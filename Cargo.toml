@@ -1,0 +1,10 @@
+[package]
+name = "rustnet"
+description = "placeholder"
+version = "0.1.0"
+edition = "2021"
+readme = "placeholder"
+license = "placeholder"
+repository = "placeholder"
+keywords = ["http"]
+categories = ["placeholder"]
