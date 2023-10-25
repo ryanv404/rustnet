@@ -2,235 +2,235 @@ use std::{borrow::Cow, fmt};
 
 impl_header_names! {
     Accept:
-        "accept", b"accept";
+        "Accept", b"accept";
     AcceptCharset:
-        "accept-charset", b"accept-charset";
+        "Accept-Charset", b"accept-charset";
     AcceptDatetime:
-        "accept-datetime", b"accept-datetime";
+        "Accept-Datetime", b"accept-datetime";
     AcceptEncoding:
-        "accept-encoding", b"accept-encoding";
+        "Accept-Encoding", b"accept-encoding";
     AcceptLanguage:
-        "accept-language", b"accept-language";
+        "Accept-Language", b"accept-language";
     AcceptPatch:
-        "accept-patch", b"accept-patch";
+        "Accept-Patch", b"accept-patch";
     AcceptPost:
-        "accept-post", b"accept-post";
+        "Accept-Post", b"accept-post";
     AcceptRanges:
-        "accept-ranges", b"accept-ranges";
+        "Accept-Ranges", b"accept-ranges";
     AccessControlAllowCredentials:
-        "access-control-allow-credentials", b"access-control-allow-credentials";
+        "Access-Control-Allow-Credentials", b"access-control-allow-credentials";
     AccessControlAllowHeaders:
-        "access-control-allow-headers", b"access-control-allow-headers";
+        "Access-Control-Allow-Headers", b"access-control-allow-headers";
     AccessControlAllowMethods:
-        "access-control-allow-methods", b"access-control-allow-methods";
+        "Access-Control-Allow-Methods", b"access-control-allow-methods";
     AccessControlAllowOrigin:
-        "access-control-allow-origin", b"access-control-allow-origin";
+        "Access-Control-Allow-Origin", b"access-control-allow-origin";
     AccessControlExposeHeaders:
-        "access-control-expose-headers", b"access-control-expose-headers";
+        "Access-Control-Expose-Headers", b"access-control-expose-headers";
     AccessControlMaxAge:
-        "access-control-max-age", b"access-control-max-age";
+        "Access-Control-Max-Age", b"access-control-max-age";
     AccessControlRequestHeaders:
-        "access-control-request-headers", b"access-control-request-headers";
+        "Access-Control-Request-Headers", b"access-control-request-headers";
     AccessControlRequestMethod:
-        "access-control-request-method", b"access-control-request-method";
+        "Access-Control-Request-Method", b"access-control-request-method";
     Age:
-        "age", b"age";
+        "Age", b"age";
     Allow:
-        "allow", b"allow";
+        "Allow", b"allow";
     AltSvc:
-        "alt-svc", b"alt-svc";
+        "Alt-Svc", b"alt-svc";
     Authorization:
-        "authorization", b"authorization";
+        "Authorization", b"authorization";
     CacheControl:
-        "cache-control", b"cache-control";
+        "Cache-Control", b"cache-control";
     CacheStatus:
-        "cache-status", b"cache-status";
+        "Cache-Status", b"cache-status";
     CdnCacheControl:
-        "cdn-cache-control", b"cdn-cache-control";
+        "Cdn-Cache-Control", b"cdn-cache-control";
     ClearSiteData:
-        "clear-site-data", b"clear-site-data";
+        "Clear-Site-Data", b"clear-site-data";
     Connection:
-        "connection", b"connection";
+        "Connection", b"connection";
     ContentDisposition:
-        "content-disposition", b"content-disposition";
+        "Content-Disposition", b"content-disposition";
     ContentEncoding:
-        "content-encoding", b"content-encoding";
+        "Content-Encoding", b"content-encoding";
     ContentLanguage:
-        "content-language", b"content-language";
+        "Content-Language", b"content-language";
     ContentLength:
-        "content-length", b"content-length";
+        "Content-Length", b"content-length";
     ContentLocation:
-        "content-location", b"content-location";
+        "Content-Location", b"content-location";
     ContentRange:
-        "content-range", b"content-range";
+        "Content-Range", b"content-range";
     ContentSecurityPolicy:
-        "content-security-policy", b"content-security-policy";
+        "Content-Security-Policy", b"content-security-policy";
     ContentSecurityPolicyReportOnly:
-        "content-security-policy-report-only", b"content-security-policy-report-only";
+        "Content-Security-Policy-Report-Only", b"content-security-policy-report-only";
     ContentType:
-        "content-type", b"content-type";
+        "Content-Type", b"content-type";
     Cookie:
-        "cookie", b"cookie";
+        "Cookie", b"cookie";
     CrossOriginEmbedderPolicy:
-        "cross-origin-embedder-policy", b"cross-origin-embedder-policy";
+        "Cross-Origin-Embedder-Policy", b"cross-origin-embedder-policy";
     CrossOriginOpenerPolicy:
-        "cross-origin-opener-policy", b"cross-origin-opener-policy";
+        "Cross-Origin-Opener-Policy", b"cross-origin-opener-policy";
     CrossOriginResourcePolicy:
-        "cross-origin-resource-policy", b"cross-origin-resource-policy";
+        "Cross-Origin-Resource-Policy", b"cross-origin-resource-policy";
     Date:
-        "date", b"date";
+        "Date", b"date";
     DeltaBase:
-        "delta-base", b"delta-base";
+        "Delta-Base", b"delta-base";
     DeviceMemory:
-        "device-memory", b"device-memory";
+        "Device-Memory", b"device-memory";
     Digest:
-        "digest", b"digest";
+        "Digest", b"digest";
     Dnt:
-        "dnt", b"dnt";
+        "Dnt", b"dnt";
     Etag:
-        "etag", b"etag";
+        "Etag", b"etag";
     Expect:
-        "expect", b"expect";
+        "Expect", b"expect";
     Expires:
-        "expires", b"expires";
+        "Expires", b"expires";
     Forwarded:
-        "forwarded", b"forwarded";
+        "Forwarded", b"forwarded";
     From:
-        "from", b"from";
+        "From", b"from";
     Host:
-        "host", b"host";
+        "Host", b"host";
     IfMatch:
-        "if-match", b"http2-settings";
+        "If-Match", b"http2-settings";
     IfModifiedSince:
-        "if-modified-since", b"if-match";
+        "If-Modified-Since", b"if-match";
     IfNoneMatch:
-        "if-none-match", b"if-modified-since";
+        "If-None-Match", b"if-modified-since";
     IfRange:
-        "if-range", b"if-none-match";
+        "If-Range", b"if-none-match";
     IfUnmodifiedSince:
-        "if-unmodified-since", b"if-range";
+        "If-Unmodified-Since", b"if-range";
     Http2Settings:
-        "http2-settings", b"if-unmodified-since";
+        "Http2-Settings", b"if-unmodified-since";
     KeepAlive:
-        "keep-alive", b"keep-alive";
+        "Keep-Alive", b"keep-alive";
     LastModified:
-        "last-modified", b"last-modified";
+        "Last-Modified", b"last-modified";
     Link:
-        "link", b"link";
+        "Link", b"link";
     Location:
-        "location", b"location";
+        "Location", b"location";
     MaxForwards:
-        "max-forwards", b"max-forwards";
+        "Max-Forwards", b"max-forwards";
     Origin:
-        "origin", b"origin";
+        "Origin", b"origin";
     PermissionsPolicy:
-        "permissions-policy", b"permissions-policy";
+        "Permissions-Policy", b"permissions-policy";
     Pragma:
-        "pragma", b"pragma";
+        "Pragma", b"pragma";
     Prefer:
-        "prefer", b"prefer";
+        "Prefer", b"prefer";
     ProxyAuthenticate:
-        "proxy-authenticate", b"proxy-authenticate";
+        "Proxy-Authenticate", b"proxy-authenticate";
     ProxyAuthorization:
-        "proxy-authorization", b"proxy-authorization";
+        "Proxy-Authorization", b"proxy-authorization";
     PublicKeyPins:
-        "public-key-pins", b"public-key-pins";
+        "Public-Key-Pins", b"public-key-pins";
     PublicKeyPinsReportOnly:
-        "public-key-pins-report-only", b"public-key-pins-report-only";
+        "Public-Key-Pins-Report-Only", b"public-key-pins-report-only";
     Purpose:
-        "purpose", b"purpose";
+        "Purpose", b"purpose";
     Range:
-        "range", b"range";
+        "Range", b"range";
     Referer:
-        "referer", b"referer";
+        "Referer", b"referer";
     ReferrerPolicy:
-        "referrer-policy", b"referrer-policy";
+        "Referrer-Policy", b"referrer-policy";
     Refresh:
-        "refresh", b"refresh";
+        "Refresh", b"refresh";
     RetryAfter:
-        "retry-after", b"retry-after";
+        "Retry-After", b"retry-after";
     SecChUa:
-        "sec-ch-ua", b"sec-ch-ua";
+        "Sec-Ch-Ua", b"sec-ch-ua";
     SecChUaMobile:
-        "sec-ch-ua-mobile", b"sec-ch-ua-mobile";
+        "Sec-Ch-Ua-Mobile", b"sec-ch-ua-mobile";
     SecChUaPlatform:
-        "sec-ch-ua-platform", b"sec-ch-ua-platform";
+        "Sec-Ch-Ua-Platform", b"sec-ch-ua-platform";
     SaveData:
-        "save-data", b"save-data";
+        "Save-Data", b"save-data";
     SecFetchDest:
-        "sec-fetch-dest", b"sec-fetch-dest";
+        "Sec-Fetch-Dest", b"sec-fetch-dest";
     SecFetchMode:
-        "sec-fetch-mode", b"sec-fetch-mode";
+        "Sec-Fetch-Mode", b"sec-fetch-mode";
     SecFetchSite:
-        "sec-fetch-site", b"sec-fetch-site";
+        "Sec-Fetch-Site", b"sec-fetch-site";
     SecFetchUser:
-        "sec-fetch-user", b"sec-fetch-user";
+        "Sec-Fetch-User", b"sec-fetch-user";
     SecGpc:
-        "sec-gpc", b"sec-gpc";
+        "Sec-Gpc", b"sec-gpc";
     SecWebSocketAccept:
-        "sec-websocket-accept", b"sec-websocket-accept";
+        "Sec-Websocket-Accept", b"sec-websocket-accept";
     SecWebSocketExtensions:
-        "sec-websocket-extensions", b"sec-websocket-extensions";
+        "Sec-Websocket-Extensions", b"sec-websocket-extensions";
     SecWebSocketKey:
-        "sec-websocket-key", b"sec-websocket-key";
+        "Sec-Websocket-Key", b"sec-websocket-key";
     SecWebSocketProtocol:
-        "sec-websocket-protocol", b"sec-websocket-protocol";
+        "Sec-Websocket-Protocol", b"sec-websocket-protocol";
     SecWebSocketVersion:
-        "sec-websocket-version", b"sec-websocket-version";
+        "Sec-Websocket-Version", b"sec-websocket-version";
     Server:
-        "server", b"server";
+        "Server", b"server";
     ServerTiming:
-        "server-timing", b"server-timing";
+        "Server-Timing", b"server-timing";
     SetCookie:
-        "set-cookie", b"set-cookie";
+        "Set-Cookie", b"set-cookie";
     Sourcemap:
-        "sourcemap", b"sourcemap";
+        "Sourcemap", b"sourcemap";
     StrictTransportSecurity:
-        "strict-transport-security", b"strict-transport-security";
+        "Strict-Transport-Security", b"strict-transport-security";
     Te:
-        "te", b"te";
+        "Te", b"te";
     TimingAllowOrigin:
-        "timing-allow-origin", b"timing-allow-origin";
+        "Timing-Allow-Origin", b"timing-allow-origin";
     Trailer:
-        "trailer", b"trailer";
+        "Trailer", b"trailer";
     TransferEncoding:
-        "transfer-encoding", b"transfer-encoding";
+        "Transfer-Encoding", b"transfer-encoding";
     UserAgent:
-        "user-agent", b"user-agent";
+        "User-Agent", b"user-agent";
     Upgrade:
-        "upgrade", b"upgrade";
+        "Upgrade", b"upgrade";
     UpgradeInsecureRequests:
-        "upgrade-insecure-requests", b"upgrade-insecure-requests";
+        "Upgrade-Insecure-Requests", b"upgrade-insecure-requests";
     Vary:
-        "vary", b"vary";
+        "Vary", b"vary";
     Via:
-        "via", b"via";
+        "Via", b"via";
     WantDigest:
-        "want-digest", b"want-digest";
+        "Want-Digest", b"want-digest";
     Warning:
-        "warning", b"warning";
+        "Warning", b"warning";
     WwwAuthenticate:
-        "www-authenticate", b"www-authenticate";
+        "Www-Authenticate", b"www-authenticate";
     XContentTypeOptions:
-        "x-content-type-options", b"x-content-type-options";
+        "X-Content-Type-Options", b"x-content-type-options";
     XDnsPrefetchControl:
-        "x-dns-prefetch-control", b"x-dns-prefetch-control";
+        "X-Dns-Prefetch-Control", b"x-dns-prefetch-control";
     XForwardedFor:
-        "x-forwarded-for", b"x-forwarded-for";
+        "X-Forwarded-For", b"x-forwarded-for";
     XForwardedHost:
-        "x-forwarded-host", b"x-forwarded-host";
+        "X-Forwarded-Host", b"x-forwarded-host";
     XForwardedProto:
-        "x-forwarded-proto", b"x-forwarded-proto";
+        "X-Forwarded-Proto", b"x-forwarded-proto";
     XFrameOptions:
-        "x-frame-options", b"x-frame-options";
+        "X-Frame-Options", b"x-frame-options";
     XPoweredBy:
-        "x-powered-by", b"x-powered-by";
+        "X-Powered-By", b"x-powered-by";
     XRequestId:
-        "x-request-id", b"x-request-id";
+        "X-Request-Id", b"x-request-id";
     XRobotsTag:
-        "x-robots-tag", b"x-robots-tag";
+        "X-Robots-Tag", b"x-robots-tag";
     XUaCompatible:
-        "x-ua-compatible", b"x-ua-compatible";
+        "X-Ua-Compatible", b"x-ua-compatible";
     XXssProtection:
-        "x-xss-protection", b"x-xss-protection";
+        "X-Xss-Protection", b"x-xss-protection";
 }

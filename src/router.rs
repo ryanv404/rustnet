@@ -68,12 +68,19 @@ impl Router {
         match self.routes.get(&*req.uri()) {
             // Resolved the route successfully.
             Some(data) if data.0.contains(req.method()) => {
+                req.log_connection_status(200);
                 (Status(200), Some(data.1.clone()))
             },
             // URI was found but not for that HTTP method.
-            Some(_) => (Status(400), None),
+            Some(_) => {
+                req.log_connection_status(400);
+                (Status(400), None)
+            },
             // No resource found for the URI.
-            None => (Status(404), self.get_error_page()),
+            None => {
+                req.log_connection_status(404);
+                (Status(404), self.get_error_page())
+            },
         }
     }
 }

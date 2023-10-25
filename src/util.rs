@@ -64,26 +64,16 @@ pub fn trim_whitespace(bytes: &[u8]) -> &[u8] {
 mod tests {
     use super::*;
 
-    macro_rules! test_whitespace_trimming {
-        ($( $name:ident: $input:expr => $expected:expr, )+) => {
-            $(
-                #[test]
-                fn $name() {
-                    assert_eq!(trim_whitespace($input), $expected);
-                }
-            )+
-        };
-    }
-
-    test_whitespace_trimming! {
-        trim_start: b"  test" => b"test",
-        trim_end: b"test    " => b"test",
-        trim_both_sides: b"         test       " => b"test",
-        trim_both_sides_not_inner: b"  Hello \nworld       " => b"Hello \nworld",
-        trim_mutliple_whitespace_types: b"\t  \nx\t  x\r\x0c" => b"x\t  x",
-        trim_many_whitespaces: b"                   " => b"",
-        trim_single_whitespace: b" " => b"",
-        trim_single_non_whitespace: b"x" => b"x",
-        trim_empty_slice: b"" => b"",
+    #[test]
+    fn test_trim_whitespace() {
+        assert_eq!(trim_whitespace(b"  test"), b"test");
+        assert_eq!(trim_whitespace(b"test    "), b"test");
+        assert_eq!(trim_whitespace(b"         test       "), b"test");
+        assert_eq!(trim_whitespace(b"  Hello \nworld       "), b"Hello \nworld");
+        assert_eq!(trim_whitespace(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
+        assert_eq!(trim_whitespace(b"                   "), b"");
+        assert_eq!(trim_whitespace(b" "), b"");
+        assert_eq!(trim_whitespace(b"x"), b"x");
+        assert_eq!(trim_whitespace(b""), b"");
     }
 }

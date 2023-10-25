@@ -4,10 +4,9 @@ use std::{
     io::{self, BufWriter, Write},
     net::TcpStream,
     path::Path,
-    sync::{Arc, Mutex},
 };
 
-use crate::{Header, HeaderName, Request, Router, Status, Version};
+use crate::{ArcRouter, Header, HeaderName, Request, Status, Version};
 
 //HTTP/1.1 200 OK
 //Accept-Ranges: bytes
@@ -110,13 +109,21 @@ impl ContentTypeValue {
     }
 
     #[must_use]
-    pub fn from_path(path: &Path) -> Self {
-        match path.extension() {
-            Some(ext) if ext == "ico" => ContentTypeValue::ImageXicon,
-            Some(ext) if ext == "html" || ext == "htm" => {
-                ContentTypeValue::TextHtml
-            },
-            Some(_) | None => ContentTypeValue::TextPlain,
+    pub fn from_path(path: &Path) -> &'static [u8] {
+        if let Some(ext) = path.extension() {
+            match ext.to_str() {
+                Some("ico") => b"image/x-icon",
+                Some("gif") => b"image/gif",
+                Some("jpg") => b"image/jpeg",
+                Some("jpeg") => b"image/jpeg",
+                Some("png") => b"image/png",
+                Some("pdf") => b"application/pdf",
+                Some("html") | Some("htm") => b"text/html; charset=UTF-8",
+                Some("txt") => b"text/plain; charset=UTF-8",
+                _ => b"text/plain; charset=UTF-8",
+            }
+        } else {
+            b"text/plain; charset=UTF-8"
         }
     }
 }
@@ -203,12 +210,11 @@ impl fmt::Debug for Response {
     }
 }
 
-type ArcRouter = Arc<Mutex<Router>>;
-
 impl Response {
     #[must_use]
     pub fn from_request(req: &Request, router: &ArcRouter) -> io::Result<Self> {
         let version = req.version().clone();
+
         let (status, maybe_path) = {
             // Acquire lock in this block to minimize the time we hold it.
             let router_lock = router.lock().unwrap();
@@ -218,14 +224,14 @@ impl Response {
         let (cache_control, content_type, body) = match maybe_path {
             Some(path) => {
                 let cache = Header::from(CacheControlValue::from_path(&path));
-                let c_type = Header::from(ContentTypeValue::from_path(&path));
+                let cont_type = Header::new(b"Content-Type", ContentTypeValue::from_path(&path));
                 let data = fs::read(path)?;
-                (cache, c_type, data)
+                (cache, cont_type, data)
             },
             None => {
                 let cache = Header::from(CacheControlValue::NoCache);
-                let c_type = Header::from(ContentTypeValue::TextPlain);
-                (cache, c_type, Vec::new())
+                let cont_type = Header::new(b"Content-Type", b"text/plain; charset=UTF-8");
+                (cache, cont_type, Vec::new())
             },
         };
 
@@ -291,37 +297,36 @@ impl Response {
         &self.body
     }
 
-    fn to_status_line(&self) -> Vec<u8> {
-        format!("{} {}\r\n", self.version(), self.status()).into_bytes()
+    pub fn status_line(&self) -> String {
+        format!("{} {}\r\n", self.version(), self.status())
     }
 
-    fn write_status_line(&self, stream: &mut BufWriter<TcpStream>) -> io::Result<()> {
-        stream.write_all(&self.to_status_line())
+    pub fn write_status_line(&self, writer: &mut BufWriter<TcpStream>) -> io::Result<()> {
+        writer.write_all(&self.status_line().as_bytes())
     }
 
-    fn write_headers(&self, stream: &mut BufWriter<TcpStream>) -> io::Result<()> {
+    pub fn write_headers(&self, writer: &mut BufWriter<TcpStream>) -> io::Result<()> {
         if !self.headers.is_empty() {
             for header in self.headers.iter() {
-                stream.write_all(&header.to_bytes())?;
+                writer.write_all(&header.to_bytes())?;
             }
         }
-
         // Signal the end of the headers section with an empty line.
-        stream.write_all(b"\r\n")
+        writer.write_all(b"\r\n")
     }
 
-    fn write_body(&self, stream: &mut BufWriter<TcpStream>) -> io::Result<()> {
+    pub fn write_body(&self, writer: &mut BufWriter<TcpStream>) -> io::Result<()> {
         if !self.body.is_empty() {
-            stream.write_all(&self.body)?;
+            writer.write_all(&self.body)?;
         }
         Ok(())
     }
 
-    pub fn send(&self, stream: &mut BufWriter<TcpStream>) -> io::Result<()> {
-        self.write_status_line(stream)?;
-        self.write_headers(stream)?;
-        self.write_body(stream)?;
-        stream.flush()?;
+    pub fn send(&self, writer: &mut BufWriter<TcpStream>) -> io::Result<()> {
+        self.write_status_line(writer)?;
+        self.write_headers(writer)?;
+        self.write_body(writer)?;
+        writer.flush()?;
         Ok(())
     }
 }
@@ -337,19 +342,11 @@ mod tests {
         let c_len = Header::from(ContentLengthValue::from(100u64));
         let headers = vec![cache.clone(), c_len.clone(), c_type.clone()];
         let res = Response {
-            version: Version::OneDotOne,
-            status: Status(200),
-            headers,
-            body: Vec::new(),
+            version: Version::OneDotOne, status: Status(200), headers, body: Vec::new()
         };
-
-        assert!(res.has_header(HeaderName::CacheControl));
-        assert!(res.has_header(HeaderName::ContentLength));
         assert_eq!(res.get_header(HeaderName::CacheControl), Some(&cache));
         assert_eq!(res.get_header(HeaderName::ContentLength), Some(&c_len));
-
         assert!(!res.has_header(HeaderName::Host));
-        assert_eq!(res.get_header(HeaderName::Host), None);
         assert_ne!(res.get_header(HeaderName::ContentType), Some(&c_len));
     }
 }

@@ -1,11 +1,14 @@
 use std::{
     borrow::Cow,
     fmt,
-    io::{BufRead, BufReader},
-    net::TcpStream,
+    io::{self, BufRead, BufReader},
+    net::{IpAddr, SocketAddr, TcpStream},
 };
 
-use crate::{Header, HeaderName, Method, NetError, Version, util::trim_whitespace};
+use crate::{
+    ArcRouter, Header, HeaderName, Method, NetError, Response, Version,
+    util::trim_whitespace
+};
 
 //GET / HTTP/1.1
 //Accept: */* (*/ for syntax coloring bug)
@@ -15,9 +18,11 @@ use crate::{Header, HeaderName, Method, NetError, Version, util::trim_whitespace
 //User-Agent: xh/0.19.3
 
 type NetResult<T> = Result<T, NetError>;
+
 type RequestLine = (Method, Vec<u8>, Version);
 
 pub struct Request {
+    pub remote_addr: Option<SocketAddr>,
     pub method: Method,
     pub uri: Vec<u8>,
     pub version: Version,
@@ -42,6 +47,7 @@ impl fmt::Debug for Request {
 impl Request {
     #[must_use]
     pub fn new(
+        remote_addr: Option<SocketAddr>,
         method: Method,
         uri: &[u8],
         version: Version,
@@ -51,7 +57,8 @@ impl Request {
         let uri = uri.to_owned();
         let body = body.to_owned();
         let headers = headers.to_owned();
-        Self { method, uri, version, headers, body }
+
+        Self { remote_addr, method, uri, version, headers, body }
     }
 
     pub fn set_header(&mut self, name: &str, value: &str) {
@@ -60,7 +67,7 @@ impl Request {
 
     #[must_use]
     pub fn from_reader(reader: &mut BufReader<TcpStream>) -> NetResult<Self> {
-        let mut headers = vec![];
+        let remote_addr = reader.get_ref().peer_addr().ok();
 
         let mut lines = reader
             .split(b'\n')
@@ -72,6 +79,8 @@ impl Request {
             .ok_or(NetError::BadRequestLine)
             .and_then(|line| Self::parse_request_line(line))?;
 
+        let mut headers = vec![];
+
         while let Some(line) = lines.next().as_ref() {
             let line = trim_whitespace(line);
             if line.is_empty() {
@@ -82,13 +91,13 @@ impl Request {
             headers.push(header);
         }
 
-        //let body = Self::parse_body().unwrap_or(Vec::new());
-        let body = Vec::new();
+        let body = Self::parse_body(b"");
 
-        Ok(Self { method, uri, version, headers, body })
+        Ok(Self { remote_addr, method, uri, version, headers, body })
     }
 
-    fn parse_request_line(buf: &[u8]) -> NetResult<RequestLine> {
+    #[must_use]
+    pub fn parse_request_line(buf: &[u8]) -> NetResult<RequestLine> {
         let line = trim_whitespace(buf);
 
         if line.is_empty() {
@@ -106,7 +115,8 @@ impl Request {
             .ok_or(NetError::BadRequestLine)
     }
 
-    fn parse_header(buf: &[u8]) -> NetResult<Header> {
+    #[must_use]
+    pub fn parse_header(buf: &[u8]) -> NetResult<Header> {
         let line = trim_whitespace(buf);
         let mut tokens = line.splitn(2, |&b| b == b':');
         let (name, value) = (tokens.next(), tokens.next());
@@ -115,9 +125,10 @@ impl Request {
             .ok_or(NetError::BadRequestHeader)
     }
 
-//    fn parse_body(buf: &[u8]) -> Option<Vec<u8>> {
-//        None
-//    }
+    #[must_use]
+    pub fn parse_body(_buf: &[u8]) -> Vec<u8> {
+        Vec::new()
+    }
 
     #[must_use]
     pub const fn method(&self) -> &Method {
@@ -143,24 +154,57 @@ impl Request {
     pub fn get_header(&self, name: HeaderName) -> Option<&Header> {
         self.headers.iter().find(|&h| h.name == name)
     }
+
+    #[must_use]
+    pub fn request_line(&self) -> String {
+        format!("{} {} {}", self.method(), self.uri(), self.version())
+    }
+
+    #[must_use]
+    pub fn remote_addr(&self) -> Option<&SocketAddr> {
+        self.remote_addr.as_ref()
+    }
+
+    #[must_use]
+    pub fn remote_ip(&self) -> Option<IpAddr> {
+        self.remote_addr().map(|sock| sock.ip())
+    }
+
+    #[must_use]
+    pub fn remote_port(&self) -> Option<u16> {
+        self.remote_addr().map(|sock| sock.port())
+    }
+
+    pub fn log_connection_status(&self, status: u16) {
+        if let Some(remote_ip) = self.remote_ip() {
+            println!("[{remote_ip}|{status}] {}", self.request_line());
+        } else {
+            println!("[?|{status}] {}", self.request_line());
+        }
+    }
+
+    #[must_use]
+    pub fn respond(&self, router: &ArcRouter) -> io::Result<Response> {
+        Response::from_request(self, router)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::response::{
-        CacheControlValue,
-        ContentLengthValue,
-        ContentTypeValue
+        CacheControlValue, ContentLengthValue, ContentTypeValue
     };
 
     #[test]
     fn test_request_headers_search() {
+        let remote_addr = None;
         let cache = Header::from(CacheControlValue::NoCache);
         let c_type = Header::from(ContentTypeValue::TextHtml);
         let c_len = Header::from(ContentLengthValue::from(100u64));
         let headers = vec![cache.clone(), c_len.clone(), c_type.clone()];
         let req = Request {
+            remote_addr,
             method: Method::Get,
             uri: b"/about".to_vec(),
             version: Version::OneDotOne,
@@ -168,14 +212,65 @@ mod tests {
             body: Vec::new(),
         };
 
-        assert!(req.has_header(HeaderName::CacheControl));
-        assert!(req.has_header(HeaderName::ContentLength));
-        assert!(req.has_header(HeaderName::ContentType));
-        assert!(!req.has_header(HeaderName::Host));
         assert_eq!(req.get_header(HeaderName::CacheControl), Some(&cache));
         assert_eq!(req.get_header(HeaderName::ContentLength), Some(&c_len));
         assert_eq!(req.get_header(HeaderName::ContentType), Some(&c_type));
-        assert_eq!(req.get_header(HeaderName::Host), None);
+        assert!(!req.has_header(HeaderName::Host));
         assert_ne!(req.get_header(HeaderName::ContentType), Some(&c_len));
+    }
+
+    #[test]
+    fn test_parse_request_line() {
+        let test1 = b"GET /test HTTP/1.1";
+        let test2 = b"POST /test HTTP/2.0";
+        let test3 = b"   GET /test HTTP/1.1 Content-Type: text/plain  ";
+        let test4 = b"foo bar baz";
+        let test5 = b"GET /test";
+        let test6 = b"GET";
+        let expected1 = (Method::Get, "/test".to_string().into_bytes(), Version::OneDotOne);
+        let expected2 = (Method::Post, "/test".to_string().into_bytes(), Version::TwoDotZero);
+
+        assert_eq!(Request::parse_request_line(test1).unwrap(), expected1);
+        assert_eq!(Request::parse_request_line(test2).unwrap(), expected2);
+        assert_eq!(Request::parse_request_line(test3).unwrap(), expected1);
+        assert!(Request::parse_request_line(test4).is_err());
+        assert!(Request::parse_request_line(test5).is_err());
+        assert!(Request::parse_request_line(test6).is_err());
+    }
+
+    #[test]
+    fn test_parse_request_headers() {
+        let test_headers = "\
+            Accept: */*\r\n\
+            Accept-Encoding: gzip, deflate, br\r\n\
+            Connection: keep-alive\r\n\
+            Host: example.com\r\n\
+            User-Agent: xh/0.19.3\r\n\
+            Pineapple: pizza\r\n\r\n"
+            .as_bytes();
+
+        let expected = vec![
+            Header::new(HeaderName::Accept.as_str().as_bytes(), b"*/*"),
+            Header::new(HeaderName::AcceptEncoding.as_str().as_bytes(), b"gzip, deflate, br"),
+            Header::new(HeaderName::Connection.as_str().as_bytes(), b"keep-alive"),
+            Header::new(HeaderName::Host.as_str().as_bytes(), b"example.com"),
+            Header::new(HeaderName::UserAgent.as_str().as_bytes(), b"xh/0.19.3"),
+            Header::new(HeaderName::Unknown(String::from("Pineapple")).as_str().as_bytes(), b"pizza")
+        ];
+
+        let mut output = vec![];
+
+        for line in test_headers.split(|&b| b == b'\n') {
+            let line = trim_whitespace(line);
+
+            if line.is_empty() {
+                break;
+            }
+
+            let header = Request::parse_header(line).unwrap();
+            output.push(header);
+        }
+
+        assert_eq!(&output[..], &expected[..]);
     }
 }

@@ -1,12 +1,9 @@
 use std::{
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, Mutex,
-    },
+    sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex},
     thread::{self, JoinHandle},
 };
 
-struct Worker {
+pub struct Worker {
     id: usize,
     thread: Option<JoinHandle<()>>,
 }
@@ -14,9 +11,7 @@ struct Worker {
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<Receiver<Job>>>) -> Self {
         let thread = thread::spawn(move || loop {
-            let message = receiver.lock().unwrap().recv();
-
-            if let Ok(job) = message {
+            if let Ok(job) = receiver.lock().unwrap().recv() {
                 println!("Worker {id} got a job; executing.");
                 job();
             } else {
@@ -25,10 +20,7 @@ impl Worker {
             }
         });
 
-        Self {
-            id,
-            thread: Some(thread),
-        }
+        Self { id, thread: Some(thread) }
     }
 }
 
@@ -47,8 +39,8 @@ impl ThreadPool {
         assert!(size > 0);
 
         let mut workers = Vec::with_capacity(size);
-
         let (tx, rx) = channel();
+
         let sender = Some(tx);
         let receiver = Arc::new(Mutex::new(rx));
 
@@ -63,9 +55,11 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
-        let job = Box::new(f);
-
-        self.sender.as_ref().unwrap().send(job).unwrap();
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Box::new(f))
+            .unwrap();
     }
 }
 
@@ -75,7 +69,6 @@ impl Drop for ThreadPool {
 
         for worker in &mut self.workers {
             println!("Shutting down worker {}", worker.id);
-
             if let Some(thread) = worker.thread.take() {
                 thread.join().unwrap();
             }

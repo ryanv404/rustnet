@@ -13,33 +13,34 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
-use std::error;
-use std::fmt;
-use std::io::{self, BufReader, BufWriter, ErrorKind};
-use std::net::{IpAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::io::{self, BufReader, BufWriter};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::spawn;
 
 pub mod connection;
+pub mod error;
 pub mod headers;
 pub mod http;
-pub mod pool;
 pub mod request;
 pub mod response;
 pub mod router;
 pub mod util;
+pub mod worker;
 
-use headers::{Header, HeaderName};
-use http::{Method, Status, Version};
-use request::Request;
-use response::Response;
-use router::Router;
+pub use error::NetError;
+pub use headers::{Header, HeaderName};
+pub use http::{Method, Status, Version};
+pub use request::Request;
+pub use response::Response;
+pub use router::Router;
+
+pub type ArcRouter = Arc<Mutex<Router>>;
 
 /// The `Server` object. This is the main entry point to the public API.
 pub struct Server {
-    local_ip: IpAddr,
-    local_port: u16,
-    router: Arc<Mutex<Router>>,
+    local_addr: Option<SocketAddr>,
+    router: ArcRouter,
     listener: TcpListener,
 }
 
@@ -50,12 +51,9 @@ impl Server {
         match TcpListener::bind(addr) {
             Ok(listener) => {
                 let router = Arc::new(Mutex::new(Router::new()));
+                let local_addr = listener.local_addr().ok();
 
-                let sock = listener.local_addr().unwrap();
-                let local_ip = sock.ip();
-                let local_port = sock.port();
-
-                Self { local_ip, local_port, router, listener }
+                Self { local_addr, router, listener }
             },
             Err(e) => panic!("Unable to bind to the address.\n{e}"),
         }
@@ -116,27 +114,44 @@ impl Server {
         lock.set_error_page(path);
     }
 
-    pub fn ip(&self) -> &IpAddr {
-        &self.local_ip
+    pub fn local_addr(&self) -> Option<&SocketAddr> {
+        self.local_addr.as_ref()
     }
 
-    pub fn port(&self) -> u16 {
-        self.local_port
+    pub fn local_ip(&self) -> Option<IpAddr> {
+        self.local_addr().map(|sock| sock.ip())
+    }
+
+    pub fn local_port(&self) -> Option<u16> {
+        self.local_addr().map(|sock| sock.port())
+    }
+
+    pub fn log_server_start(&self) {
+        let maybe_addr = (self.local_ip(), self.local_port());
+
+        if let (Some(ip), Some(port)) = maybe_addr {
+            println!("[SERVER] Listening on {ip} at port {port}.");
+        } else {
+            println!("[SERVER] Unable to determine the local address.");
+        }
+    }
+
+    pub fn log_server_shutdown(&self) {
+        println!("[SERVER] Now shutting down.");
     }
 
     /// Starts the server.
     pub fn start(&self) -> io::Result<()> {
-        println!("[SERVER] Listening on {} at port {}.", self.ip(), self.port());
+        self.log_server_start();
 
         for s in self.listener.incoming() {
             match s {
                 Ok(stream) => {
                     let router = self.router.clone();
 
-                    thread::spawn(move || {
-                        match Server::handle_connection(stream, router) {
-                            Err(e) => eprintln!("[SERVER] Error: {e}"),
-                            Ok(_) => {},
+                    spawn(move || {
+                        if let Err(e) = Self::handle_connection(stream, router) {
+                            eprintln!("[SERVER] Error: {e}");
                         }
                     }).join().unwrap();
                 },
@@ -144,66 +159,18 @@ impl Server {
             }
         }
 
-        println!("[SERVER] Now shutting down.");
+        self.log_server_shutdown();
         Ok(())
     }
 
-    fn handle_connection(stream: TcpStream, router: Arc<Mutex<Router>>) -> io::Result<()> {
-        let remote_ip = stream.peer_addr()?.ip();
-        let s_clone = stream.try_clone()?;
-
-        let mut reader = BufReader::new(stream);
-        let mut writer = BufWriter::new(s_clone);
+    fn handle_connection(stream: TcpStream, router: ArcRouter) -> io::Result<()> {
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let mut writer = BufWriter::new(stream);
 
         let req = Request::from_reader(&mut reader)?;
-        let res = Response::from_request(&req, &router)?;
-
-        let code = res.status_code();
-        let method = req.method();
-        let uri = req.uri();
-        eprintln!("[{remote_ip}|{code}] {method} {uri}");
+        let res = req.respond(&router)?;
 
         res.send(&mut writer)?;
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum NetError {
-    BadBufferRead,
-    BadRequest,
-    BadRequestLine,
-    BadRequestHeader,
-}
-
-impl fmt::Display for NetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BadBufferRead => f.write_str("network reader error"),
-            Self::BadRequest => f.write_str("invalid request"),
-            Self::BadRequestLine => f.write_str("invalid request line"),
-            Self::BadRequestHeader => f.write_str("invalid request header"),
-        }
-    }
-}
-
-impl error::Error for NetError {}
-
-impl From<NetError> for io::Error {
-    fn from(err: NetError) -> Self {
-        match err {
-            NetError::BadBufferRead => Self::new(
-                ErrorKind::InvalidData, "unable to read from the network reader"
-            ),
-            NetError::BadRequest => Self::new(
-                ErrorKind::InvalidData, "unable to parse the request"
-            ),
-            NetError::BadRequestLine => Self::new(
-                ErrorKind::InvalidData, "unable to parse the request line"
-            ),
-            NetError::BadRequestHeader => Self::new(
-                ErrorKind::InvalidData, "unable to parse a request header"
-            ),
-        }
     }
 }

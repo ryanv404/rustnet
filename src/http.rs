@@ -190,7 +190,6 @@ impl Status {
 }
 
 // The HTTP protocol version.
-#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Version {
     ZeroDotNine,
