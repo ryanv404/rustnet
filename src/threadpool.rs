@@ -1,16 +1,19 @@
 use std::{
-    sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::{channel, Receiver, Sender}},
     thread::{self, JoinHandle},
 };
 
+type Task = Box<dyn FnOnce() + Send + 'static>;
+
 pub struct Worker {
+    #[allow(dead_code)]
     id: usize,
-    thread: Option<JoinHandle<()>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<Receiver<Job>>>) -> Self {
-        let thread = thread::spawn(move || loop {
+    fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
+        let handle = thread::spawn(move || loop {
             if let Ok(job) = receiver.lock().unwrap().recv() {
                 println!("Worker {id} got a job; executing.");
                 job();
@@ -20,20 +23,17 @@ impl Worker {
             }
         });
 
-        Self { id, thread: Some(thread) }
+        Self { id, handle: Some(handle) }
     }
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
-
-#[allow(clippy::module_name_repetitions)]
 pub struct ThreadPool {
     workers: Vec<Worker>,
-    sender: Option<Sender<Job>>,
+    sender: Option<Sender<Task>>,
 }
 
 impl ThreadPool {
-    /// Create a new `ThreadPool`.
+    /// Create a new `ThreadPool` with the given number of worker threads.
     #[must_use]
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
@@ -55,11 +55,8 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
-        self.sender
-            .as_ref()
-            .unwrap()
-            .send(Box::new(f))
-            .unwrap();
+        // Send a boxed closure to the channel.
+        self.sender.as_ref().unwrap().send(Box::new(f)).unwrap();
     }
 }
 
@@ -68,9 +65,8 @@ impl Drop for ThreadPool {
         drop(self.sender.take());
 
         for worker in &mut self.workers {
-            println!("Shutting down worker {}", worker.id);
-            if let Some(thread) = worker.thread.take() {
-                thread.join().unwrap();
+            if let Some(handle) = worker.handle.take() {
+                handle.join().unwrap();
             }
         }
     }

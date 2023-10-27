@@ -1,10 +1,10 @@
-use std::io;
+use std::{io, thread, time::Duration};
 
 use rustnet::Server;
 
 fn main() -> io::Result<()> {
     // Create an HTTP server.
-    let mut s = Server::new("127.0.0.1:7878");
+    let mut s = Server::http("127.0.0.1:7878");
 
     // Set up endpoints.
     s.get("/", "examples/static/index.html");
@@ -17,7 +17,11 @@ fn main() -> io::Result<()> {
     s.set_error_page("examples/static/error.html");
 
     // Start the server.
-    s.start()?;
+    let server = s.start()?;
+
+    thread::sleep(Duration::from_secs(3));
+
+    server.shutdown();
 
     Ok(())
 }

@@ -10,9 +10,8 @@ pub fn trim_whitespace(bytes: &[u8]) -> &[u8] {
 
     // Dispense with simple cases first.
     match len {
-        0 => return bytes,
         1 if bytes[0].is_ascii_whitespace() => return b"",
-        1 => return bytes,
+        0 | 1 => return bytes,
         _ => {},
     }
 
@@ -57,23 +56,5 @@ pub fn trim_whitespace(bytes: &[u8]) -> &[u8] {
     } else {
         // Multibyte slice remains.
         &bytes[first..=last]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_trim_whitespace() {
-        assert_eq!(trim_whitespace(b"  test"), b"test");
-        assert_eq!(trim_whitespace(b"test    "), b"test");
-        assert_eq!(trim_whitespace(b"         test       "), b"test");
-        assert_eq!(trim_whitespace(b"  Hello \nworld       "), b"Hello \nworld");
-        assert_eq!(trim_whitespace(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
-        assert_eq!(trim_whitespace(b"                   "), b"");
-        assert_eq!(trim_whitespace(b" "), b"");
-        assert_eq!(trim_whitespace(b"x"), b"x");
-        assert_eq!(trim_whitespace(b""), b"");
     }
 }

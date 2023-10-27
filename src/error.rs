@@ -1,41 +1,40 @@
-use std::{error, fmt, io::{self, ErrorKind}};
+use std::{
+    error::Error,
+    fmt::{Display, Formatter, Result as FmtResult},
+    io::Error as IoError,
+    result::Result as StdResult,
+};
 
-#[derive(Clone, Debug)]
+pub type NetResult<T> = StdResult<T, NetError>;
+
+#[allow(clippy::module_name_repetitions)]
+#[derive(Debug)]
 pub enum NetError {
-    BadBufferRead,
-    BadRequest,
-    BadRequestLine,
-    BadRequestHeader,
+    BadStatus,
+    EarlyEof,
+    ReadError(IoError),
+    ParseError(&'static str),
+    BadConnection(IoError),
 }
 
-impl fmt::Display for NetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Error for NetError {}
+
+impl Display for NetError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::BadBufferRead => f.write_str("network reader error"),
-            Self::BadRequest => f.write_str("invalid request"),
-            Self::BadRequestLine => f.write_str("invalid request line"),
-            Self::BadRequestHeader => f.write_str("invalid request header"),
+            Self::BadStatus => f.write_str("invalid status code"),
+            Self::EarlyEof => {
+                f.write_str("received an unexpected EOF on the stream")
+            },
+            Self::ReadError(e) => write!(f, "read error: {e}"),
+            Self::ParseError(s) => write!(f, "unable to parse: {s}"),
+            Self::BadConnection(e) => write!(f, "connection error: {e}"),
         }
     }
 }
 
-impl error::Error for NetError {}
-
-impl From<NetError> for io::Error {
-    fn from(err: NetError) -> Self {
-        match err {
-            NetError::BadBufferRead => Self::new(
-                ErrorKind::InvalidData, "unable to read from the network reader"
-            ),
-            NetError::BadRequest => Self::new(
-                ErrorKind::InvalidData, "unable to parse the request"
-            ),
-            NetError::BadRequestLine => Self::new(
-                ErrorKind::InvalidData, "unable to parse the request line"
-            ),
-            NetError::BadRequestHeader => Self::new(
-                ErrorKind::InvalidData, "unable to parse a request header"
-            ),
-        }
+impl From<IoError> for NetError {
+    fn from(e: IoError) -> Self {
+        Self::ReadError(e)
     }
 }

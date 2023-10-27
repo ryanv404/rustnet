@@ -1,7 +1,9 @@
-use std::{fmt, io::{self, ErrorKind}};
+use std::{fmt, str::FromStr};
+
+use crate::{NetError, NetResult};
 
 /// HTTP methods.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Method {
     Get,
     Put,
@@ -20,34 +22,31 @@ impl fmt::Display for Method {
     }
 }
 
-impl TryFrom<&[u8]> for Method {
-    type Error = io::Error;
+impl FromStr for Method {
+    type Err = NetError;
 
-    fn try_from(bytes: &[u8]) -> io::Result<Self> {
-        let method = match bytes {
-            b"GET" => Self::Get,
-            b"PUT" => Self::Put,
-            b"POST" => Self::Post,
-            b"HEAD" => Self::Head,
-            b"PATCH" => Self::Patch,
-            b"TRACE" => Self::Trace,
-            b"DELETE" => Self::Delete,
-            b"CONNECT" => Self::Connect,
-            b"OPTIONS" => Self::Options,
-            unk => {
-                let unknown = String::from_utf8_lossy(unk);
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Unsupported HTTP method \"{unknown}\"requested.")
-                ));
-            },
+    fn from_str(s: &str) -> NetResult<Self> {
+        let upper_str = s.trim().to_uppercase();
+
+        let method = match &*upper_str {
+            "GET" => Self::Get,
+            "PUT" => Self::Put,
+            "POST" => Self::Post,
+            "HEAD" => Self::Head,
+            "PATCH" => Self::Patch,
+            "TRACE" => Self::Trace,
+            "DELETE" => Self::Delete,
+            "CONNECT" => Self::Connect,
+            "OPTIONS" => Self::Options,
+            _ => return Err(NetError::ParseError("method")),
         };
         Ok(method)
     }
 }
 
 impl Method {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Get => "GET",
             Self::Put => "PUT",
@@ -69,6 +68,18 @@ pub struct Status(pub u16);
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.code(), self.msg())
+    }
+}
+
+impl TryFrom<u16> for Status {
+    type Error = NetError;
+
+    fn try_from(code: u16) -> NetResult<Self> {
+        if (100..=600).contains(&code) {
+            Ok(Self(code))
+        } else {
+            Err(NetError::BadStatus)
+        }
     }
 }
 
@@ -108,7 +119,7 @@ impl Status {
             400 => "Bad Request",
 
             // 4xx (client error) status codes.
-            401 => "Unauthorized",
+            401 | 561 => "Unauthorized",
             402 => "Payment Required",
             403 => "Forbidden",
             404 => "Not Found",
@@ -176,7 +187,6 @@ impl Status {
             527 => "Railgun Listener to Origin",
             529 => "The Service Is Overloaded",
             530 => "Site Frozen",
-            561 => "Unauthorized",
             598 => "Network Read Timeout Error",
             599 => "Network Connect Timeout Error",
             _ => ""
@@ -190,7 +200,7 @@ impl Status {
 }
 
 // The HTTP protocol version.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Version {
     ZeroDotNine,
     OneDotZero,
@@ -204,34 +214,49 @@ impl fmt::Display for Version {
     }
 }
 
-impl TryFrom<&[u8]> for Version {
-    type Error = io::Error;
+impl FromStr for Version {
+    type Err = NetError;
 
-    fn try_from(bytes: &[u8]) -> io::Result<Self> {
-        let version = match bytes {
-            b"HTTP/0.9" => Self::ZeroDotNine,
-            b"HTTP/1.0" => Self::OneDotZero,
-            b"HTTP/1.1" => Self::OneDotOne,
-            b"HTTP/2.0" => Self::TwoDotZero,
-            unk => {
-                let unknown = String::from_utf8_lossy(unk);
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Unsupported HTTP version \"{unknown}\"requested.")
-                ));
-            },
+    fn from_str(s: &str) -> NetResult<Self> {
+        let upper_str = s.trim().to_uppercase();
+
+        let version = match &*upper_str {
+            "HTTP/0.9" => Self::ZeroDotNine,
+            "HTTP/1.0" => Self::OneDotZero,
+            "HTTP/1.1" => Self::OneDotOne,
+            "HTTP/2.0" => Self::TwoDotZero,
+            _ => return Err(NetError::ParseError("version")),
         };
         Ok(version)
     }
 }
 
 impl Version {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ZeroDotNine => "HTTP/0.9",
             Self::OneDotZero => "HTTP/1.0",
             Self::OneDotOne => "HTTP/1.1",
             Self::TwoDotZero => "HTTP/2.0",
+        }
+    }
+
+    #[must_use]
+    pub const fn major(&self) -> u8 {
+        match self {
+            Self::ZeroDotNine => 0,
+            Self::OneDotZero | Self::OneDotOne => 1,
+            Self::TwoDotZero => 2,
+        }
+    }
+
+    #[must_use]
+    pub const fn minor(&self) -> u8 {
+        match self {
+            Self::OneDotZero | Self::TwoDotZero => 0,
+            Self::OneDotOne => 1,
+            Self::ZeroDotNine => 9,
         }
     }
 }
