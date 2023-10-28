@@ -2,17 +2,21 @@ use std::{
     io::Result as IoResult,
     net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     path::PathBuf,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
-    thread::{self, JoinHandle, spawn},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread::{self, spawn, JoinHandle},
     time::Duration,
 };
 
 use crate::{
-    NetError, NetResult, Method, RemoteClient, Request, Response,
-    Route, Router, ThreadPool, NUM_WORKERS,
+    Method, NetError, NetResult, RemoteClient, Request, Response, Route, Router, ThreadPool,
+    consts::NUM_WORKERS,
 };
 
 /// Configures the socket address and the router for a `Server`.
+#[allow(clippy::module_name_repetitions)]
 pub struct ServerConfig<A: ToSocketAddrs> {
     /// User-provided socket address.
     pub addr: A,
@@ -23,7 +27,10 @@ pub struct ServerConfig<A: ToSocketAddrs> {
 impl<A: ToSocketAddrs> ServerConfig<A> {
     /// Creates a `ServerConfig` object containing the provided socket address.
     pub fn new(addr: A) -> Self {
-        Self { addr, router: Router::new() }
+        Self {
+            addr,
+            router: Router::new(),
+        }
     }
 
     /// Starts the server, returning a handle to the running `Server` instance.
@@ -164,23 +171,27 @@ impl Server {
                         let rtr = Arc::clone(&router);
 
                         pool.execute(move || {
-                            if let Err(e) = Server::respond(client, rtr) {
-                                let _msg = e;
+                            if let Err(e) = Self::respond(client, &rtr) {
+                                let _ = e;
                             }
                         });
-                    },
+                    }
                     Err(e) => {
-                        let _msg = NetError::BadConnection(e);
-                    },
+                        let _ = NetError::BadConnection(e);
+                    }
                 }
             }
         });
 
-        Ok(Self { handle, local_addr, close_trigger })
+        Ok(Self {
+            handle,
+            local_addr,
+            close_trigger,
+        })
     }
 
     /// Handles a remote client connection.
-    pub fn respond(mut client: RemoteClient, router: Arc<Router>) -> NetResult<()> {
+    pub fn respond(mut client: RemoteClient, router: &Arc<Router>) -> NetResult<()> {
         let req = Request::from_client(&mut client)?;
         let res = Response::from_request(&req, router)?;
         res.send(&mut client)?;
@@ -189,19 +200,23 @@ impl Server {
 
     /// Returns the IP address on which the server is listening.
     #[must_use]
-    pub fn local_ip(&self) -> IpAddr {
+    pub const fn local_ip(&self) -> IpAddr {
         self.local_addr.ip()
     }
 
     /// Returns the port on which the server is listening.
     #[must_use]
-    pub fn local_port(&self) -> u16 {
+    pub const fn local_port(&self) -> u16 {
         self.local_addr.port()
     }
 
     /// Logs a start up message to stdout.
     pub fn log_server_start(addr: &SocketAddr) {
-        println!("[SERVER] Listening on {} at port {}.", addr.ip(), addr.port());
+        println!(
+            "[SERVER] Listening on {} at port {}.",
+            addr.ip(),
+            addr.port()
+        );
     }
 
     /// Logs a shutdown message to stdout.
@@ -216,7 +231,7 @@ impl Server {
         self.close_trigger.store(false, Ordering::Relaxed);
 
         // Connect to and unblock the listener thread.
-        if let Ok(stream) = TcpStream::connect(&self.local_addr) {
+        if let Ok(stream) = TcpStream::connect(self.local_addr) {
             stream.shutdown(Shutdown::Both).unwrap();
         }
 

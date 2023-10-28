@@ -1,4 +1,7 @@
-use std::{fmt, str::FromStr};
+use std::{
+    fmt::{Display, Formatter, Result as FmtResult},
+    str::FromStr,
+};
 
 use crate::{NetError, NetResult};
 
@@ -16,8 +19,8 @@ pub enum Method {
     Options,
 }
 
-impl fmt::Display for Method {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Method {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.as_str())
     }
 }
@@ -65,8 +68,8 @@ impl Method {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Status(pub u16);
 
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Status {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{} {}", self.code(), self.msg())
     }
 }
@@ -78,7 +81,7 @@ impl TryFrom<u16> for Status {
         if (100..=600).contains(&code) {
             Ok(Self(code))
         } else {
-            Err(NetError::BadStatus)
+            Err(NetError::BadStatusCode)
         }
     }
 }
@@ -189,7 +192,7 @@ impl Status {
             530 => "Site Frozen",
             598 => "Network Read Timeout Error",
             599 => "Network Connect Timeout Error",
-            _ => ""
+            _ => "",
         }
     }
 
@@ -208,8 +211,8 @@ pub enum Version {
     TwoDotZero,
 }
 
-impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Version {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.as_str())
     }
 }

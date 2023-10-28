@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf};
 
 use crate::{Method, Request, Status};
 
@@ -12,6 +9,7 @@ pub struct Route {
 }
 
 impl Route {
+    #[must_use]
     pub fn new(method: Method, uri: &str) -> Self {
         let uri = uri.to_string();
         Self { method, uri }
@@ -20,7 +18,7 @@ impl Route {
 
 type RoutesMap = HashMap<Route, PathBuf>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Router {
     pub routes: RoutesMap,
 }
@@ -28,7 +26,7 @@ pub struct Router {
 impl Router {
     #[must_use]
     pub fn new() -> Self {
-        Self { routes: HashMap::new() }
+        Self::default()
     }
 
     pub fn mount(&mut self, route: Route) {
@@ -40,24 +38,26 @@ impl Router {
         self.routes.insert(route, path);
     }
 
+    #[must_use]
     pub fn get_error_page(&self) -> Option<PathBuf> {
         let route = Route::new(Method::Get, "__error");
         self.routes.get(&route).cloned()
     }
 
+    #[must_use]
     pub fn resolve(&self, req: &Request) -> Resolved {
-        match self.routes.get(&req.route()) {
-            // Resolved the route to a local resource path.
-            Some(ref path) => {
-                req.log_connection_status(200);
-                Resolved::new(Status(200), Some(path.to_path_buf()))
-            },
-            // No local resource path found for the URI.
-            None => {
+        self.routes.get(&req.route()).map_or_else(
+            || {
+                // No local resource path found for the URI.
                 req.log_connection_status(404);
                 Resolved::new(Status(404), self.get_error_page())
             },
-        }
+            // Resolved the route to a local resource path.
+            |path| {
+                req.log_connection_status(200);
+                Resolved::new(Status(200), Some(path.clone()))
+            },
+        )
     }
 }
 
@@ -68,15 +68,18 @@ pub struct Resolved {
 }
 
 impl Resolved {
-    pub fn new(status: Status, path: Option<PathBuf>) -> Self {
+    #[must_use]
+    pub const fn new(status: Status, path: Option<PathBuf>) -> Self {
         Self { status, path }
     }
 
-    pub fn status(&self) -> Status {
+    #[must_use]
+    pub const fn status(&self) -> Status {
         self.status
     }
 
-    pub fn path(&self) -> Option<&PathBuf> {
+    #[must_use]
+    pub const fn path(&self) -> Option<&PathBuf> {
         self.path.as_ref()
     }
 }

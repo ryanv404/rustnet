@@ -1,45 +1,50 @@
 #[test]
 fn test_request_headers_search() {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    use crate::{Header, HeaderName, Request, RequestLine};
+    use crate::{
+        Header, Request, RequestLine,
+        consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST},
+    };
+    use std::{collections::HashMap, net::{IpAddr, Ipv4Addr, SocketAddr}};
 
     let cache = Header {
-        name: HeaderName::CacheControl,
-        value: "no-cache".to_string()
-    };
-    let c_type = Header {
-        name: HeaderName::ContentType,
-        value: "text/plain; charset=UTF-8".to_string()
+        name: CACHE_CONTROL,
+        value: "no-cache".to_string(),
     };
     let c_len = Header {
-        name: HeaderName::ContentLength,
-        value: "0".to_string()
+        name: CONTENT_LENGTH,
+        value: "0".to_string(),
     };
-    let headers = vec![cache.clone(), c_len.clone(), c_type.clone()];
+    let c_type = Header {
+        name: CONTENT_TYPE,
+        value: "text/plain; charset=UTF-8".to_string(),
+    };
 
-    let remote_addr = SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        8080
-    );
+    let headers = HashMap::from([
+        (cache.name.clone(), cache.clone()),
+        (c_len.name.clone(), c_len.clone()),
+        (c_type.name.clone(), c_type.clone())
+    ]);
+
+    let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
     let req = Request {
         remote_addr,
         request_line: RequestLine::default(),
         headers,
-        body: Vec::new()
+        body: Vec::new(),
     };
 
-    assert_eq!(req.get_header(&HeaderName::CacheControl).unwrap(), &cache);
-    assert_eq!(req.get_header(&HeaderName::ContentLength).unwrap(), &c_len);
-    assert_eq!(req.get_header(&HeaderName::ContentType).unwrap(), &c_type);
-    assert_ne!(req.get_header(&HeaderName::ContentType).unwrap(), &c_len);
-    assert!(!req.has_header(&HeaderName::Host));
+    assert_eq!(req.get_header(&CACHE_CONTROL).unwrap(), &cache);
+    assert_eq!(req.get_header(&CONTENT_LENGTH).unwrap(), &c_len);
+    assert_eq!(req.get_header(&CONTENT_TYPE).unwrap(), &c_type);
+    assert_ne!(req.get_header(&CONTENT_TYPE).unwrap(), &c_len);
+    assert!(!req.has_header(&HOST));
 }
 
 #[test]
 fn test_parse_request_line() {
+    use crate::{Method::*, RequestLine, Version::*};
     use std::str::FromStr;
-    use crate::{RequestLine, Method::*, Version::*};
 
     let expected1 = RequestLine::new(Get, "/test", OneDotOne);
     let expected2 = RequestLine::new(Post, "/test", TwoDotZero);
@@ -60,8 +65,10 @@ fn test_parse_request_line() {
 
 #[test]
 fn test_parse_request_headers() {
-    use std::str::FromStr;
-    use crate::{Header, HeaderName};
+    use crate::{Header, HeaderName,
+        consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT},
+    };
+    use std::{collections::HashMap, str::FromStr};
 
     let test_headers = "\
         Accept: */*\r\n\
@@ -71,16 +78,36 @@ fn test_parse_request_headers() {
         User-Agent: xh/0.19.3\r\n\
         Pineapple: pizza\r\n\r\n";
 
-    let expected = vec![
-        Header { name: HeaderName::Accept, value: "*/*".to_string() },
-        Header { name: HeaderName::AcceptEncoding, value: "gzip, deflate, br".to_string() },
-        Header { name: HeaderName::Connection, value: "keep-alive".to_string() },
-        Header { name: HeaderName::Host, value: "example.com".to_string() },
-        Header { name: HeaderName::UserAgent, value: "xh/0.19.3".to_string() },
-        Header { name: HeaderName::Unknown("pineapple".to_string()), value: "pizza".to_string() }
-    ];
+    let pineapple = HeaderName::from_str("Pineapple").unwrap();
 
-    let mut output = vec![];
+    let expected = HashMap::from([
+        (ACCEPT, Header {
+            name: ACCEPT,
+            value: "*/*".to_string(),
+        }),
+        (ACCEPT_ENCODING, Header {
+            name: ACCEPT_ENCODING,
+            value: "gzip, deflate, br".to_string(),
+        }),
+        (CONNECTION, Header {
+            name: CONNECTION,
+            value: "keep-alive".to_string(),
+        }),
+        (HOST, Header {
+            name: HOST,
+            value: "example.com".to_string(),
+        }),
+        (USER_AGENT, Header {
+            name: USER_AGENT,
+            value: "xh/0.19.3".to_string(),
+        }),
+        (pineapple.clone(), Header {
+            name: pineapple,
+            value: "pizza".to_string(),
+        })
+    ]);
+
+    let mut output = HashMap::new();
 
     for line in test_headers.split('\n') {
         let trimmed = line.trim();
@@ -88,49 +115,24 @@ fn test_parse_request_headers() {
             break;
         }
 
-        output.push(Header::from_str(trimmed).unwrap());
+        let header = Header::from_str(trimmed).unwrap();
+        output.insert(header.name.clone(), header);
     }
 
-    assert_eq!(&output[..], &expected[..]);
-}
-
-#[test]
-fn test_response_headers_search() {
-    use crate::{Header, HeaderName, Response};
-
-    let res = Response::default();
-
-    let cache_con = Header {
-        name: HeaderName::CacheControl,
-        value: "no-cache".to_string()
-    };
-    let cont_len = Header {
-        name: HeaderName::ContentLength,
-        value: "0".to_string()
-    };
-    let cont_type = Header {
-        name: HeaderName::ContentType,
-        value: "text/plain; charset=UTF-8".to_string()
-    };
-
-    assert_eq!(res.get_header(&HeaderName::CacheControl).unwrap(), &cache_con);
-    assert_eq!(res.get_header(&HeaderName::ContentLength).unwrap(), &cont_len);
-    assert_eq!(res.get_header(&HeaderName::ContentType).unwrap(), &cont_type);
-    assert_ne!(res.get_header(&HeaderName::ContentType).unwrap(), &cont_len);
-    assert!(!res.has_header(&HeaderName::Host));
+    assert_eq!(output, expected);
 }
 
 #[test]
 fn test_trim_whitespace_bytes() {
-    use crate::util::trim_whitespace;
+    use crate::trim_whitespace_bytes;
 
-    assert_eq!(trim_whitespace(b"  test"), b"test");
-    assert_eq!(trim_whitespace(b"test    "), b"test");
-    assert_eq!(trim_whitespace(b"         test       "), b"test");
-    assert_eq!(trim_whitespace(b"  Hello \nworld       "), b"Hello \nworld");
-    assert_eq!(trim_whitespace(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
-    assert_eq!(trim_whitespace(b"                   "), b"");
-    assert_eq!(trim_whitespace(b" "), b"");
-    assert_eq!(trim_whitespace(b"x"), b"x");
-    assert_eq!(trim_whitespace(b""), b"");
+    assert_eq!(trim_whitespace_bytes(b"  test"), b"test");
+    assert_eq!(trim_whitespace_bytes(b"test    "), b"test");
+    assert_eq!(trim_whitespace_bytes(b"         test       "), b"test");
+    assert_eq!(trim_whitespace_bytes(b"  Hello \nworld       "), b"Hello \nworld");
+    assert_eq!(trim_whitespace_bytes(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
+    assert_eq!(trim_whitespace_bytes(b"                   "), b"");
+    assert_eq!(trim_whitespace_bytes(b" "), b"");
+    assert_eq!(trim_whitespace_bytes(b"x"), b"x");
+    assert_eq!(trim_whitespace_bytes(b""), b"");
 }

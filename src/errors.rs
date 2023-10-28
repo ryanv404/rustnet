@@ -7,12 +7,12 @@ use std::{
 
 pub type NetResult<T> = StdResult<T, NetError>;
 
-#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub enum NetError {
-    BadStatus,
     EarlyEof,
-    ReadError(IoError),
+    NonUtf8Header,
+    BadStatusCode,
+    IoError(IoError),
     ParseError(&'static str),
     BadConnection(IoError),
 }
@@ -22,11 +22,10 @@ impl Error for NetError {}
 impl Display for NetError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::BadStatus => f.write_str("invalid status code"),
-            Self::EarlyEof => {
-                f.write_str("received an unexpected EOF on the stream")
-            },
-            Self::ReadError(e) => write!(f, "read error: {e}"),
+            Self::EarlyEof => f.write_str("received an unexpected EOF on the stream"),
+            Self::NonUtf8Header => f.write_str("header names must only contain UTF-8 bytes"),
+            Self::BadStatusCode => f.write_str("invalid status code"),
+            Self::IoError(e) => write!(f, "read error: {e}"),
             Self::ParseError(s) => write!(f, "unable to parse: {s}"),
             Self::BadConnection(e) => write!(f, "connection error: {e}"),
         }
@@ -35,6 +34,6 @@ impl Display for NetError {
 
 impl From<IoError> for NetError {
     fn from(e: IoError) -> Self {
-        Self::ReadError(e)
+        Self::IoError(e)
     }
 }

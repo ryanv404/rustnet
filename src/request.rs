@@ -1,6 +1,7 @@
 use std::{
-    io::BufRead,
+    collections::HashMap,
     fmt::{Display, Formatter, Result as FmtResult},
+    io::BufRead,
     net::{IpAddr, SocketAddr},
     str::FromStr,
 };
@@ -29,7 +30,7 @@ impl Default for RequestLine {
         Self {
             method: Method::Get,
             uri: "/".to_string(),
-            version: Version::OneDotOne
+            version: Version::OneDotOne,
         }
     }
 }
@@ -69,7 +70,11 @@ impl FromStr for RequestLine {
 impl RequestLine {
     #[must_use]
     pub fn new(method: Method, uri: &str, version: Version) -> Self {
-        Self { method, uri: uri.to_string(), version }
+        Self {
+            method,
+            uri: uri.to_string(),
+            version,
+        }
     }
 }
 
@@ -77,7 +82,7 @@ impl RequestLine {
 pub struct Request {
     pub remote_addr: SocketAddr,
     pub request_line: RequestLine,
-    pub headers: Vec<Header>,
+    pub headers: HashMap<HeaderName, Header>,
     pub body: Vec<u8>,
 }
 
@@ -86,22 +91,23 @@ impl Request {
     pub fn new(
         remote_addr: SocketAddr,
         request_line: RequestLine,
-        headers: Vec<Header>,
-        body: Vec<u8>
+        headers: HashMap<HeaderName, Header>,
+        body: Vec<u8>,
     ) -> Self {
         Self {
             remote_addr,
             request_line,
             headers,
-            body
+            body,
         }
     }
 
+    /// Parse a `Request` sent by a `RemoteClient`.
     pub fn from_client(client: &mut RemoteClient) -> NetResult<Self> {
-        let mut headers = vec![];
+        let mut headers = HashMap::new();
         let mut line_buf = String::new();
 
-        let remote_addr = client.remote_addr.clone();
+        let remote_addr = client.remote_addr;
 
         // Parse the request line.
         let request_line = {
@@ -125,8 +131,9 @@ impl Request {
                         break;
                     }
 
-                    headers.push(Header::from_str(trimmed_buf)?);
-                },
+                    let header = Header::from_str(trimmed_buf)?;
+                    headers.insert(header.name.clone(), header);
+                }
             }
         }
 
@@ -137,7 +144,7 @@ impl Request {
             remote_addr,
             request_line,
             headers,
-            body
+            body,
         })
     }
 
@@ -168,12 +175,12 @@ impl Request {
 
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
-        self.headers.iter().any(|h| h.name == *name)
+        self.headers.contains_key(name)
     }
 
     #[must_use]
     pub fn get_header(&self, name: &HeaderName) -> Option<&Header> {
-        self.headers.iter().find(|&h| h.name == *name)
+        self.headers.get(name)
     }
 
     #[must_use]
@@ -182,22 +189,27 @@ impl Request {
     }
 
     #[must_use]
-    pub const fn remote_addr(&self) -> &SocketAddr {
-        &self.remote_addr
+    pub const fn remote_addr(&self) -> SocketAddr {
+        self.remote_addr
     }
 
     #[must_use]
-    pub fn remote_ip(&self) -> IpAddr {
+    pub const fn remote_ip(&self) -> IpAddr {
         self.remote_addr.ip()
     }
 
     #[must_use]
-    pub fn remote_port(&self) -> u16 {
+    pub const fn remote_port(&self) -> u16 {
         self.remote_addr.port()
     }
 
     pub fn log_connection_status(&self, status: u16) {
-        let request_line = self.request_line();
-        println!("[{}|{status}] {request_line}", self.remote_ip());
+        println!(
+            "[{}|{status}] {} {} {}",
+            self.remote_ip(),
+            self.version(),
+            self.method(),
+            self.uri()
+        );
     }
 }

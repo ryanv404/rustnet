@@ -1,13 +1,15 @@
 use std::{
-    io::{
-        BufRead, BufReader, BufWriter, Error as IoError, Read,
-        Result as IoResult, Write,
-    },
-    net::{SocketAddr, TcpStream},
+    io::{BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult, Write},
+    net::{IpAddr, SocketAddr, TcpStream},
     sync::Mutex,
 };
 
-use crate::{READER_BUFSIZE, WRITER_BUFSIZE};
+use crate::{Request, consts::{READER_BUFSIZE, WRITER_BUFSIZE}};
+
+pub enum Message {
+    NewRequest(Request),
+    Error(IoError),
+}
 
 pub struct NetReader(pub BufReader<TcpStream>);
 
@@ -65,9 +67,7 @@ pub struct RemoteClient {
 impl TryFrom<(TcpStream, SocketAddr)> for RemoteClient {
     type Error = IoError;
 
-    fn try_from(conn: (TcpStream, SocketAddr)) -> IoResult<Self> {
-        let stream = conn.0;
-        let addr = conn.1;
+    fn try_from((stream, addr): (TcpStream, SocketAddr)) -> IoResult<Self> {
         Self::new(stream, addr)
     }
 }
@@ -99,20 +99,31 @@ impl BufRead for RemoteClient {
 }
 
 impl RemoteClient {
-    /// Creates a readable and writable `RemoteClient` instance.
+    /// Creates a new readable and writable `RemoteClient` instance.
     pub fn new(stream: TcpStream, remote_addr: SocketAddr) -> IoResult<Self> {
         let (r, w) = (stream.try_clone()?, stream);
         let (reader, writer) = (NetReader::from(r), NetWriter::from(w));
-        Ok(Self { remote_addr, reader, writer })
+        Ok(Self {
+            remote_addr,
+            reader,
+            writer,
+        })
     }
 
-    pub fn remote_addr(&self) -> &SocketAddr {
-        &self.remote_addr
+    /// Returns the remote client's IP address.
+    pub const fn remote_ip(&self) -> IpAddr {
+        self.remote_addr.ip()
     }
 
+    /// Returns the remote client's port.
+    pub const fn remote_port(&self) -> u16 {
+        self.remote_addr.port()
+    }
+
+    /// Attempts to clone a new `RemoteClient` instance.
     pub fn try_clone(&self) -> IoResult<Self> {
         let stream = self.reader.0.get_ref().try_clone()?;
-        let addr = self.remote_addr.clone();
-        Ok(Self::new(stream, addr)?)
+        let addr = self.remote_addr;
+        Self::new(stream, addr)
     }
 }

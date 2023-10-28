@@ -1,4 +1,4 @@
-use std::{io, thread, time::Duration};
+use std::io;
 
 use rustnet::Server;
 
@@ -19,9 +19,7 @@ fn main() -> io::Result<()> {
     // Start the server.
     let server = s.start()?;
 
-    thread::sleep(Duration::from_secs(3));
-
-    server.shutdown();
+    server.handle.join().unwrap();
 
     Ok(())
 }

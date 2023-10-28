@@ -1,277 +1,336 @@
-use std::{fmt, str::FromStr};
+use std::{
+    fmt::{Display, Formatter, Result as FmtResult},
+    str::{self, FromStr},
+};
 
-use crate::{NetError, NetResult};
+use crate::{NetError, NetResult, trim_whitespace_bytes};
+
+/// Header field name.
+/// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
+pub struct HeaderName {
+    /// Abstraction over standard and non-standard field names.
+    pub inner: HdrRepr,
+}
+
+impl From<StdHeader> for HeaderName {
+    fn from(std: StdHeader) -> Self {
+        Self { inner: HdrRepr::Std(std) }
+    }
+}
+
+impl FromStr for HeaderName {
+    type Err = NetError;
+
+    /// Attempts to convert a string slice into a `HeaderName` returning an error
+    /// if the header name contains any bytes that are not valid UTF-8.
+    fn from_str(s: &str) -> NetResult<Self> {
+        Self::try_from(s.as_bytes())
+    }
+}
+
+impl TryFrom<&[u8]> for HeaderName {
+    type Error = NetError;
+
+    /// Attempts to convert a byte slice into a `HeaderName` returning an error
+    /// if the header name contains any bytes that are not valid UTF-8.
+    fn try_from(b: &[u8]) -> NetResult<Self> {
+        Ok(Self::new(HdrRepr::try_from(b)?))
+    }
+}
+
+impl HeaderName {
+    /// Creates a new `HeaderName` from a `HdrRepr` representation.
+    #[must_use]
+    pub const fn new(inner: HdrRepr) -> Self {
+        Self { inner }
+    }
+
+    /// Returns the header field name as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        assert!(str::from_utf8(self.inner.as_bytes()).is_ok());
+
+        // SAFETY: The header name contains valid UTF-8 bytes only.
+        unsafe {
+            str::from_utf8_unchecked(self.inner.as_bytes())
+        }
+    }
+}
+
+impl Display for HeaderName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Header field name representation.
+/// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HdrRepr {
+    Std(StdHeader),
+    Custom(Vec<u8>),
+}
+
+impl Display for HdrRepr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(
+            f, "{}",
+            match self {
+                Self::Std(std) => std.as_str(),
+                Self::Custom(cust) => {
+                    let cust_str = str::from_utf8(cust.as_slice());
+                    // HdrRepr's should only contain valid UTF-8.
+                    cust_str.unwrap()
+                },
+            }
+        )
+    }
+}
+
+impl TryFrom<&[u8]> for HdrRepr {
+    type Error = NetError;
+
+    /// Attempts to convert a byte slice into a `HdrRepr` returning an error
+    /// if the header name contains any bytes that are not UTF-8.
+    fn try_from(b: &[u8]) -> NetResult<Self> {
+        match StdHeader::from_bytes(b) {
+            Some(std) => Ok(Self::Std(std)),
+            None if str::from_utf8(b).is_ok() => {
+                Ok(Self::Custom(b.to_ascii_lowercase()))
+            },
+            None => Err(NetError::NonUtf8Header),
+        }
+    }
+}
+
+impl HdrRepr {
+    /// Returns a byte slice representing the header field name.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Std(std) => std.as_bytes(),
+            Self::Custom(ref hdr) => hdr.as_slice(),
+        }
+    }
+}
 
 macro_rules! impl_header_names {
-    ($( $name:ident: $output:expr, $text:expr; )+) => {
-        #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-        pub enum HeaderName {
-            $( $name, )+
-            Unknown(String),
+    ($( $bytes:literal => $constant:ident, $variant:ident; )+) => {
+        // Standard header field names.
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
+        pub enum StdHeader {
+            $( $variant, )+
         }
 
-        impl fmt::Display for HeaderName {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        pub mod header_names {
+            use super::{HdrRepr, HeaderName, StdHeader};
+
+            $( 
+                // Constants representing all of the standard header field names.
+                pub const $constant: HeaderName = HeaderName {
+                    inner: HdrRepr::Std(StdHeader::$variant)
+                };
+            )+
+        }
+
+        impl Display for StdHeader {
+            fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
                 write!(f, "{}", self.as_str())
             }
         }
 
-        impl FromStr for HeaderName {
-            type Err = NetError;
+        impl StdHeader {
+            /// Attempts to convert a byte slice into a `StdHeader`, returning `None`
+            /// if it cannot do so.
+            #[must_use]
+            pub fn from_bytes(input: &[u8]) -> Option<Self> {
+                let lowercase = trim_whitespace_bytes(input).to_ascii_lowercase();
 
-            fn from_str(s: &str) -> NetResult<Self> {
-                let name = s.trim().to_lowercase();
+                match lowercase.as_slice() {
+                    $( $bytes => Some(Self::$variant), )+
+                    _ => None,
+                }
+            }
 
-                match name.as_str() {
-                    $( $text => Ok(Self::$name), )+
-                    _ => Ok(Self::Unknown(name)),
+            /// Returns the header name as a byte slice.
+            #[must_use]
+            pub const fn as_bytes(&self) -> &'static [u8] {
+                match *self {
+                    $( Self::$variant => $bytes, )+
+                }
+            }
+
+            /// Returns the header name as a string slice.
+            #[must_use]
+            pub const fn as_str(&self) -> &'static str {
+                // SAFETY: We know that the bytes are valid UTF-8 since we provided them.
+                unsafe {
+                    str::from_utf8_unchecked(self.as_bytes())
                 }
             }
         }
 
-        impl HeaderName {
-            #[must_use]
-            pub fn as_str(&self) -> &str {
-                match self {
-                    $( Self::$name => $output, )+
-                    Self::Unknown(ref name) => name.as_str(),
-                }
-            }
+        #[cfg(test)]
+        const TEST_HEADERS: &'static [(StdHeader, &'static [u8])] = &[
+            $( (StdHeader::$variant, $bytes), )+
+        ];
+
+        #[cfg(test)]
+        #[test]
+        fn test_parse_std_headers() {
+            // Lowercase bytes test.
+            TEST_HEADERS.iter().for_each(|&(std, bytes)| {
+                let std_hdr = HeaderName::from(std);
+                let parsed_hdr = HeaderName::try_from(bytes).unwrap();
+
+                assert_eq!(std_hdr, parsed_hdr);
+            });
+
+            // Uppercase bytes test.
+            TEST_HEADERS.iter().for_each(|&(std, bytes)| {
+                let std_hdr = HeaderName::from(std);
+                let parsed_hdr = HeaderName::try_from(
+                    bytes.to_ascii_uppercase().as_slice()
+                ).unwrap();
+
+                assert_eq!(std_hdr, parsed_hdr);
+            });
         }
     };
 }
 
 impl_header_names! {
-    Accept:
-        "Accept", "accept";
-    AcceptCharset:
-        "Accept-Charset", "accept-charset";
-    AcceptDatetime:
-        "Accept-Datetime", "accept-datetime";
-    AcceptEncoding:
-        "Accept-Encoding", "accept-encoding";
-    AcceptLanguage:
-        "Accept-Language", "accept-language";
-    AcceptPatch:
-        "Accept-Patch", "accept-patch";
-    AcceptPost:
-        "Accept-Post", "accept-post";
-    AcceptRanges:
-        "Accept-Ranges", "accept-ranges";
-    AccessControlAllowCredentials:
-        "Access-Control-Allow-Credentials", "access-control-allow-credentials";
-    AccessControlAllowHeaders:
-        "Access-Control-Allow-Headers", "access-control-allow-headers";
-    AccessControlAllowMethods:
-        "Access-Control-Allow-Methods", "access-control-allow-methods";
-    AccessControlAllowOrigin:
-        "Access-Control-Allow-Origin", "access-control-allow-origin";
-    AccessControlExposeHeaders:
-        "Access-Control-Expose-Headers", "access-control-expose-headers";
-    AccessControlMaxAge:
-        "Access-Control-Max-Age", "access-control-max-age";
-    AccessControlRequestHeaders:
-        "Access-Control-Request-Headers", "access-control-request-headers";
-    AccessControlRequestMethod:
-        "Access-Control-Request-Method", "access-control-request-method";
-    Age:
-        "Age", "age";
-    Allow:
-        "Allow", "allow";
-    AltSvc:
-        "Alt-Svc", "alt-svc";
-    Authorization:
-        "Authorization", "authorization";
-    CacheControl:
-        "Cache-Control", "cache-control";
-    CacheStatus:
-        "Cache-Status", "cache-status";
-    CdnCacheControl:
-        "Cdn-Cache-Control", "cdn-cache-control";
-    ClearSiteData:
-        "Clear-Site-Data", "clear-site-data";
-    Connection:
-        "Connection", "connection";
-    ContentDisposition:
-        "Content-Disposition", "content-disposition";
-    ContentEncoding:
-        "Content-Encoding", "content-encoding";
-    ContentLanguage:
-        "Content-Language", "content-language";
-    ContentLength:
-        "Content-Length", "content-length";
-    ContentLocation:
-        "Content-Location", "content-location";
-    ContentRange:
-        "Content-Range", "content-range";
-    ContentSecurityPolicy:
-        "Content-Security-Policy", "content-security-policy";
-    ContentSecurityPolicyReportOnly:
-        "Content-Security-Policy-Report-Only", "content-security-policy-report-only";
-    ContentType:
-        "Content-Type", "content-type";
-    Cookie:
-        "Cookie", "cookie";
-    CrossOriginEmbedderPolicy:
-        "Cross-Origin-Embedder-Policy", "cross-origin-embedder-policy";
-    CrossOriginOpenerPolicy:
-        "Cross-Origin-Opener-Policy", "cross-origin-opener-policy";
-    CrossOriginResourcePolicy:
-        "Cross-Origin-Resource-Policy", "cross-origin-resource-policy";
-    Date:
-        "Date", "date";
-    DeltaBase:
-        "Delta-Base", "delta-base";
-    DeviceMemory:
-        "Device-Memory", "device-memory";
-    Digest:
-        "Digest", "digest";
-    Dnt:
-        "Dnt", "dnt";
-    Etag:
-        "Etag", "etag";
-    Expect:
-        "Expect", "expect";
-    Expires:
-        "Expires", "expires";
-    Forwarded:
-        "Forwarded", "forwarded";
-    From:
-        "From", "from";
-    Host:
-        "Host", "host";
-    IfMatch:
-        "If-Match", "http2-settings";
-    IfModifiedSince:
-        "If-Modified-Since", "if-match";
-    IfNoneMatch:
-        "If-None-Match", "if-modified-since";
-    IfRange:
-        "If-Range", "if-none-match";
-    IfUnmodifiedSince:
-        "If-Unmodified-Since", "if-range";
-    Http2Settings:
-        "Http2-Settings", "if-unmodified-since";
-    KeepAlive:
-        "Keep-Alive", "keep-alive";
-    LastModified:
-        "Last-Modified", "last-modified";
-    Link:
-        "Link", "link";
-    Location:
-        "Location", "location";
-    MaxForwards:
-        "Max-Forwards", "max-forwards";
-    Origin:
-        "Origin", "origin";
-    PermissionsPolicy:
-        "Permissions-Policy", "permissions-policy";
-    Pragma:
-        "Pragma", "pragma";
-    Prefer:
-        "Prefer", "prefer";
-    ProxyAuthenticate:
-        "Proxy-Authenticate", "proxy-authenticate";
-    ProxyAuthorization:
-        "Proxy-Authorization", "proxy-authorization";
-    PublicKeyPins:
-        "Public-Key-Pins", "public-key-pins";
-    PublicKeyPinsReportOnly:
-        "Public-Key-Pins-Report-Only", "public-key-pins-report-only";
-    Purpose:
-        "Purpose", "purpose";
-    Range:
-        "Range", "range";
-    Referer:
-        "Referer", "referer";
-    ReferrerPolicy:
-        "Referrer-Policy", "referrer-policy";
-    Refresh:
-        "Refresh", "refresh";
-    RetryAfter:
-        "Retry-After", "retry-after";
-    SecChUa:
-        "Sec-Ch-Ua", "sec-ch-ua";
-    SecChUaMobile:
-        "Sec-Ch-Ua-Mobile", "sec-ch-ua-mobile";
-    SecChUaPlatform:
-        "Sec-Ch-Ua-Platform", "sec-ch-ua-platform";
-    SaveData:
-        "Save-Data", "save-data";
-    SecFetchDest:
-        "Sec-Fetch-Dest", "sec-fetch-dest";
-    SecFetchMode:
-        "Sec-Fetch-Mode", "sec-fetch-mode";
-    SecFetchSite:
-        "Sec-Fetch-Site", "sec-fetch-site";
-    SecFetchUser:
-        "Sec-Fetch-User", "sec-fetch-user";
-    SecGpc:
-        "Sec-Gpc", "sec-gpc";
-    SecWebSocketAccept:
-        "Sec-Websocket-Accept", "sec-websocket-accept";
-    SecWebSocketExtensions:
-        "Sec-Websocket-Extensions", "sec-websocket-extensions";
-    SecWebSocketKey:
-        "Sec-Websocket-Key", "sec-websocket-key";
-    SecWebSocketProtocol:
-        "Sec-Websocket-Protocol", "sec-websocket-protocol";
-    SecWebSocketVersion:
-        "Sec-Websocket-Version", "sec-websocket-version";
-    Server:
-        "Server", "server";
-    ServerTiming:
-        "Server-Timing", "server-timing";
-    SetCookie:
-        "Set-Cookie", "set-cookie";
-    Sourcemap:
-        "Sourcemap", "sourcemap";
-    StrictTransportSecurity:
-        "Strict-Transport-Security", "strict-transport-security";
-    Te:
-        "Te", "te";
-    TimingAllowOrigin:
-        "Timing-Allow-Origin", "timing-allow-origin";
-    Trailer:
-        "Trailer", "trailer";
-    TransferEncoding:
-        "Transfer-Encoding", "transfer-encoding";
-    UserAgent:
-        "User-Agent", "user-agent";
-    Upgrade:
-        "Upgrade", "upgrade";
-    UpgradeInsecureRequests:
-        "Upgrade-Insecure-Requests", "upgrade-insecure-requests";
-    Vary:
-        "Vary", "vary";
-    Via:
-        "Via", "via";
-    WantDigest:
-        "Want-Digest", "want-digest";
-    Warning:
-        "Warning", "warning";
-    WwwAuthenticate:
-        "Www-Authenticate", "www-authenticate";
-    XContentTypeOptions:
-        "X-Content-Type-Options", "x-content-type-options";
-    XDnsPrefetchControl:
-        "X-Dns-Prefetch-Control", "x-dns-prefetch-control";
-    XForwardedFor:
-        "X-Forwarded-For", "x-forwarded-for";
-    XForwardedHost:
-        "X-Forwarded-Host", "x-forwarded-host";
-    XForwardedProto:
-        "X-Forwarded-Proto", "x-forwarded-proto";
-    XFrameOptions:
-        "X-Frame-Options", "x-frame-options";
-    XPoweredBy:
-        "X-Powered-By", "x-powered-by";
-    XRequestId:
-        "X-Request-Id", "x-request-id";
-    XRobotsTag:
-        "X-Robots-Tag", "x-robots-tag";
-    XUaCompatible:
-        "X-Ua-Compatible", "x-ua-compatible";
-    XXssProtection:
-        "X-Xss-Protection", "x-xss-protection";
+    b"accept" => ACCEPT, Accept;
+    b"accept-charset" => ACCEPT_CHARSET, AcceptCharset;
+    b"accept-datetime" => ACCEPT_DATETIME, AcceptDatetime;
+    b"accept-encoding" => ACCEPT_ENCODING, AcceptEncoding;
+    b"accept-language" => ACCEPT_LANGUAGE, AcceptLanguage;
+    b"accept-patch" => ACCEPT_PATCH, AcceptPatch;
+    b"accept-post" => ACCEPT_POST, AcceptPost;
+    b"accept-ranges" => ACCEPT_RANGES, AcceptRanges;
+    b"access-control-allow-credentials" => ACCESS_CONTROL_ALLOW_CREDENTIALS,
+        AccessControlAllowCredentials;
+    b"access-control-allow-headers" => ACCESS_CONTROL_ALLOW_HEADERS,
+        AccessControlAllowHeaders;
+    b"access-control-allow-methods" => ACCESS_CONTROL_ALLOW_METHODS,
+        AccessControlAllowMethods;
+    b"access-control-allow-origin" => ACCESS_CONTROL_ALLOW_ORIGIN,
+        AccessControlAllowOrigin;
+    b"access-control-expose-headers" => ACCESS_CONTROL_EXPOSE_HEADERS,
+        AccessControlExposeHeaders;
+    b"access-control-max-age" => ACCESS_CONTROL_MAX_AGE, AccessControlMaxAge;
+    b"access-control-request-headers" => ACCESS_CONTROL_REQUEST_HEADERS,
+        AccessControlRequestHeaders;
+    b"access-control-request-method" => ACCESS_CONTROL_REQUEST_METHOD,
+        AccessControlRequestMethod;
+    b"age" => AGE, Age;
+    b"allow" => ALLOW, Allow;
+    b"alt-svc" => ALT_SVC, AltSvc;
+    b"authorization" => AUTHORIZATION, Authorization;
+    b"cache-control" => CACHE_CONTROL, CacheControl;
+    b"cache-status" => CACHE_STATUS, CacheStatus;
+    b"cdn-cache-control" => CDN_CACHE_CONTROL, CdnCacheControl;
+    b"clear-site-data" => CLEAR_SITE_DATA, ClearSiteData;
+    b"connection" => CONNECTION, Connection;
+    b"content-disposition" => CONTENT_DISPOSITION, ContentDisposition;
+    b"content-encoding" => CONTENT_ENCODING, ContentEncoding;
+    b"content-language" => CONTENT_LANGUAGE, ContentLanguage;
+    b"content-length" => CONTENT_LENGTH, ContentLength;
+    b"content-location" => CONTENT_LOCATION, ContentLocation;
+    b"content-range" => CONTENT_RANGE, ContentRange;
+    b"content-security-policy" => CONTENT_SECURITY_POLICY,
+        ContentSecurityPolicy;
+    b"content-security-policy-report-only" =>
+        CONTENT_SECURITY_POLICY_REPORT_ONLY, ContentSecurityPolicyReportOnly;
+    b"content-type" => CONTENT_TYPE, ContentType;
+    b"cookie" => COOKIE, Cookie;
+    b"cross-origin-embedder-policy" => CROSS_ORIGIN_EMBEDDER_POLICY,
+        CrossOriginEmbedderPolicy;
+    b"cross-origin-opener-policy" => CROSS_ORIGIN_OPENER_POLICY,
+        CrossOriginOpenerPolicy;
+    b"cross-origin-resource-policy" => CROSS_ORIGIN_RESOURCE_POLICY,
+        CrossOriginResourcePolicy;
+    b"date" => DATE, Date;
+    b"delta-base" => DELTA_BASE, DeltaBase;
+    b"device-memory" => DEVICE_MEMORY, DeviceMemory;
+    b"digest" => DIGEST, Digest;
+    b"dnt" => DNT, Dnt;
+    b"etag" => ETAG, Etag;
+    b"expect" => EXPECT, Expect;
+    b"expires" => EXPIRES, Expires;
+    b"forwarded" => FORWARDED, Forwarded;
+    b"from" => FROM, From;
+    b"host" => HOST, Host;
+    b"if-match" => IF_MATCH, IfMatch;
+    b"if-modified-since" => IF_MODIFIED_SINCE, IfModifiedSince;
+    b"if-none-match" => IF_NONE_MATCH, IfNoneMatch;
+    b"if-range" => IF_RANGE, IfRange;
+    b"if-unmodified-since" => IF_UNMODIFIED_SINCE, IfUnmodifiedSince;
+    b"http2-settings" => HTTP2_SETTINGS, Http2Settings;
+    b"keep-alive" => KEEP_ALIVE, KeepAlive;
+    b"last-modified" => LAST_MODIFIED, LastModified;
+    b"link" => LINK, Link;
+    b"location" => LOCATION, Location;
+    b"max-forwards" => MAX_FORWARDS, MaxForwards;
+    b"origin" => ORIGIN, Origin;
+    b"permissions-policy" => PERMISSIONS_POLICY, PermissionsPolicy;
+    b"pragma" => PRAGMA, Pragma;
+    b"prefer" => PREFER, Prefer;
+    b"proxy-authenticate" => PROXY_AUTHENTICATE, ProxyAuthenticate;
+    b"proxy-authorization" => PROXY_AUTHORIZATION, ProxyAuthorization;
+    b"public-key-pins" => PUBLIC_KEY_PINS, PublicKeyPins;
+    b"public-key-pins-report-only" => PUBLIC_KEY_PINS_REPORT_ONLY,
+        PublicKeyPinsReportOnly;
+    b"purpose" => PURPOSE, Purpose;
+    b"range" => RANGE, Range;
+    b"referer" => REFERER, Referer;
+    b"referrer-policy" => REFERRER_POLICY, ReferrerPolicy;
+    b"refresh" => REFRESH, Refresh;
+    b"retry-after" => RETRY_AFTER, RetryAfter;
+    b"sec-ch-ua" => SEC_CH_UA, SecChUa;
+    b"sec-ch-ua-mobile" => SEC_CH_UA_MOBILE, SecChUaMobile;
+    b"sec-ch-ua-platform" => SEC_CH_UA_PLATFORM, SecChUaPlatform;
+    b"save-data" => SAVE_DATA, SaveData;
+    b"sec-fetch-dest" => SEC_FETCH_DEST, SecFetchDest;
+    b"sec-fetch-mode" => SEC_FETCH_MODE, SecFetchMode;
+    b"sec-fetch-site" => SEC_FETCH_SITE, SecFetchSite;
+    b"sec-fetch-user" => SEC_FETCH_USER, SecFetchUser;
+    b"sec-gpc" => SEC_GPC, SecGpc;
+    b"sec-websocket-accept" => SEC_WEBSOCKET_ACCEPT, SecWebsocketAccept;
+    b"sec-websocket-extensions" => SEC_WEBSOCKET_EXTENSIONS,
+        SecWebsocketExtensions;
+    b"sec-websocket-key" => SEC_WEBSOCKET_KEY, SecWebsocketKey;
+    b"sec-websocket-protocol" => SEC_WEBSOCKET_PROTOCOL, SecWebsocketProtocol;
+    b"sec-websocket-version" => SEC_WEBSOCKET_VERSION, SecWebsocketVersion;
+    b"server" => SERVER, Server;
+    b"server-timing" => SERVER_TIMING, ServerTiming;
+    b"set-cookie" => SET_COOKIE, SetCookie;
+    b"sourcemap" => SOURCEMAP, Sourcemap;
+    b"strict-transport-security" => STRICT_TRANSPORT_SECURITY,
+        StrictTransportSecurity;
+    b"te" => TE, Te;
+    b"timing-allow-origin" => TIMING_ALLOW_ORIGIN, TimingAllowOrigin;
+    b"trailer" => TRAILER, Trailer;
+    b"transfer-encoding" => TRANSFER_ENCODING, TransferEncoding;
+    b"user-agent" => USER_AGENT, UserAgent;
+    b"upgrade" => UPGRADE, Upgrade;
+    b"upgrade-insecure-requests" => UPGRADE_INSECURE_REQUESTS,
+        UpgradeInsecureRequests;
+    b"vary" => VARY, Vary;
+    b"via" => VIA, Via;
+    b"want-digest" => WANT_DIGEST, WantDigest;
+    b"warning" => WARNING, Warning;
+    b"www-authenticate" => WWW_AUTHENTICATE, WwwAuthenticate;
+    b"x-content-type-options" => X_CONTENT_TYPE_OPTIONS, XContentTypeOptions;
+    b"x-dns-prefetch-control" => X_DNS_PREFETCH_CONTROL, XDnsPrefetchControl;
+    b"x-forwarded-for" => X_FORWARDED_FOR, XForwardedFor;
+    b"x-forwarded-host" => X_FORWARDED_HOST, XForwardedHost;
+    b"x-forwarded-proto" => X_FORWARDED_PROTO, XForwardedProto;
+    b"x-frame-options" => X_FRAME_OPTIONS, XFrameOptions;
+    b"x-powered-by" => X_POWERED_BY, XPoweredBy;
+    b"x-request-id" => X_REQUEST_ID, XRequestId;
+    b"x-robots-tag" => X_ROBOTS_TAG, XRobotsTag;
+    b"x-ua-compatible" => X_UA_COMPATIBLE, XUaCompatible;
+    b"x-xss-protection" => X_XSS_PROTECTION, XXssProtection;
 }

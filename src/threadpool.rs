@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, Mutex, mpsc::{channel, Receiver, Sender}},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, Mutex,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -13,14 +16,13 @@ pub struct Worker {
 
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
-        let handle = thread::spawn(move || loop {
-            if let Ok(job) = receiver.lock().unwrap().recv() {
-                println!("Worker {id} got a job; executing.");
+        let handle = thread::spawn(move || {
+            while let Ok(job) = receiver.lock().unwrap().recv() {
+                //println!("Worker {id} got a job; executing.");
                 job();
-            } else {
-                println!("Worker {id} disconnected; shutting down.");
-                break;
             }
+
+            //println!("Worker {id} disconnected; shutting down.");
         });
 
         Self { id, handle: Some(handle) }
