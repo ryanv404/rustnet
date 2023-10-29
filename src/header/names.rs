@@ -1,7 +1,5 @@
-use std::{
-    fmt::{Display, Formatter, Result as FmtResult},
-    str::{self, FromStr},
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::str::{self, FromStr};
 
 use crate::{NetError, NetResult, trim_whitespace_bytes};
 
@@ -25,7 +23,11 @@ impl FromStr for HeaderName {
     /// Attempts to convert a string slice into a `HeaderName` returning an error
     /// if the header name contains any bytes that are not valid UTF-8.
     fn from_str(s: &str) -> NetResult<Self> {
-        Self::try_from(s.as_bytes())
+        let name = Self {
+			inner: HdrRepr::try_from(s.as_bytes())?
+		};
+
+		Ok(name)
     }
 }
 
@@ -35,7 +37,11 @@ impl TryFrom<&[u8]> for HeaderName {
     /// Attempts to convert a byte slice into a `HeaderName` returning an error
     /// if the header name contains any bytes that are not valid UTF-8.
     fn try_from(b: &[u8]) -> NetResult<Self> {
-        Ok(Self::new(HdrRepr::try_from(b)?))
+        let name = Self {
+			inner: HdrRepr::try_from(b)?
+		};
+
+		Ok(name)
     }
 }
 
@@ -46,15 +52,21 @@ impl HeaderName {
         Self { inner }
     }
 
-    /// Returns the header field name as a string slice.
+    /// Returns the header field name as a byte slice.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+		self.inner.as_bytes()
+	}
+
+	/// Returns the header field name as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        assert!(str::from_utf8(self.inner.as_bytes()).is_ok());
-
-        // SAFETY: The header name contains valid UTF-8 bytes only.
-        unsafe {
-            str::from_utf8_unchecked(self.inner.as_bytes())
-        }
+		// The header name should contain valid UTF-8 bytes only.
+        if let Ok(s) = str::from_utf8(self.as_bytes()) {
+			s
+		} else {
+			""
+		}
     }
 }
 

@@ -1,7 +1,5 @@
-use std::{
-    fmt::{Display, Formatter, Result as FmtResult},
-    str::FromStr,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::str::FromStr;
 
 use crate::{NetError, NetResult};
 
@@ -41,7 +39,7 @@ impl FromStr for Method {
             "DELETE" => Self::Delete,
             "CONNECT" => Self::Connect,
             "OPTIONS" => Self::Options,
-            _ => return Err(NetError::ParseError("method")),
+            _ => return Err(NetError::ParseError("http method")),
         };
         Ok(method)
     }
@@ -228,7 +226,7 @@ impl FromStr for Version {
             "HTTP/1.0" => Self::OneDotZero,
             "HTTP/1.1" => Self::OneDotOne,
             "HTTP/2.0" => Self::TwoDotZero,
-            _ => return Err(NetError::ParseError("version")),
+            _ => return Err(NetError::ParseError("http version")),
         };
         Ok(version)
     }

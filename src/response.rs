@@ -1,16 +1,13 @@
-use std::{
-    collections::HashMap,
-    fs,
-    io::{Result as IoResult, Write},
-    sync::Arc,
-};
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::{Result as IoResult, Write};
+use std::sync::Arc;
 
 use crate::{
-    Header, HeaderName, Method, NetResult, RemoteClient, Request, RequestLine,
-    Router, Status, Version, consts::{
-        CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE
-    },
+    HeaderName, HeaderValue, Method, NetResult, RemoteClient, Request,
+    Router, Status, Version, default_headers,
 };
+use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
 
 //HTTP/1.1 200 OK
 //Accept-Ranges: bytes
@@ -33,7 +30,7 @@ pub struct Response {
     pub uri: String,
     pub version: Version,
     pub status: Status,
-    pub headers: HashMap<HeaderName, Header>,
+    pub headers: BTreeMap<HeaderName, HeaderValue>,
     pub body: Vec<u8>,
 }
 
@@ -44,7 +41,7 @@ impl Default for Response {
             uri: String::from("/"),
             version: Version::OneDotOne,
             status: Status(200),
-            headers: Header::default_headers(),
+            headers: default_headers(),
             body: Vec::new(),
         }
     }
@@ -52,48 +49,46 @@ impl Default for Response {
 
 impl Response {
     pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
-        let RequestLine {
-            method,
-            uri,
-            version,
-        } = req.request_line.clone();
+        let method = req.method;
+		let uri = req.uri.clone();
+		let version = req.version;
 
         let resolved = router.resolve(req);
 
-        let mut headers = HashMap::new();
+        let mut headers = BTreeMap::new();
 
         let body = {
             if let Some(path) = resolved.path() {
-                let cache_con = Header::cache_control_from_path(path);
-                let content_type = Header::content_type_from_path(path);
+                headers.insert(
+					CACHE_CONTROL,
+					HeaderValue::cache_control_from_path(path)
+				);
 
-                headers.insert(cache_con.name.clone(), cache_con);
-                headers.insert(content_type.name.clone(), content_type);
+				headers.insert(
+					CONTENT_TYPE,
+					HeaderValue::content_type_from_path(path)
+				);
 
                 fs::read(path)?
             } else {
-                let cache_con = Header {
-                    name: CACHE_CONTROL,
-                    value: "no-cache".to_string(),
-                };
-                let content_type = Header {
-                    name: CONTENT_TYPE,
-                    value: "text/plain; charset=UTF-8".to_string(),
-                };
+                headers.insert(
+					CACHE_CONTROL,
+					"no-cache".into()
+				);
 
-                headers.insert(cache_con.name.clone(), cache_con);
-                headers.insert(content_type.name.clone(), content_type);
+				headers.insert(
+					CONTENT_TYPE,
+					"text/plain; charset=UTF-8".into()
+				);
 
                 Vec::new()
             }
         };
 
-        let content_len = Header {
-            name: CONTENT_LENGTH,
-            value: body.len().to_string(),
-        };
-
-        headers.insert(content_len.name.clone(), content_len);
+		headers.insert(
+			CONTENT_LENGTH,
+            body.len().to_string().as_str().into()
+		);
 
         let status = resolved.status();
 
@@ -113,7 +108,7 @@ impl Response {
     }
 
     #[must_use]
-    pub const fn uri(&self) -> &String {
+    pub fn uri(&self) -> &str {
         &self.uri
     }
 
@@ -142,80 +137,62 @@ impl Response {
         self.headers.contains_key(name)
     }
 
-    #[must_use]
-    pub fn get_header(&self, name: &HeaderName) -> Option<&Header> {
-        self.headers.get(name)
+    pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
+		if self.has_header(&name) {
+            self.headers.entry(name).and_modify(|v| *v = val);
+		} else {
+            self.headers.insert(name, val);
+		}
+    }
+
+	#[must_use]
+    pub fn cache_control(&self) -> Option<&HeaderValue> {
+        self.headers.get(&CACHE_CONTROL)
+    }
+
+    pub fn set_cache_control(&mut self, value: HeaderValue) {
+        self.set_header(CACHE_CONTROL, value);
     }
 
     #[must_use]
-    pub fn cache_control(&self) -> Option<&Header> {
-        self.get_header(&CACHE_CONTROL)
+    pub fn content_len(&self) -> Option<&HeaderValue> {
+        self.headers.get(&CONTENT_LENGTH)
     }
 
-    pub fn set_cache_control(&mut self, value: &str) {
-        self.headers.entry(CACHE_CONTROL)
-            .and_modify(|hdr| { hdr.value = value.to_owned(); })
-            .or_insert_with(|| Header {
-                name: CACHE_CONTROL,
-                value: value.to_owned(),
-            });
+    pub fn set_content_len(&mut self, value: HeaderValue) {
+        self.set_header(CONTENT_LENGTH, value);
     }
 
     #[must_use]
-    pub fn content_len(&self) -> Option<&Header> {
-        self.get_header(&CONTENT_LENGTH)
+    pub fn content_type(&self) -> Option<&HeaderValue> {
+        self.headers.get(&CONTENT_TYPE)
     }
 
-    pub fn set_content_len(&mut self, len: u64) {
-        self.headers.entry(CONTENT_LENGTH)
-            .and_modify(|hdr| { hdr.value = len.to_string(); })
-            .or_insert_with(|| Header {
-                name: CONTENT_LENGTH,
-                value: len.to_string(),
-            });
-    }
-
-    #[must_use]
-    pub fn content_type(&self) -> Option<&Header> {
-        self.get_header(&CONTENT_TYPE)
-    }
-
-    pub fn set_content_type(&mut self, content_type: &str) {
-        self.headers.entry(CONTENT_TYPE)
-            .and_modify(|hdr| { hdr.value = content_type.to_owned(); })
-            .or_insert_with(|| Header {
-                name: CONTENT_TYPE,
-                value: content_type.to_owned(),
-            });
-    }
-
-    /// Returns a vector of all headers sorted by header name.
-    #[must_use]
-    pub fn all_headers(&self) -> Vec<Header> {
-        let mut headers: Vec<Header> = self.headers.clone().into_values().collect();
-        headers.sort_unstable();
-        headers
+    pub fn set_content_type(&mut self, value: HeaderValue) {
+        self.set_header(CONTENT_TYPE, value);
     }
 
     #[must_use]
     pub fn body(&self) -> &[u8] {
-        &self.body
+        self.body.as_slice()
     }
 
     #[must_use]
     pub fn status_line(&self) -> String {
-        format!("{} {}", self.version(), self.status())
+        format!("{} {}", &self.version, &self.status)
     }
 
     pub fn write_status_line(&self, writer: &mut RemoteClient) -> IoResult<()> {
-        write!(writer, "{} {}\r\n", self.version(), self.status())
+        write!(writer, "{} {}\r\n", &self.version, &self.status)
     }
 
     pub fn write_headers(&self, writer: &mut RemoteClient) -> IoResult<()> {
         if !self.headers.is_empty() {
-            self.all_headers().iter().for_each(|h| {
-                write!(writer, "{h}\r\n").unwrap();
-            });
+            self.headers.iter().for_each(|(name, value)| {
+				write!(writer, "{name}: ").unwrap();
+				writer.write_all(value.as_bytes()).unwrap();
+				writer.write_all(b"\r\n").unwrap();
+			});
         }
 
         // Signal the end of the headers section with an empty line.
@@ -224,18 +201,17 @@ impl Response {
     }
 
     pub fn write_body(&self, writer: &mut RemoteClient) -> IoResult<()> {
-        if !self.body.is_empty() {
-            writer.write_all(&self.body)?;
-        }
-
-        Ok(())
+        if self.body.is_empty() {
+			Ok(())
+		} else {
+			writer.write_all(&self.body)
+		}
     }
 
     pub fn send(&self, writer: &mut RemoteClient) -> IoResult<()> {
         self.write_status_line(writer)?;
         self.write_headers(writer)?;
         self.write_body(writer)?;
-
         writer.flush()?;
         Ok(())
     }

@@ -64,7 +64,7 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
 /// Attempt to use the terminal `date` program, if available, to get the
 /// current date and time.
 #[must_use]
-pub fn try_terminal_date() -> Option<String> {
+pub fn try_date() -> Option<String> {
     if let Ok(date_out) = Command::new("date")
         .arg("--utc")
         .arg("+%a, %d %b %Y %H:%M:%S %Z")

@@ -1,20 +1,15 @@
-use std::{
-    error::Error,
-    fmt::{Display, Formatter, Result as FmtResult},
-    io::Error as IoError,
-    result::Result as StdResult,
-};
-
-pub type NetResult<T> = StdResult<T, NetError>;
+use std::error::Error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 #[derive(Debug)]
 pub enum NetError {
-    EarlyEof,
     NonUtf8Header,
     BadStatusCode,
+    ReadError(IoError),
+    WriteError(IoError),
     IoError(IoError),
     ParseError(&'static str),
-    BadConnection(IoError),
 }
 
 impl Error for NetError {}
@@ -22,18 +17,24 @@ impl Error for NetError {}
 impl Display for NetError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::EarlyEof => f.write_str("received an unexpected EOF on the stream"),
-            Self::NonUtf8Header => f.write_str("header names must only contain UTF-8 bytes"),
+            Self::NonUtf8Header => f.write_str("non-UTF-8 encoded header name"),
             Self::BadStatusCode => f.write_str("invalid status code"),
-            Self::IoError(e) => write!(f, "read error: {e}"),
+            Self::ReadError(e) => write!(f, "read error: {e}"),
+            Self::WriteError(e) => write!(f, "write error: {e}"),
+            Self::IoError(e) => write!(f, "io error: {e}"),
             Self::ParseError(s) => write!(f, "unable to parse: {s}"),
-            Self::BadConnection(e) => write!(f, "connection error: {e}"),
         }
     }
 }
 
 impl From<IoError> for NetError {
     fn from(e: IoError) -> Self {
-        Self::IoError(e)
+		Self::IoError(e)
     }
+}
+
+impl NetError {
+	pub fn from_kind(kind: IoErrorKind) -> Self {
+		Self::IoError(IoError::from(kind))
+	}
 }

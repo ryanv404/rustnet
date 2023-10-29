@@ -1,8 +1,9 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use crate::{Method, Request, Status};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct Route {
     pub method: Method,
     pub uri: String,
@@ -10,17 +11,17 @@ pub struct Route {
 
 impl Route {
     #[must_use]
-    pub fn new(method: Method, uri: &str) -> Self {
-        let uri = uri.to_string();
-        Self { method, uri }
+    pub fn new<S: Into<String>>(method: Method, uri: S) -> Self {
+        Self {
+			method,
+			uri: uri.into()
+		}
     }
 }
 
-type RoutesMap = HashMap<Route, PathBuf>;
-
 #[derive(Clone, Debug, Default)]
 pub struct Router {
-    pub routes: RoutesMap,
+    pub routes: BTreeMap<Route, PathBuf>,
 }
 
 impl Router {
@@ -34,8 +35,7 @@ impl Router {
     }
 
     pub fn mount_with_path<P: Into<PathBuf>>(&mut self, route: Route, path: P) {
-        let path = path.into();
-        self.routes.insert(route, path);
+        self.routes.insert(route, path.into());
     }
 
     #[must_use]
@@ -49,12 +49,12 @@ impl Router {
         self.routes.get(&req.route()).map_or_else(
             || {
                 // No local resource path found for the URI.
-                req.log_connection_status(404);
+                req.log_with_status(404);
                 Resolved::new(Status(404), self.get_error_page())
             },
             // Resolved the route to a local resource path.
             |path| {
-                req.log_connection_status(200);
+                req.log_with_status(200);
                 Resolved::new(Status(200), Some(path.clone()))
             },
         )

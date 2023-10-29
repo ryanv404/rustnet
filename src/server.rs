@@ -1,19 +1,16 @@
-use std::{
-    io::Result as IoResult,
-    net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread::{self, spawn, JoinHandle},
-    time::Duration,
-};
+use std::io::Result as IoResult;
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{self, spawn, JoinHandle};
+use std::time::Duration;
 
 use crate::{
-    Method, NetError, NetResult, RemoteClient, Request, Response, Route, Router, ThreadPool,
-    consts::NUM_WORKERS,
+    Method, NetError, NetResult, RemoteClient, Request, Response, Route,
+	Router, ThreadPool,
 };
+use crate::consts::NUM_WORKERS;
 
 /// Configures the socket address and the router for a `Server`.
 #[allow(clippy::module_name_repetitions)]
@@ -177,7 +174,7 @@ impl Server {
                         });
                     }
                     Err(e) => {
-                        let _ = NetError::BadConnection(e);
+                        let _ = NetError::from_kind(e.kind());
                     }
                 }
             }
@@ -228,6 +225,7 @@ impl Server {
     pub fn shutdown(&self) {
         self.log_server_shutdown();
 
+		// Stops the listener thread's loop.
         self.close_trigger.store(false, Ordering::Relaxed);
 
         // Connect to and unblock the listener thread.
