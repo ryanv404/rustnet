@@ -1,6 +1,0 @@
-Cache-Control: no-cache
-Content-Length: 592
-Content-Type: text/html; charset=UTF-8
-Cache-Control: no-cache
-Content-Length: 592
-Content-Type: text/html; charset=UTF-8
