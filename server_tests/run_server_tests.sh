@@ -2,7 +2,7 @@
 
 trap "clean_up" INT TERM ERR
 
-SERVER_ADDR="localhost:7878"
+# SERVER_ADDR="localhost:7878"
 
 CRATE_DIR="/data/data/com.termux/files/home/projects/rustnet"
 SERVER_BIN="${CRATE_DIR}/target/debug/examples/server"
