@@ -1,5 +1,4 @@
 
-# Global variables
 $crateDir = ($PSScriptRoot | Get-Item).Parent
 $serverFile = Join-Path -Path $crateDir -ChildPath `
 	'target\debug\examples\server.exe'
@@ -27,9 +26,6 @@ function Initialize-MyServer {
 }
 
 function Start-MyServer {
-	[CmdletBinding(SupportsShouldProcess)]
-	param()
-
     if (Test-Path -Path $testOutputFile -PathType Leaf) {
         Remove-Item -Path $testOutputFile | Out-Null
 	}
@@ -37,7 +33,7 @@ function Start-MyServer {
     New-Item -ItemType File -Path $testOutputFile *> $null
 
     if (Test-Path -Path $serverFile -PathType Leaf) {
-		# It's fasting to launch the binary directly.
+		# It's faster to launch the binary directly.
 		$serverJob = Start-Job -ScriptBlock {
 			$serverFile = $serverFile
 			Invoke-Expression $serverFile *> $null
@@ -71,7 +67,6 @@ function Save-MyResult {
 }
 
 function Remove-MyTestDebris {
-	[CmdletBinding(SupportsShouldProcess)]
 	param(
 		[Parameter(Mandatory = $true)]
 		[System.Int32]$serverId
