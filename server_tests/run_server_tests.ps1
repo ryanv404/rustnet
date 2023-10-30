@@ -1,4 +1,3 @@
-
 $crateDir = ($PSScriptRoot | Get-Item).Parent
 $serverFile = Join-Path -Path $crateDir -ChildPath `
 	'target\debug\examples\server.exe'
