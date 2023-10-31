@@ -1,10 +1,18 @@
 [package]
 name = "rustnet"
-description = "placeholder"
+authors = ["ryanv404"]
+description = "An http networking library and server."
+
 version = "0.1.0"
 edition = "2021"
-readme = "placeholder"
-license = "placeholder"
-repository = "placeholder"
-keywords = ["http"]
-categories = ["placeholder"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/ryanv404/rustnet.git"
+keywords = ["http, server, networking"]
+categories = ["network-programming"]
+
+autobins = false
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"

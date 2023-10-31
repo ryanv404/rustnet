@@ -6,8 +6,8 @@ trap "clean_up" INT TERM ERR
 
 CRATE_DIR="/data/data/com.termux/files/home/projects/rustnet"
 SERVER_BIN="${CRATE_DIR}/target/debug/examples/server"
-TEST_OUTPUT_FILE="${CRATE_DIR}/server_tests/test_output.txt"
-EXPECTED_OUTPUT_FILE="${CRATE_DIR}/server_tests/expected_output.txt"
+TEST_OUTPUT_FILE="${CRATE_DIR}/scripts/test_output.txt"
+EXPECTED_OUTPUT_FILE="${CRATE_DIR}/scripts/expected_output.txt"
 
 SERVER_PID=""
 
@@ -27,7 +27,7 @@ run_all_tests() {
 build_test_server() {
     echo "Building the test server."
 
-    cargo build --example server &> /dev/null
+    cargo build --binary server &> /dev/null
 
     if [[ "$?" -ne 0 ]]; then
         echo "Unable to build the test server."
@@ -51,12 +51,10 @@ launch_test_server() {
 
     touch "$TEST_OUTPUT_FILE"
 
-    if [[ -x "$SERVER_BIN" ]]; then
-        "$SERVER_BIN" &> /dev/null &
-    else
-        cargo run --example server &> /dev/null &
-        sleep 3
-    fi
+	cargo run --binary server &> /dev/null &
+
+	# Give server time to go live.
+	sleep 3
 
     SERVER_PID="$!"
 

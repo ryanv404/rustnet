@@ -3,11 +3,11 @@ use std::str::{self, FromStr};
 
 use crate::{NetError, NetResult, trim_whitespace_bytes};
 
-/// Header field name.
+/// Header name.
 /// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct HeaderName {
-    /// Abstraction over standard and non-standard field names.
+    /// Abstraction over standard and non-standard names.
     pub inner: HdrRepr,
 }
 
@@ -52,15 +52,50 @@ impl HeaderName {
         Self { inner }
     }
 
-    /// Returns the header field name as a byte slice.
+    /// Returns the header name as a byte slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
 		self.inner.as_bytes()
 	}
 
-	/// Returns the header field name as a string slice.
+    /// Returns the header name as a title case string.
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub fn to_titlecase(&self) -> String {
+		if self.inner.is_empty() {
+			return String::new();
+		}
+		
+		let bytes = self.inner.as_bytes();
+		let mut title = String::with_capacity(bytes.len());
+		
+		let parts = bytes.split(|&b| b == b'-');
+
+		for (i, part)in parts.enumerate() {
+			// Ensure each part has at least one element.
+			if part.is_empty() {
+				continue;
+			}
+
+			// Prepend every part but the first with a hyphen.
+			if i > 0 {
+				title.push('-');
+			}
+
+			// Make the first letter of each part uppercase.
+			title.push(part[0].to_ascii_uppercase() as char);
+
+			if part.len() > 1 {
+				// Leave the rest of the slice as is.
+				title.push_str(str::from_utf8(&part[1..]).unwrap());
+			}
+		}
+	
+		title
+	}
+
+	/// Returns the header name as a string slice.
+    #[must_use]
+    pub fn as_str(&mut self) -> &str {
 		// The header name should contain valid UTF-8 bytes only.
         if let Ok(s) = str::from_utf8(self.as_bytes()) {
 			s
@@ -72,32 +107,16 @@ impl HeaderName {
 
 impl Display for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.as_str())
+		write!(f, "{}", &self.to_titlecase())
     }
 }
 
-/// Header field name representation.
+/// Header name representation.
 /// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HdrRepr {
     Std(StdHeader),
     Custom(Vec<u8>),
-}
-
-impl Display for HdrRepr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(
-            f, "{}",
-            match self {
-                Self::Std(std) => std.as_str(),
-                Self::Custom(cust) => {
-                    let cust_str = str::from_utf8(cust.as_slice());
-                    // HdrRepr's should only contain valid UTF-8.
-                    cust_str.unwrap()
-                },
-            }
-        )
-    }
 }
 
 impl TryFrom<&[u8]> for HdrRepr {
@@ -117,19 +136,29 @@ impl TryFrom<&[u8]> for HdrRepr {
 }
 
 impl HdrRepr {
-    /// Returns a byte slice representing the header field name.
+    /// Returns a byte slice representing the header name.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Std(std) => std.as_bytes(),
-            Self::Custom(ref hdr) => hdr.as_slice(),
+            Self::Custom(ref hdr_vec) => hdr_vec.as_slice(),
+        }
+    }
+
+    /// Returns whether the byte representation of the header name has a
+	/// length of zero.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Std(std) => std.as_bytes().is_empty(),
+            Self::Custom(ref hdr_vec) => hdr_vec.is_empty(),
         }
     }
 }
 
 macro_rules! impl_header_names {
     ($( $bytes:literal => $constant:ident, $variant:ident; )+) => {
-        // Standard header field names.
+        // Standard header names.
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
         pub enum StdHeader {
             $( $variant, )+
@@ -139,7 +168,7 @@ macro_rules! impl_header_names {
             use super::{HdrRepr, HeaderName, StdHeader};
 
             $( 
-                // Constants representing all of the standard header field names.
+                // Constants representing all of the standard header names.
                 pub const $constant: HeaderName = HeaderName {
                     inner: HdrRepr::Std(StdHeader::$variant)
                 };

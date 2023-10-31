@@ -7,14 +7,14 @@ fn main() -> io::Result<()> {
     let mut s = Server::http("127.0.0.1:7878");
 
     // Set up endpoints.
-    s.get("/", "examples/static/index.html");
-    s.get("/about", "examples/static/about.html");
+    s.get("/", "static/index.html");
+    s.get("/about", "static/about.html");
 
     // Set the location of the favicon.
-    s.set_favicon("examples/static/favicon.ico");
+    s.set_favicon("static/favicon.ico");
 
     // Set the default 404 Not Found page for all other endpoints.
-    s.set_error_page("examples/static/error.html");
+    s.set_error_page("static/error.html");
 
     // Start the server.
     let server = s.start()?;
