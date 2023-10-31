@@ -1,68 +1,74 @@
+# Initialize global variables
 $crateDir = ($PSScriptRoot | Get-Item).Parent
-$serverFile = Join-Path -Path $crateDir -ChildPath `
-	'target\debug\examples\server.exe'
-$testOutputFile = Join-Path -Path $crateDir -ChildPath `
-	'server_tests\test_output.txt'
-$expectedOutputFile = Join-Path -Path $crateDir -ChildPath `
-	'server_tests\expected_output.txt'
+$testsDir = Join-Path -Path $crateDir -ChildPath 'server_tests'
+$outputFile = Join-Path -Path $testsDir -ChildPath 'test_output.txt'
+$expectedFile = Join-Path -Path $testsDir -ChildPath 'expected_output.txt'
 
 function Initialize-MyServer {
-	if (Test-Path -Path $serverFile -PathType Leaf) {
-		Write-Output "Removing prior build artifacts."
+	$red = @{ ForegroundColor = 'Red'; }
 
-		$cleanJob = Start-Job -ScriptBlock { cargo clean *> $null }
+	cargo clean *> $null
 
-		Wait-Job -Job $cleanJob | Out-Null
-		Remove-Job -Job $cleanJob -Force | Out-Null
+	if ($LASTEXITCODE -ne 0) {
+		Write-Host @red "Unable to remove the prior build artifacts. Continuing."
 	}
 
-	$buildJob = Start-Job -ScriptBlock {
-		cargo build --example server *> $null
-	}
+	Write-Host "Building..."
 
-	Wait-Job -Job $buildJob | Out-Null
-	Remove-Job -Job $buildJob -Force | Out-Null
+	cargo build --example server *> $null
+
+	if ($LASTEXITCODE -ne 0) {
+		Write-Host @red "Unable to build the server. Exiting."
+		exit
+	}
 }
 
 function Start-MyServer {
-    if (Test-Path -Path $testOutputFile -PathType Leaf) {
-        Remove-Item -Path $testOutputFile | Out-Null
+    if (Test-Path -Path $outputFile) {
+        Remove-Item -Path $outputFile | Out-Null
 	}
 
-    New-Item -ItemType File -Path $testOutputFile *> $null
+    New-Item -ItemType File -Path $outputFile | Out-Null
 
-    if (Test-Path -Path $serverFile -PathType Leaf) {
-		# It's faster to launch the binary directly.
-		$serverJob = Start-Job -ScriptBlock {
-			$serverFile = $serverFile
-			Invoke-Expression $serverFile *> $null
-		}
+	$serverJob = Start-Job -ScriptBlock {
+		cargo run --example server *> $null
+	}
 
-		$serverId = $serverJob.Id
-
-		if (($null -eq $serverId) -or ($serverId -eq 0)) {
-			Write-Error `
-				"Unable to start the test server. Exiting now."
-			Remove-MyTestDebris $null
-		} else {
-			$serverId
-		}
-	} else {
-		Write-Error "Could not locate the server executable file. Exiting."
+	$serverId = $serverJob.Id
+	
+	if (($null -eq $serverId) -or ($serverId -eq 0)) {
+		$red = @{ ForegroundColor = 'Red'; }
+		Write-Host @red "Unable to start a job for the server. Exiting."
 		Remove-MyTestDebris $null
+	}
+	else {
+		return $serverId
 	}
 }
 
-function Save-MyResult {
-    param(
-		[Parameter(Mandatory = $true)]
-		[System.String]$name,
+function Initialize-MyConnection {
+	Start-Sleep -Seconds 2
 
-		[Parameter(Mandatory = $true)]
-		[System.String]$result
-	)
+	$initConnectParams = @{
+		Uri = "http://127.0.0.1:7878/"
+		Method = 'Get'
+		SkipHttpErrorCheck = $true
+		ErrorAction = 'Ignore'
+	}
+	
+	$stillConnecting = $true
 
-	$result | Out-File -FilePath $testOutputFile -Append
+	while ($stillConnecting) {
+		Write-Host "Waiting for server..."
+
+		$res = $null
+		$res = (Invoke-WebRequest @initConnectParams).StatusCode
+
+		if ($res -eq 200) {
+			Write-Host "Server is live!`n"
+			$stillConnecting = $false
+		}
+	}
 }
 
 function Remove-MyTestDebris {
@@ -71,59 +77,64 @@ function Remove-MyTestDebris {
 		[System.Int32]$serverId
 	)
 
-	if (($null -ne $serverId) -and ($serverId -ne 0)) {
-		# Avoid raising an exception if job does not exist by filtering.
-		$jobExists = $(
-			Get-Job | Where-Object { $_.Id -eq $serverId } | Out-String
-		)
-
-		$jobExists = [System.Boolean]$jobExists.Length
+	if ($null -ne $serverId) {
+		$serverJob = (Get-Job | Where-Object { $_.Id -eq $serverId })
+		$jobExists = [System.Boolean]$serverJob.Count
 
 		if ($jobExists) {
             Remove-Job -Id $serverId -Force
 		}
 
-		Write-Output "The test server with Job ID $serverId has been closed."
-	}
+		cargo clean *> $null
 
-	Write-Output "Finishing clean up and then exiting."
-
-	if (Test-Path -Path $serverFile -PathType Leaf) {
-		$cleanJob = Start-Job -ScriptBlock { cargo clean *> $null }
-
-		Wait-Job -Job $cleanJob | Out-Null
-		Remove-Job -Job $cleanJob -Force
+		if ($LASTEXITCODE -ne 0) {
+			$red = @{ ForegroundColor = 'Red'; }
+			Write-Host @red "Unable to remove artifacts from this test."
+		}
 	}
 
 	exit
 }
 
 function Get-MyFinalResult {
-	if (!(Test-Path -Path $testOutputFile -PathType Leaf) -or `
-		!(Test-Path -Path $expectedOutputFile -PathType Leaf))
-	{
-		Write-Error "Cannot locate one or both test output files. Exiting."
+	$red = @{ ForegroundColor = 'Red'; }
+	$green = @{ ForegroundColor = 'Green'; }
+	$yellow = @{ ForegroundColor = 'Yellow'; }
+	$cyan = @{ ForegroundColor = 'Cyan'; }
+
+	if (!(Test-Path -Path $outputFile)) {
+		Write-Host @red "Cannot locate the test output file. Exiting."
+		return
+	}
+	
+	if (!(Test-Path -Path $expectedFile)) {
+		Write-Host @red "Cannot locate the expected output file. Exiting."
 		return
 	}
 
-	$test = Get-Content -Path $testOutputFile
-	$expect = Get-Content -Path $expectedOutputFile
+	$test = Get-Content -Path $outputFile -Raw -Encoding utf8
+	$test = $test.Trim()
+	
+	if ([System.String]::IsNullOrEmpty($test)) {
+		Write-Host @red "Test output file is empty. Exiting"
+		return
+	}
 
-	if (($test.Length -eq 0) -or ($expect.Length -eq 0)) {
-		Write-Error "✗ THERE WERE TEST FAILURES :-("
-		Write-Error "One or both test output files were empty."
+	$expected = Get-Content -Path $expectedFile -Raw -Encoding utf8
+	$expected = $expected.Trim()
+
+	if ([System.String]::IsNullOrEmpty($expected)) {
+		Write-Host @red "Expected output file is empty. Exiting"
+		return
+	}
+
+	if ($test -ceq $expected) {
+		Write-Host @green "✔ ALL TESTS PASSED! \o/"
 	}
 	else {
-		# This cmdlet will only output differences.
-		$result = Compare-Object -ReferenceObject $test -DifferenceObject $expect
-
-		# If there are zero differences, then the test output was as expected.
-		if ($result.Count -eq 0) {
-			Write-Host -ForegroundColor Green "`n✔ ALL TESTS PASSED! \o/`n"
-		}
-		else {
-			Write-Host -ForegroundColor Red "`n✗ THERE WERE TEST FAILURES :-(`n"
-		}
+		Write-Host @red "✗ THERE WERE TEST FAILURES :-("
+		Write-Host @yellow "`n[EXPECTED OUTPUT]:`n$expected"
+		Write-Host @cyan "`n[TEST OUTPUT]:`n$test"
 	}
 }
 
@@ -140,24 +151,28 @@ function Test-OneRoute {
 
 	)
 
-	$addr = 'http://127.0.0.1:7878'
-	$uri = "$addr$uri"
-	$res = (Invoke-WebRequest -Method 'Get' -Uri $uri -SkipHttpErrorCheck).RawContent
+	$target = "http://127.0.0.1:7878${uri}"
+
+	$connectParams = @{
+		Uri = $target
+		Method = 'Get'
+		SkipHttpErrorCheck = $true
+	}
+	
+	$res = (Invoke-WebRequest @connectParams).RawContent
 
 	if ([System.String]::IsNullOrEmpty($res)) {
-		Write-Error "✗ THERE WERE TEST FAILURES :-("
-		Write-Error "No response received for test: $name"
-
+		$red = @{ ForegroundColor = 'Red'; }
+		Write-Host @red "✗ THERE WERE TEST FAILURES :-("
+		Write-Host @red "No response received for test: $name"
 		Remove-MyTestDebris $serverId
 	}
 	else {
-		$result = $res -split '\r?\n' |
+		$res -split '\r?\n' |
 			Select-Object -First 4 |
-			ForEach-Object { "${_}`n" } |
-			Out-String -NoNewline
-		$result = $result.Trim()
-
-		Save-MyResult $name $result
+			ForEach-Object { "$($_.Trim())" } |
+			Join-String -Separator "`r`n" |
+			Out-File -FilePath $outputFile -Encoding utf8 -Append
 	}
 }
 
@@ -165,17 +180,15 @@ function Test-MyServer {
 	Set-Location -Path $crateDir
 
 	Initialize-MyServer
-
-	Write-Output "Launching the test server."
 	$serverId = Start-MyServer
-
-	Write-Output "The test server is running with Job ID ${serverId}."
+	Initialize-MyConnection
 
 	if ($serverId -ne 0) {
-		Test-OneRoute -Name "Get index page test" -Uri "/" -ServerId $serverId
-		Test-OneRoute -Name "Get about page test" -Uri "/about" -ServerId $serverId
-		Test-OneRoute -Name "Get non-existent page test" -Uri "/foo" -ServerId $serverId
-		Test-OneRoute -Name "Get favicon icon test" -Uri "/favicon.ico" -ServerId $serverId
+		$srvId = @{ ServerId = $serverId }
+		Test-OneRoute -Name "Get index page test" -Uri "/" @srvId
+		Test-OneRoute -Name "Get about page test" -Uri "/about" @srvId
+		Test-OneRoute -Name "Get non-existent page test" -Uri "/foo" @srvId
+		Test-OneRoute -Name "Get favicon icon test" -Uri "/favicon.ico" @srvId
 
 		Get-MyFinalResult
 		Remove-MyTestDebris $serverId
