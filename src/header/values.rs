@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct HeaderValue(Vec<u8>);
+pub struct HeaderValue(pub Vec<u8>);
 
 impl Display for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -18,11 +18,16 @@ impl From<&str> for HeaderValue {
 
 impl From<&[u8]> for HeaderValue {
     fn from(bytes: &[u8]) -> Self {
-        Self(Vec::from(bytes))
+        Self(bytes.to_vec())
     }
 }
 
 impl HeaderValue {
+    #[must_use]
+    pub fn new(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0

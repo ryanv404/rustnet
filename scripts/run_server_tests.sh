@@ -2,118 +2,163 @@
 
 trap "clean_up" INT TERM ERR
 
-# SERVER_ADDR="localhost:7878"
-
-CRATE_DIR="/data/data/com.termux/files/home/projects/rustnet"
-SERVER_BIN="${CRATE_DIR}/target/debug/examples/server"
-TEST_OUTPUT_FILE="${CRATE_DIR}/scripts/test_output.txt"
-EXPECTED_OUTPUT_FILE="${CRATE_DIR}/scripts/expected_output.txt"
-
+# Global variables.
+NUM_TESTS=0
+NUM_PASSED=0
 SERVER_PID=""
+CRATE_DIR="$(pwd)"
+SERVER_ADDR="127.0.0.1:7878"
+
+# Terminal colors.
+RED=$'\e[31m'
+GRN=$'\e[32m'
+YLW=$'\e[33m'
+BLU=$'\e[34m'
+PURP=$'\e[35m'
+CYAN=$'\e[36m'
+CLR=$'\e[0m'
 
 run_all_tests() {
-    launch_test_server
+    build_server
+    launch_server
+    confirm_server_is_live
 
-    run_test "Get index page test" "/"
-    run_test "Get about page test" "/about"
-    run_test "Get non-existent page test" "/foo"
-    run_test "Get favicon icon test" "/favicon.ico"
+    run_test "get_index_linux" "/"
+    run_test "get_about_linux" "/about"
+    run_test "get_foo_linux" "/foo"
+    run_test "get_favicon_headers" "/favicon.ico"
 
-    analyze_test_results
+    if (( ($NUM_TESTS == $NUM_PASSED) && ($NUM_TESTS > 0) )); then
+        echo -e "\n${GRN}${NUM_PASSED} / ${NUM_TESTS} tests passed.${CLR}"
+    else
+        echo -e "\n${RED}${NUM_PASSED} / ${NUM_TESTS} tests passed.${CLR}"
+    fi
 
     clean_up
 }
 
-build_test_server() {
-    echo "Building the test server."
+build_server() {
+    cargo clean &> /dev/null
 
-    cargo build --binary server &> /dev/null
+    if (( $? != 0 )); then
+        echo -e "${YLW}Unable to remove prior build artifacts.${CLR}"
+    fi
 
-    if [[ "$?" -ne 0 ]]; then
-        echo "Unable to build the test server."
+    echo "Building..."
+    cargo build --bin server &> /dev/null
+
+    if (( $? != 0 )); then
+        echo -e "\n${RED}Unable to build the server.${CLR}"
         clean_up
     fi
 }
 
-launch_test_server() {
-    if [[ -x "$SERVER_BIN" ]]; then
-        echo "Cleaning prior build artifacts."
-        cargo clean &> /dev/null
-    fi
+launch_server() {
+    echo "Starting..."
 
-    build_test_server
-
-    echo "Launching the test server."
-
-    if [[ -f "$TEST_OUTPUT_FILE" ]]; then
-        rm "$TEST_OUTPUT_FILE"
-    fi
-
-    touch "$TEST_OUTPUT_FILE"
-
-	cargo run --binary server &> /dev/null &
-
-	# Give server time to go live.
-	sleep 3
-
+	cargo run --bin server &> /dev/null &
     SERVER_PID="$!"
 
-    echo "The test server is running with PID ${SERVER_PID}."
+	# Give server time to go live.
+	sleep 2
 }
 
-parse_and_print_result() {
+confirm_server_is_live() {
+    local ATTEMPT_NUM=0
+    local MAX_ATTEMPTS=5
+    local STILL_CONNECTING=0
+
+    while (( ($ATTEMPT_NUM < $MAX_ATTEMPTS) && ($STILL_CONNECTING == 0) )); do
+        echo -n "Connecting..."
+
+        xh "$SERVER_ADDR" &> /dev/null
+
+        if (( $? == 0 )); then
+            echo -e "${GRN}Server is live!${CLR}\n"
+            STILL_CONNECTING=1
+            break
+        else
+            echo -e "${YLW}Not live yet.${CLR}"
+            (( ATTEMPT_NUM++ ))
+            sleep 1
+        fi
+    done
+
+    if (( $STILL_CONNECTING == 0 )); then
+        echo -e "\n${RED}The server is unreachable.${CLR}"
+    fi
+}
+
+print_result() {
     local TEST_NAME="$1"
     local TEST_RESULT="$2"
+    local EXPECTED_FILE="${CRATE_DIR}/scripts/tests/${TEST_NAME}.txt"
 
-    if [[ ! -z "$TEST_RESULT" ]]; then
-        echo -e "\n[${TEST_NAME}]:"
-        echo "$TEST_RESULT"
-        echo "$TEST_RESULT" >> "$TEST_OUTPUT_FILE"
+    echo -e -n "[${BLU}${TEST_NAME}${CLR}]: "
+
+    TRIM_RESULT=$( echo -n "$TEST_RESULT" | sed 's/^ *//g' | sed 's/ *$//g' )
+
+    if [[ -z "$TRIM_RESULT" ]]; then
+        echo -e "${RED}✗ (No response received for this test).${CLR}"
+        return
+    fi
+
+    if [[ ! -f "$EXPECTED_FILE" ]]; then
+        echo -e "${RED}✗ (No expected output file found for this test).${CLR}"
+        return
+    fi
+
+    local EXPECTED=$( cat "$EXPECTED_FILE" | sed 's/^ *//g' | sed 's/ *$//g' )
+
+    if [[ -z "$EXPECTED" ]]; then
+        echo -e "${RED}✗ (The expected output file is empty for this test).${CLR}"
+        return
+    fi
+
+    if [[ "$TRIM_RESULT" == "$EXPECTED" ]]; then
+        echo -e "${GRN}✔${CLR}"
+        (( NUM_PASSED++ ))
     else
-        echo "No output received for this test."
+        echo -e "${RED}✗ (The test output did not match the expected output).${CLR}"
+        echo -e "${YLW}---[EXPECTED]---\n${EXPECTED}${CLR}\n"
+        echo -e "${PURP}===[TEST OUTPUT]===\n${TRIM_RESULT}${CLR}"
     fi
 }
 
 clean_up() {
     if [[ ! -z "$SERVER_PID" ]]; then
-        ps aux | rg --quiet "$SERVER_PID"
+        ps -p "$SERVER_PID" &> /dev/null
 
-        if [[ "$?" -eq 0 ]]; then 
-            kill -SIGTERM "$SERVER_PID"
-            wait -f "$SERVER_PID"
+        if (( $? == 0 )); then 
+            kill -SIGTERM "$SERVER_PID" &> /dev/null
+            wait -f "$SERVER_PID" &> /dev/null
         fi
-
-        echo -e "\nThe test server with PID $SERVER_PID has been closed."
     fi
 
-    if [[ -x "$SERVER_BIN" ]]; then
-        echo "Finishing clean up and then exiting."
-        cargo clean &> /dev/null
+    cargo clean &> /dev/null
+
+    if (( $? != 0 )); then
+         echo -e "${YLW}Unable to remove artifacts from this test run.${CLR}"
     fi
 
     exit
 }
 
-analyze_test_results() {
-    local GREEN=$'\e[32m'
-    local RED=$'\e[31m'
-    local RESET=$'\e[0m'
-
-    diff --report-identical-files --text "$TEST_OUTPUT_FILE" "$EXPECTED_OUTPUT_FILE" > /dev/null
-
-    if [[ "$?" -eq 0 ]]; then
-        echo -e "\n${GREEN}✔ ALL TESTS PASSED!${RESET}"
-    else
-        echo -e "\n${RED}✗ THERE WERE TEST FAILURES :-(${RESET}"
-    fi
-}
-
 run_test() {
+    local TEST_RESULT=""
     local TEST_NAME="$1"
     local TEST_TARGET="$2"
-    local TEST_RESULT=$( xh --print=h --no-check-status "${SERVER_ADDR}${TEST_TARGET}" )
 
-    parse_and_print_result "$TEST_NAME" "$TEST_RESULT"
+    (( NUM_TESTS++ ))
+
+    if [[ "$TEST_TARGET" == "/favicon.ico" ]]; then
+        TEST_RESULT=$( xh --print=h --no-check-status "${SERVER_ADDR}${TEST_TARGET}" )
+    else
+        TEST_RESULT=$( xh --print=hb --no-check-status "${SERVER_ADDR}${TEST_TARGET}" )
+    fi
+
+    print_result "$TEST_NAME" "$TEST_RESULT"
 }
 
+# Run all server tests.
 run_all_tests

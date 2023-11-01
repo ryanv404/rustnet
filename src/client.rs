@@ -40,7 +40,8 @@ impl<A: ToSocketAddrs> Default for ClientBuilder<A> {
 }
 
 impl<A: ToSocketAddrs> ClientBuilder<A> {
-        pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -74,6 +75,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
+    #[must_use]
     pub fn default_headers(addr: &str) -> HeadersMap {
         Client::default_headers(addr)
     }
@@ -100,7 +102,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         let stream = {
             if let (Some(ip), Some(port)) = (self.ip.as_ref(), self.port) {
                 let remote = format!("{ip}:{port}");
-                TcpStream::connect(&remote)?
+                TcpStream::connect(remote)?
             } else if let Some(addr) = self.addr.as_ref() {
                 TcpStream::connect(addr)?
             } else {
@@ -120,14 +122,14 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         };
 
         let method = self.method.take().unwrap_or_default();
-        let uri = self.uri.take().unwrap_or(String::from("/"));
+        let uri = self.uri.take().unwrap_or_else(|| String::from("/"));
         let version = self.version.take().unwrap_or_default();
 
-        let headers = self.headers.take().unwrap_or(
-            Self::default_headers(&remote_addr.to_string())
+        let headers = self.headers.take().unwrap_or_else(
+            || Self::default_headers(&remote_addr.to_string())
         );
 
-        let body = self.body.take().unwrap_or(Vec::new());
+        let body = self.body.take().unwrap_or_default();
 
         Ok(Client {
             method,
@@ -202,11 +204,12 @@ impl BufRead for Client {
 }
 
 impl Client {
+    #[must_use]
     pub fn http<A: ToSocketAddrs>() -> ClientBuilder<A> {
         ClientBuilder::new()
     }
 
-    pub fn method(&self) -> Method {
+    pub const fn method(&self) -> Method {
         self.method
     }
 
@@ -214,7 +217,7 @@ impl Client {
         &self.uri
     }
 
-    pub fn version(&self) -> Version {
+    pub const fn version(&self) -> Version {
         self.version
     }
 
@@ -229,7 +232,7 @@ impl Client {
         ])
     }
 
-    pub fn headers(&self) -> &HeadersMap {
+    pub const fn headers(&self) -> &HeadersMap {
         &self.headers
     }
 
@@ -251,11 +254,11 @@ impl Client {
         &self.body
     }
 
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
-    pub fn remote_addr(&self) -> SocketAddr {
+    pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
@@ -285,10 +288,8 @@ impl Client {
                 // Ensure the default headers are included.
                 let default_headers = Self::default_headers(&remote_addr);
 
-                for (name, value) in default_headers.into_iter() {
-                    if !self.headers.contains_key(&name) {
-                        self.headers.insert(name, value);
-                    }
+                for (name, value) in default_headers {
+                    self.headers.entry(name).or_insert(value);
                 }
 
                 self.headers_to_string()

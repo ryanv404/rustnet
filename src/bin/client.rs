@@ -25,8 +25,8 @@ fn main() -> io::Result<()> {
         }
 
         let addr = format!("{addr}:80");
-        let uri = args.next().unwrap_or(String::from("/"));
-        let _data = args.next().unwrap_or(String::new());
+        let uri = args.next().unwrap_or_else(|| String::from("/"));
+        let _data = args.next().unwrap_or_default();
 
         // Create an HTTP client and send a request.
         let mut client = Client::http()

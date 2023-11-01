@@ -183,7 +183,8 @@ impl Request {
         &self.version
     }
 
-    pub fn headers(&self) -> &HeadersMap {
+    #[must_use]
+    pub const fn headers(&self) -> &HeadersMap {
         &self.headers
     }
 

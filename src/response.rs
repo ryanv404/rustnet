@@ -53,7 +53,7 @@ impl Display for Response {
         write!(f, "{}", self.status_line())?;
 
         if !self.headers.is_empty() {
-            for (name, value) in self.headers.iter() {
+            for (name, value) in &self.headers {
                 write!(f, "\n{name}: {value}")?;
             }
         }
@@ -62,7 +62,7 @@ impl Display for Response {
             let body = String::from_utf8_lossy(&self.body);
             let body = body.trim();
 
-            if body.len() > 0 {
+            if !body.is_empty() {
                 write!(f, "\n\n{body}")?;
             }
         }
@@ -137,7 +137,8 @@ impl Response {
         self.status.msg()
     }
 
-    pub fn headers(&self) -> &HeadersMap {
+    #[must_use]
+    pub const fn headers(&self) -> &HeadersMap {
         &self.headers
     }
 

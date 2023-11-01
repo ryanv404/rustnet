@@ -39,7 +39,7 @@ impl From<NetError> for IoError {
             NetError::NonUtf8Header |
                 NetError::BadStatusCode |
                 NetError::ParseError(_) => {
-                IoError::new(IoErrorKind::Other, err.to_string())
+                Self::new(IoErrorKind::Other, err.to_string())
             },
             NetError::IoError(io_error) |
                 NetError::ReadError(io_error) |

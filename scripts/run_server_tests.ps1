@@ -223,9 +223,9 @@ function Test-MyServer {
 	Start-MyServer
 	Initialize-MyConnection
 
-	Test-OneRoute -TestName "get_index" -Uri "/"
-	Test-OneRoute -TestName "get_about" -Uri "/about"
-	Test-OneRoute -TestName "get_foo" -Uri "/foo"
+	Test-OneRoute -TestName "get_index_win" -Uri "/"
+	Test-OneRoute -TestName "get_about_win" -Uri "/about"
+	Test-OneRoute -TestName "get_foo_win" -Uri "/foo"
 	Test-OneRoute -TestName "get_favicon_headers" -Uri "/favicon.ico"
 
 	Get-MyFinalResult

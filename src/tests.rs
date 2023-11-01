@@ -83,3 +83,72 @@ fn test_trim_whitespace_bytes() {
     assert_eq!(trim_whitespace_bytes(b"x"), b"x");
     assert_eq!(trim_whitespace_bytes(b""), b"");
 }
+
+#[test]
+fn test_client_response_parsing() {
+    use crate::{Client, HeaderValue as HdrVal, Status, Version};
+    use crate::consts::{
+        ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION,
+        CONTENT_LENGTH, CONTENT_TYPE, DATE, LOCATION, SERVER
+    };
+
+    let addr = "httpbin.org:80";
+    let test_codes: [u16; 5] = [101, 202, 303, 404, 505];
+
+    for code in test_codes.into_iter() {
+        // Responds with the status code corresponding to `code`.
+        let uri = format!("/status/{code}");
+        let mut client = Client::http().addr(&addr).uri(&uri).build().unwrap();
+
+        println!("{}", &client);
+        client.send().unwrap();
+        let res = client.recv().unwrap();
+        println!("{}", &res);
+
+        assert_eq!(res.version, Version::OneDotOne);
+        assert_eq!(res.status, Status(code));
+        assert_eq!(
+            res.headers.get(&ACCESS_CONTROL_ALLOW_CREDENTIALS),
+            Some(&HdrVal::new(b"true"))
+        );
+        assert_eq!(
+            res.headers.get(&ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&HdrVal::new(b"*"))
+        );
+
+        if code == 101 {
+            assert_eq!(
+                res.headers.get(&CONNECTION),
+                Some(&HdrVal::new(b"upgrade"))
+            );
+        } else  {
+            assert_eq!(
+                res.headers.get(&CONNECTION),
+                Some(&HdrVal::new(b"keep-alive"))
+            );
+            assert_eq!(
+                res.headers.get(&CONTENT_LENGTH),
+                Some(&HdrVal::new(b"0"))
+            );
+        }
+
+        if code == 303 {
+            assert_eq!(
+                res.headers.get(&LOCATION),
+                Some(&HdrVal::new(b"/redirect/1"))
+            );
+        } else {
+            assert_eq!(
+                res.headers.get(&CONTENT_TYPE),
+                Some(&HdrVal::new(b"text/html; charset=utf-8"))
+            );
+        }
+
+        assert_eq!(
+            res.headers.get(&SERVER),
+            Some(&HdrVal::new(b"gunicorn/19.9.0"))
+        );
+        assert!(res.headers.contains_key(&DATE));
+        //assert_eq!(res.body, Vec::new());
+    }
+}
