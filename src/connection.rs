@@ -4,7 +4,10 @@ use std::{
     sync::Mutex,
 };
 
-use crate::{Request, consts::{READER_BUFSIZE, WRITER_BUFSIZE}};
+use crate::{
+    consts::{READER_BUFSIZE, WRITER_BUFSIZE},
+    Request,
+};
 
 pub enum Message {
     NewRequest(Request),

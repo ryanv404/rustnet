@@ -3,11 +3,11 @@ use std::fs;
 use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
 
-use crate::{
-    HeaderName, HeaderValue, Method, NetResult, RemoteClient, Request,
-    Router, Status, Version, default_headers,
-};
 use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
+use crate::{
+    default_headers, HeaderName, HeaderValue, Method, NetResult, RemoteClient, Request, Router,
+    Status, Version,
+};
 
 //HTTP/1.1 200 OK
 //Accept-Ranges: bytes
@@ -50,8 +50,8 @@ impl Default for Response {
 impl Response {
     pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
         let method = req.method;
-		let uri = req.uri.clone();
-		let version = req.version;
+        let uri = req.uri.clone();
+        let version = req.version;
 
         let resolved = router.resolve(req);
 
@@ -59,36 +59,21 @@ impl Response {
 
         let body = {
             if let Some(path) = resolved.path() {
-                headers.insert(
-					CACHE_CONTROL,
-					HeaderValue::cache_control_from_path(path)
-				);
+                headers.insert(CACHE_CONTROL, HeaderValue::cache_control_from_path(path));
 
-				headers.insert(
-					CONTENT_TYPE,
-					HeaderValue::content_type_from_path(path)
-				);
+                headers.insert(CONTENT_TYPE, HeaderValue::content_type_from_path(path));
 
                 fs::read(path)?
             } else {
-                headers.insert(
-					CACHE_CONTROL,
-					"no-cache".into()
-				);
+                headers.insert(CACHE_CONTROL, "no-cache".into());
 
-				headers.insert(
-					CONTENT_TYPE,
-					"text/plain; charset=UTF-8".into()
-				);
+                headers.insert(CONTENT_TYPE, "text/plain; charset=UTF-8".into());
 
                 Vec::new()
             }
         };
 
-		headers.insert(
-			CONTENT_LENGTH,
-            body.len().to_string().as_str().into()
-		);
+        headers.insert(CONTENT_LENGTH, body.len().to_string().as_str().into());
 
         let status = resolved.status();
 
@@ -138,14 +123,14 @@ impl Response {
     }
 
     pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
-		if self.has_header(&name) {
+        if self.has_header(&name) {
             self.headers.entry(name).and_modify(|v| *v = val);
-		} else {
+        } else {
             self.headers.insert(name, val);
-		}
+        }
     }
 
-	#[must_use]
+    #[must_use]
     pub fn cache_control(&self) -> Option<&HeaderValue> {
         self.headers.get(&CACHE_CONTROL)
     }
@@ -189,10 +174,10 @@ impl Response {
     pub fn write_headers(&self, writer: &mut RemoteClient) -> IoResult<()> {
         if !self.headers.is_empty() {
             self.headers.iter().for_each(|(name, value)| {
-				write!(writer, "{name}: ").unwrap();
-				writer.write_all(value.as_bytes()).unwrap();
-				writer.write_all(b"\r\n").unwrap();
-			});
+                write!(writer, "{name}: ").unwrap();
+                writer.write_all(value.as_bytes()).unwrap();
+                writer.write_all(b"\r\n").unwrap();
+            });
         }
 
         // Signal the end of the headers section with an empty line.
@@ -202,10 +187,10 @@ impl Response {
 
     pub fn write_body(&self, writer: &mut RemoteClient) -> IoResult<()> {
         if self.body.is_empty() {
-			Ok(())
-		} else {
-			writer.write_all(&self.body)
-		}
+            Ok(())
+        } else {
+            writer.write_all(&self.body)
+        }
     }
 
     pub fn send(&self, writer: &mut RemoteClient) -> IoResult<()> {

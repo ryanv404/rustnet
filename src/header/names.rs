@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
-use crate::{NetError, NetResult, trim_whitespace_bytes};
+use crate::{trim_whitespace_bytes, NetError, NetResult};
 
 /// Header name.
 /// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
@@ -13,7 +13,9 @@ pub struct HeaderName {
 
 impl From<StdHeader> for HeaderName {
     fn from(std: StdHeader) -> Self {
-        Self { inner: HdrRepr::Std(std) }
+        Self {
+            inner: HdrRepr::Std(std),
+        }
     }
 }
 
@@ -24,10 +26,10 @@ impl FromStr for HeaderName {
     /// if the header name contains any bytes that are not valid UTF-8.
     fn from_str(s: &str) -> NetResult<Self> {
         let name = Self {
-			inner: HdrRepr::try_from(s.as_bytes())?
-		};
+            inner: HdrRepr::try_from(s.as_bytes())?,
+        };
 
-		Ok(name)
+        Ok(name)
     }
 }
 
@@ -38,10 +40,10 @@ impl TryFrom<&[u8]> for HeaderName {
     /// if the header name contains any bytes that are not valid UTF-8.
     fn try_from(b: &[u8]) -> NetResult<Self> {
         let name = Self {
-			inner: HdrRepr::try_from(b)?
-		};
+            inner: HdrRepr::try_from(b)?,
+        };
 
-		Ok(name)
+        Ok(name)
     }
 }
 
@@ -55,59 +57,54 @@ impl HeaderName {
     /// Returns the header name as a byte slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-		self.inner.as_bytes()
-	}
+        self.inner.as_bytes()
+    }
 
     /// Returns the header name as a title case string.
     #[must_use]
     pub fn to_titlecase(&self) -> String {
-		if self.inner.is_empty() {
-			return String::new();
-		}
-		
-		let bytes = self.inner.as_bytes();
-		let mut title = String::with_capacity(bytes.len());
-		
-		let parts = bytes.split(|&b| b == b'-');
+        if self.inner.is_empty() {
+            return String::new();
+        }
 
-		for (i, part)in parts.enumerate() {
-			// Ensure each part has at least one element.
-			if part.is_empty() {
-				continue;
-			}
+        let bytes = self.inner.as_bytes();
+        let mut title = String::with_capacity(bytes.len());
 
-			// Prepend every part but the first with a hyphen.
-			if i > 0 {
-				title.push('-');
-			}
+        let parts = bytes.split(|&b| b == b'-');
 
-			// Make the first letter of each part uppercase.
-			title.push(part[0].to_ascii_uppercase() as char);
+        for (i, part) in parts.enumerate() {
+            // Ensure each part has at least one element.
+            if part.is_empty() {
+                continue;
+            }
 
-			if part.len() > 1 {
-				// Leave the rest of the slice as is.
-				title.push_str(str::from_utf8(&part[1..]).unwrap());
-			}
-		}
-	
-		title
-	}
+            // Prepend every part but the first with a hyphen.
+            if i > 0 {
+                title.push('-');
+            }
 
-	/// Returns the header name as a string slice.
+            // Make the first letter of each part uppercase.
+            title.push(part[0].to_ascii_uppercase() as char);
+
+            if part.len() > 1 {
+                // Leave the rest of the slice as is.
+                title.push_str(str::from_utf8(&part[1..]).unwrap());
+            }
+        }
+
+        title
+    }
+
+    /// Returns the header name as a string slice.
     #[must_use]
     pub fn as_str(&mut self) -> &str {
-		// The header name should contain valid UTF-8 bytes only.
-        if let Ok(s) = str::from_utf8(self.as_bytes()) {
-			s
-		} else {
-			""
-		}
+        str::from_utf8(self.as_bytes()).map_or("", |s| s)
     }
 }
 
 impl Display for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		write!(f, "{}", &self.to_titlecase())
+        write!(f, "{}", &self.to_titlecase())
     }
 }
 
@@ -127,9 +124,7 @@ impl TryFrom<&[u8]> for HdrRepr {
     fn try_from(b: &[u8]) -> NetResult<Self> {
         match StdHeader::from_bytes(b) {
             Some(std) => Ok(Self::Std(std)),
-            None if str::from_utf8(b).is_ok() => {
-                Ok(Self::Custom(b.to_ascii_lowercase()))
-            },
+            None if str::from_utf8(b).is_ok() => Ok(Self::Custom(b.to_ascii_lowercase())),
             None => Err(NetError::NonUtf8Header),
         }
     }
@@ -146,7 +141,7 @@ impl HdrRepr {
     }
 
     /// Returns whether the byte representation of the header name has a
-	/// length of zero.
+    /// length of zero.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
@@ -167,7 +162,7 @@ macro_rules! impl_header_names {
         pub mod header_names {
             use super::{HdrRepr, HeaderName, StdHeader};
 
-            $( 
+            $(
                 // Constants representing all of the standard header names.
                 pub const $constant: HeaderName = HeaderName {
                     inner: HdrRepr::Std(StdHeader::$variant)

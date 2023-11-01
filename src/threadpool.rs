@@ -25,7 +25,10 @@ impl Worker {
             //println!("Worker {id} disconnected; shutting down.");
         });
 
-        Self { id, handle: Some(handle) }
+        Self {
+            id,
+            handle: Some(handle),
+        }
     }
 }
 

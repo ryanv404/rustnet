@@ -1,19 +1,17 @@
 use std::io::Result as IoResult;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
-use crate::{
-    Method, NetError, NetResult, RemoteClient, Request, Response, Route,
-	Router, ThreadPool,
-};
 use crate::consts::NUM_WORKERS;
+use crate::{
+    Method, NetError, NetResult, RemoteClient, Request, Response, Route, Router, ThreadPool,
+};
 
 /// Configures the socket address and the router for a `Server`.
-#[allow(clippy::module_name_repetitions)]
 pub struct ServerConfig<A: ToSocketAddrs> {
     /// User-provided socket address.
     pub addr: A,
@@ -225,7 +223,7 @@ impl Server {
     pub fn shutdown(&self) {
         self.log_server_shutdown();
 
-		// Stops the listener thread's loop.
+        // Stops the listener thread's loop.
         self.close_trigger.store(false, Ordering::Relaxed);
 
         // Connect to and unblock the listener thread.

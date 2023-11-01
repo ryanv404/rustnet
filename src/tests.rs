@@ -9,7 +9,7 @@ fn test_parse_request_line() {
     let test5 = "GET /test";
     let test6 = "GET";
 
-	let expected1 = (Get, "/test".to_owned(), OneDotOne);
+    let expected1 = (Get, "/test".to_owned(), OneDotOne);
     let expected2 = (Post, "/test".to_owned(), TwoDotZero);
 
     assert_eq!(Request::parse_request_line(test1).unwrap(), expected1);
@@ -22,11 +22,11 @@ fn test_parse_request_line() {
 
 #[test]
 fn test_parse_request_headers() {
-	use std::collections::BTreeMap;
+    use std::collections::BTreeMap;
 
-	use crate::{HeaderName, Request};
-	use crate::header::names::HdrRepr;
     use crate::consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT};
+    use crate::header::names::HdrRepr;
+    use crate::{HeaderName, Request};
 
     let test = "\
         Accept: */*\r\n\
@@ -43,9 +43,11 @@ fn test_parse_request_headers() {
         (HOST, "example.com".into()),
         (USER_AGENT, "xh/0.19.3".into()),
         (
-			HeaderName{ inner: HdrRepr::Custom(Vec::from("pineapple")) },
-			"pizza".into()
-        )
+            HeaderName {
+                inner: HdrRepr::Custom(Vec::from("pineapple")),
+            },
+            "pizza".into(),
+        ),
     ]);
 
     let mut output = BTreeMap::new();
@@ -53,7 +55,7 @@ fn test_parse_request_headers() {
     for line in test.split('\n') {
         let trim = line.trim();
 
-		if trim.is_empty() {
+        if trim.is_empty() {
             break;
         }
 
@@ -71,7 +73,10 @@ fn test_trim_whitespace_bytes() {
     assert_eq!(trim_whitespace_bytes(b"  test"), b"test");
     assert_eq!(trim_whitespace_bytes(b"test    "), b"test");
     assert_eq!(trim_whitespace_bytes(b"         test       "), b"test");
-    assert_eq!(trim_whitespace_bytes(b"  Hello \nworld       "), b"Hello \nworld");
+    assert_eq!(
+        trim_whitespace_bytes(b"  Hello \nworld       "),
+        b"Hello \nworld"
+    );
     assert_eq!(trim_whitespace_bytes(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
     assert_eq!(trim_whitespace_bytes(b"                   "), b"");
     assert_eq!(trim_whitespace_bytes(b" "), b"");

@@ -13,9 +13,9 @@ impl Route {
     #[must_use]
     pub fn new<S: Into<String>>(method: Method, uri: S) -> Self {
         Self {
-			method,
-			uri: uri.into()
-		}
+            method,
+            uri: uri.into(),
+        }
     }
 }
 
@@ -49,12 +49,12 @@ impl Router {
         self.routes.get(&req.route()).map_or_else(
             || {
                 // No local resource path found for the URI.
-                req.log_with_status(404);
+                req.log_verbose(404);
                 Resolved::new(Status(404), self.get_error_page())
             },
             // Resolved the route to a local resource path.
             |path| {
-                req.log_with_status(200);
+                req.log_verbose(200);
                 Resolved::new(Status(200), Some(path.clone()))
             },
         )

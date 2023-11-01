@@ -1,3 +1,4 @@
 /target
 /tools
 /.vscode
+scripts/server_log.txt
