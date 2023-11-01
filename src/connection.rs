@@ -1,19 +1,19 @@
-use std::{
-    io::{BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult, Write},
-    net::{IpAddr, SocketAddr, TcpStream},
-    sync::Mutex,
+use std::io::{
+    BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult,
+    Write
 };
+use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::sync::Mutex;
 
-use crate::{
-    consts::{READER_BUFSIZE, WRITER_BUFSIZE},
-    Request,
-};
+use crate::consts::{READER_BUFSIZE, WRITER_BUFSIZE};
+use crate::Request;
 
 pub enum Message {
     NewRequest(Request),
     Error(IoError),
 }
 
+#[derive(Debug)]
 pub struct NetReader(pub BufReader<TcpStream>);
 
 impl From<TcpStream> for NetReader {
@@ -38,6 +38,7 @@ impl BufRead for NetReader {
     }
 }
 
+#[derive(Debug)]
 pub struct NetWriter(pub Mutex<BufWriter<TcpStream>>);
 
 impl From<TcpStream> for NetWriter {
@@ -55,10 +56,15 @@ impl Write for NetWriter {
     fn flush(&mut self) -> IoResult<()> {
         self.0.lock().unwrap().flush()
     }
+
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.0.lock().unwrap().write_all(buf)
+    }
 }
 
 /// Represents a TCP connection to a remote client.
-pub struct RemoteClient {
+#[derive(Debug)]
+pub struct RemoteConnect {
     /// The remote connection's socket address.
     pub remote_addr: SocketAddr,
     /// Reads requests from the TCP connection.
@@ -67,7 +73,7 @@ pub struct RemoteClient {
     pub writer: NetWriter,
 }
 
-impl TryFrom<(TcpStream, SocketAddr)> for RemoteClient {
+impl TryFrom<(TcpStream, SocketAddr)> for RemoteConnect {
     type Error = IoError;
 
     fn try_from((stream, addr): (TcpStream, SocketAddr)) -> IoResult<Self> {
@@ -75,7 +81,7 @@ impl TryFrom<(TcpStream, SocketAddr)> for RemoteClient {
     }
 }
 
-impl Write for RemoteClient {
+impl Write for RemoteConnect {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
         self.writer.write(buf)
     }
@@ -83,15 +89,19 @@ impl Write for RemoteClient {
     fn flush(&mut self) -> IoResult<()> {
         self.writer.flush()
     }
+
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.writer.write_all(buf)
+    }
 }
 
-impl Read for RemoteClient {
+impl Read for RemoteConnect {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         self.reader.read(buf)
     }
 }
 
-impl BufRead for RemoteClient {
+impl BufRead for RemoteConnect {
     fn fill_buf(&mut self) -> IoResult<&[u8]> {
         self.reader.fill_buf()
     }
@@ -101,8 +111,8 @@ impl BufRead for RemoteClient {
     }
 }
 
-impl RemoteClient {
-    /// Creates a new readable and writable `RemoteClient` instance.
+impl RemoteConnect {
+    /// Creates a new readable and writable `RemoteConnect` instance.
     pub fn new(stream: TcpStream, remote_addr: SocketAddr) -> IoResult<Self> {
         let (r, w) = (stream.try_clone()?, stream);
         let (reader, writer) = (NetReader::from(r), NetWriter::from(w));
@@ -123,7 +133,7 @@ impl RemoteClient {
         self.remote_addr.port()
     }
 
-    /// Attempts to clone a new `RemoteClient` instance.
+    /// Attempts to clone a new `RemoteConnect` instance.
     pub fn try_clone(&self) -> IoResult<Self> {
         let stream = self.reader.0.get_ref().try_clone()?;
         let addr = self.remote_addr;

@@ -1,7 +1,14 @@
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(Vec<u8>);
+
+impl Display for HeaderValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", String::from_utf8_lossy(self.as_bytes()))
+    }
+}
 
 impl From<&str> for HeaderValue {
     fn from(s: &str) -> Self {

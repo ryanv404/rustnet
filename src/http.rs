@@ -17,6 +17,12 @@ pub enum Method {
     Options,
 }
 
+impl Default for Method {
+    fn default() -> Self {
+        Self::Get
+    }
+}
+
 impl Display for Method {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.as_str())
@@ -69,6 +75,17 @@ pub struct Status(pub u16);
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{} {}", self.code(), self.msg())
+    }
+}
+
+impl FromStr for Status {
+    type Err = NetError;
+
+    fn from_str(code: &str) -> NetResult<Self> {
+        match u16::from_str(code) {
+            Ok(num) => Self::try_from(num),
+            Err(_) => Err(NetError::BadStatusCode),
+        }
     }
 }
 
@@ -207,6 +224,12 @@ pub enum Version {
     OneDotZero,
     OneDotOne,
     TwoDotZero,
+}
+
+impl Default for Version {
+    fn default() -> Self {
+        Self::OneDotOne
+    }
 }
 
 impl Display for Version {

@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKERS;
 use crate::{
-    Method, NetError, NetResult, RemoteClient, Request, Response, Route, Router, ThreadPool,
+    Method, NetError, NetResult, RemoteConnect, Request, Response, Route,
+    Router, ThreadPool,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -121,8 +122,8 @@ impl Listener {
         self.inner.local_addr()
     }
 
-    pub fn accept(&self) -> IoResult<RemoteClient> {
-        self.inner.accept().and_then(RemoteClient::try_from)
+    pub fn accept(&self) -> IoResult<RemoteConnect> {
+        self.inner.accept().and_then(RemoteConnect::try_from)
     }
 }
 
@@ -186,7 +187,7 @@ impl Server {
     }
 
     /// Handles a remote client connection.
-    pub fn respond(mut client: RemoteClient, router: &Arc<Router>) -> NetResult<()> {
+    pub fn respond(mut client: RemoteConnect, router: &Arc<Router>) -> NetResult<()> {
         let req = Request::from_client(&mut client)?;
         let res = Response::from_request(&req, router)?;
         res.send(&mut client)?;

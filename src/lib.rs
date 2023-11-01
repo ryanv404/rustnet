@@ -14,11 +14,10 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::result::Result as StdResult;
-
 #[cfg(test)]
 mod tests;
 
+pub mod client;
 pub mod connection;
 pub mod errors;
 pub mod header;
@@ -30,9 +29,10 @@ pub mod server;
 pub mod threadpool;
 pub mod util;
 
-pub use connection::{NetReader, NetWriter, RemoteClient};
+pub use client::Client;
+pub use connection::{NetReader, NetWriter, RemoteConnect};
 pub use errors::NetError;
-pub use header::{default_headers, HeaderName, HeaderValue};
+pub use header::{HeaderName, HeadersMap, HeaderValue};
 pub use http::{Method, Status, Version};
 pub use request::Request;
 pub use response::Response;
@@ -43,10 +43,10 @@ pub use util::{trim_whitespace_bytes, try_date};
 
 pub mod consts {
     pub use crate::header::header_names::*;
-
     pub const NUM_WORKERS: usize = 4;
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
 }
 
+use std::result::Result as StdResult;
 pub type NetResult<T> = StdResult<T, NetError>;

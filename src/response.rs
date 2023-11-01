@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
 
 use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
 use crate::{
-    default_headers, HeaderName, HeaderValue, Method, NetResult, RemoteClient, Request, Router,
-    Status, Version,
+    HeaderName, HeadersMap, HeaderValue, Method, NetResult, RemoteConnect,
+    Request, Router, Status, Version,
 };
 
 //HTTP/1.1 200 OK
@@ -30,52 +31,71 @@ pub struct Response {
     pub uri: String,
     pub version: Version,
     pub status: Status,
-    pub headers: BTreeMap<HeaderName, HeaderValue>,
+    pub headers: HeadersMap,
     pub body: Vec<u8>,
 }
 
 impl Default for Response {
     fn default() -> Self {
         Self {
-            method: Method::Get,
+            method: Method::default(),
             uri: String::from("/"),
-            version: Version::OneDotOne,
+            version: Version::default(),
             status: Status(200),
-            headers: default_headers(),
+            headers: Self::default_headers(),
             body: Vec::new(),
         }
     }
 }
 
+impl Display for Response {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.status_line())?;
+
+        if !self.headers.is_empty() {
+            for (name, value) in self.headers.iter() {
+                write!(f, "\n{name}: {value}")?;
+            }
+        }
+
+        if !self.body.is_empty() {
+            let body = String::from_utf8_lossy(&self.body);
+            let body = body.trim();
+
+            if body.len() > 0 {
+                write!(f, "\n\n{body}")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl Response {
     pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
-        let method = req.method;
-        let uri = req.uri.clone();
-        let version = req.version;
-
         let resolved = router.resolve(req);
 
         let mut headers = BTreeMap::new();
 
         let body = {
             if let Some(path) = resolved.path() {
-                headers.insert(CACHE_CONTROL, HeaderValue::cache_control_from_path(path));
+                let body = fs::read(path)?;
+                let len = format!("{}", body.len());
 
+                headers.insert(CACHE_CONTROL, HeaderValue::cache_control_from_path(path));
+                headers.insert(CONTENT_LENGTH, len.as_str().into());
                 headers.insert(CONTENT_TYPE, HeaderValue::content_type_from_path(path));
 
-                fs::read(path)?
+                body
             } else {
-                headers.insert(CACHE_CONTROL, "no-cache".into());
-
-                headers.insert(CONTENT_TYPE, "text/plain; charset=UTF-8".into());
-
                 Vec::new()
             }
         };
 
-        headers.insert(CONTENT_LENGTH, body.len().to_string().as_str().into());
-
+        let uri = req.uri.clone();
         let status = resolved.status();
+        let method = req.method;
+        let version = req.version;
 
         Ok(Self {
             method,
@@ -83,7 +103,7 @@ impl Response {
             version,
             status,
             headers,
-            body,
+            body
         })
     }
 
@@ -115,6 +135,20 @@ impl Response {
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
         self.status.msg()
+    }
+
+    pub fn headers(&self) -> &HeadersMap {
+        &self.headers
+    }
+
+    /// Default set of response headers.
+    #[must_use]
+    pub fn default_headers() -> HeadersMap {
+        BTreeMap::from([
+            (CACHE_CONTROL, "no-cache".into()),
+            (CONTENT_LENGTH, "0".into()),
+            (CONTENT_TYPE, "text/plain; charset=UTF-8".into()),
+        ])
     }
 
     #[must_use]
@@ -167,11 +201,11 @@ impl Response {
         format!("{} {}", &self.version, &self.status)
     }
 
-    pub fn write_status_line(&self, writer: &mut RemoteClient) -> IoResult<()> {
+    pub fn write_status_line(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         write!(writer, "{} {}\r\n", &self.version, &self.status)
     }
 
-    pub fn write_headers(&self, writer: &mut RemoteClient) -> IoResult<()> {
+    pub fn write_headers(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         if !self.headers.is_empty() {
             self.headers.iter().for_each(|(name, value)| {
                 write!(writer, "{name}: ").unwrap();
@@ -185,7 +219,7 @@ impl Response {
         Ok(())
     }
 
-    pub fn write_body(&self, writer: &mut RemoteClient) -> IoResult<()> {
+    pub fn write_body(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         if self.body.is_empty() {
             Ok(())
         } else {
@@ -193,7 +227,7 @@ impl Response {
         }
     }
 
-    pub fn send(&self, writer: &mut RemoteClient) -> IoResult<()> {
+    pub fn send(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         self.write_status_line(writer)?;
         self.write_headers(writer)?;
         self.write_body(writer)?;

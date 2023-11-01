@@ -33,6 +33,21 @@ impl From<IoError> for NetError {
     }
 }
 
+impl From<NetError> for IoError {
+    fn from(err: NetError) -> Self {
+        match err {
+            NetError::NonUtf8Header |
+                NetError::BadStatusCode |
+                NetError::ParseError(_) => {
+                IoError::new(IoErrorKind::Other, err.to_string())
+            },
+            NetError::IoError(io_error) |
+                NetError::ReadError(io_error) |
+                NetError::WriteError(io_error) => io_error,
+        }
+    }
+}
+
 impl NetError {
     #[must_use]
     pub fn from_kind(kind: IoErrorKind) -> Self {

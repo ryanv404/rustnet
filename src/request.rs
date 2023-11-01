@@ -4,8 +4,11 @@ use std::io::{BufRead, ErrorKind::UnexpectedEof};
 use std::net::{IpAddr, SocketAddr};
 use std::str;
 
-use crate::consts::READER_BUFSIZE;
-use crate::{HeaderName, HeaderValue, Method, NetError, NetResult, RemoteClient, Route, Version};
+use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH};
+use crate::{
+    HeaderName, HeadersMap, HeaderValue, Method, NetError, NetResult,
+    RemoteConnect, Route, Version
+};
 
 //GET / HTTP/1.1
 //Accept: */* (*/ for syntax coloring bug)
@@ -20,7 +23,7 @@ pub struct Request {
     pub method: Method,
     pub uri: String,
     pub version: Version,
-    pub headers: BTreeMap<HeaderName, HeaderValue>,
+    pub headers: HeadersMap,
     pub body: Vec<u8>,
 }
 
@@ -28,11 +31,11 @@ impl Default for Request {
     fn default() -> Self {
         Self {
             remote_addr: SocketAddr::new([127, 0, 0, 1].into(), 8787),
-            method: Method::Get,
+            method: Method::default(),
             uri: "/".to_string(),
-            version: Version::OneDotOne,
-            headers: BTreeMap::new(),
-            body: Vec::with_capacity(READER_BUFSIZE),
+            version: Version::default(),
+            headers: Self::default_headers(),
+            body: Vec::new(),
         }
     }
 }
@@ -50,7 +53,7 @@ impl Request {
         method: Method,
         uri: String,
         version: Version,
-        headers: BTreeMap<HeaderName, HeaderValue>,
+        headers: HeadersMap,
         body: Vec<u8>,
     ) -> Self {
         Self {
@@ -65,7 +68,9 @@ impl Request {
 
     /// Tries to parse the first line of a request.
     pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
-        let trim = line.trim_start();
+        let trim = line.trim();
+
+        dbg!(trim);
 
         if trim.is_empty() {
             return Err(NetError::ParseError("request line"));
@@ -73,6 +78,8 @@ impl Request {
 
         let mut tok = trim.splitn(3, ' ').map(str::trim);
         let tokens = (tok.next(), tok.next(), tok.next());
+
+        dbg!(&tokens);
 
         if let (Some(m), Some(u), Some(v)) = tokens {
             Ok((m.parse()?, u.to_string(), v.parse()?))
@@ -93,8 +100,8 @@ impl Request {
         }
     }
 
-    /// Parse a `Request` sent by a `RemoteClient`.
-    pub fn from_client(client: &mut RemoteClient) -> NetResult<Self> {
+    /// Parse a `Request` sent by a `RemoteConnect`.
+    pub fn from_client(client: &mut RemoteConnect) -> NetResult<Self> {
         let remote_addr = client.remote_addr;
 
         let mut buf = String::new();
@@ -119,11 +126,11 @@ impl Request {
             buf.clear();
 
             match client.read_line(&mut buf) {
-                Ok(0) => {
-                    return Err(NetError::from_kind(UnexpectedEof));
-                }
                 Err(e) => {
                     return Err(NetError::from(e));
+                }
+                Ok(0) => {
+                    return Err(NetError::from_kind(UnexpectedEof));
                 }
                 Ok(_) => {
                     let trim = buf.trim();
@@ -174,6 +181,19 @@ impl Request {
     #[must_use]
     pub const fn version(&self) -> &Version {
         &self.version
+    }
+
+    pub fn headers(&self) -> &HeadersMap {
+        &self.headers
+    }
+
+    /// Default set of request headers.
+    #[must_use]
+    pub fn default_headers() -> HeadersMap {
+        BTreeMap::from([
+            (CACHE_CONTROL, "no-cache".into()),
+            (CONTENT_LENGTH, "0".into()),
+        ])
     }
 
     #[must_use]
