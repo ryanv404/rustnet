@@ -44,7 +44,7 @@ build_server() {
         echo -e "${YLW}Unable to remove prior build artifacts.${CLR}"
     fi
 
-    echo "Building..."
+    echo "Building server..."
     cargo build --bin server &> /dev/null
 
     if (( $? != 0 )); then
@@ -54,7 +54,7 @@ build_server() {
 }
 
 launch_server() {
-    echo "Starting..."
+    echo "Starting server..."
 
 	cargo run --bin server &> /dev/null &
     SERVER_PID="$!"
@@ -69,7 +69,7 @@ confirm_server_is_live() {
     local STILL_CONNECTING=0
 
     while (( ($ATTEMPT_NUM < $MAX_ATTEMPTS) && ($STILL_CONNECTING == 0) )); do
-        echo -n "Connecting..."
+        echo -n "Connecting... "
 
         xh "$SERVER_ADDR" &> /dev/null
 

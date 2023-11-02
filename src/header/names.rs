@@ -11,6 +11,12 @@ pub struct HeaderName {
     pub inner: HdrRepr,
 }
 
+impl Display for HeaderName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", &self.to_titlecase())
+    }
+}
+
 impl From<StdHeader> for HeaderName {
     fn from(std: StdHeader) -> Self {
         Self {
@@ -73,7 +79,7 @@ impl HeaderName {
         let parts = bytes.split(|&b| b == b'-');
 
         for (i, part) in parts.enumerate() {
-            // Ensure each part has at least one element.
+            // Skip empty parts.
             if part.is_empty() {
                 continue;
             }
@@ -102,12 +108,6 @@ impl HeaderName {
     }
 }
 
-impl Display for HeaderName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", &self.to_titlecase())
-    }
-}
-
 /// Header name representation.
 /// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -119,8 +119,7 @@ pub enum HdrRepr {
 impl TryFrom<&[u8]> for HdrRepr {
     type Error = NetError;
 
-    /// Attempts to convert a byte slice into a `HdrRepr` returning an error
-    /// if the header name contains any bytes that are not UTF-8.
+    /// Parses a bytes slice into a `HdrRepr`.
     fn try_from(b: &[u8]) -> NetResult<Self> {
         match StdHeader::from_bytes(b) {
             Some(std) => Ok(Self::Std(std)),
@@ -177,11 +176,11 @@ macro_rules! impl_header_names {
         }
 
         impl StdHeader {
-            /// Attempts to convert a byte slice into a `StdHeader`, returning `None`
-            /// if it cannot do so.
+            /// Parses a bytes slice into a `StdHeader` if possible.
             #[must_use]
             pub fn from_bytes(input: &[u8]) -> Option<Self> {
-                let lowercase = trim_whitespace_bytes(input).to_ascii_lowercase();
+                let lowercase = trim_whitespace_bytes(input)
+                    .to_ascii_lowercase();
 
                 match lowercase.as_slice() {
                     $( $bytes => Some(Self::$variant), )+
@@ -189,7 +188,7 @@ macro_rules! impl_header_names {
                 }
             }
 
-            /// Returns the header name as a byte slice.
+            /// Returns a bytes slice representation of the `StdHeader`.
             #[must_use]
             pub const fn as_bytes(&self) -> &'static [u8] {
                 match *self {
@@ -197,42 +196,18 @@ macro_rules! impl_header_names {
                 }
             }
 
-            /// Returns the header name as a string slice.
+            /// Returns a string slice representation of the `StdHeader`.
             #[must_use]
-            pub const fn as_str(&self) -> &'static str {
-                // SAFETY: We know that the bytes are valid UTF-8 since we provided them.
-                unsafe {
-                    str::from_utf8_unchecked(self.as_bytes())
-                }
+            pub fn as_str(&self) -> &'static str {
+                // NOTE: The standard headers below are all UTF-8 compatible.
+                str::from_utf8(self.as_bytes()).unwrap()
             }
         }
 
         #[cfg(test)]
-        const TEST_HEADERS: &'static [(StdHeader, &'static [u8])] = &[
+        pub const TEST_HEADERS: &'static [(StdHeader, &'static [u8])] = &[
             $( (StdHeader::$variant, $bytes), )+
         ];
-
-        #[cfg(test)]
-        #[test]
-        fn test_parse_std_headers() {
-            // Lowercase bytes test.
-            TEST_HEADERS.iter().for_each(|&(std, bytes)| {
-                let std_hdr = HeaderName::from(std);
-                let parsed_hdr = HeaderName::try_from(bytes).unwrap();
-
-                assert_eq!(std_hdr, parsed_hdr);
-            });
-
-            // Uppercase bytes test.
-            TEST_HEADERS.iter().for_each(|&(std, bytes)| {
-                let std_hdr = HeaderName::from(std);
-                let parsed_hdr = HeaderName::try_from(
-                    bytes.to_ascii_uppercase().as_slice()
-                ).unwrap();
-
-                assert_eq!(std_hdr, parsed_hdr);
-            });
-        }
     };
 }
 

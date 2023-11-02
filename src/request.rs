@@ -47,50 +47,29 @@ impl Display for Request {
 }
 
 impl Request {
-    #[must_use]
-    pub fn new(
-        remote_addr: SocketAddr,
-        method: Method,
-        uri: String,
-        version: Version,
-        headers: HeadersMap,
-        body: Vec<u8>,
-    ) -> Self {
-        Self {
-            remote_addr,
-            method,
-            uri,
-            version,
-            headers,
-            body,
-        }
-    }
-
-    /// Tries to parse the first line of a request.
+    /// Parses the first line of a request.
     pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
         let trim = line.trim();
-
-        dbg!(trim);
 
         if trim.is_empty() {
             return Err(NetError::ParseError("request line"));
         }
 
         let mut tok = trim.splitn(3, ' ').map(str::trim);
+
         let tokens = (tok.next(), tok.next(), tok.next());
 
-        dbg!(&tokens);
-
-        if let (Some(m), Some(u), Some(v)) = tokens {
-            Ok((m.parse()?, u.to_string(), v.parse()?))
+        if let (Some(meth), Some(uri), Some(ver)) = tokens {
+            Ok((meth.parse()?, uri.to_string(), ver.parse()?))
         } else {
             Err(NetError::ParseError("request line"))
         }
     }
 
-    /// Tries to parse a string slice into a `HeaderName` and `HeaderValue`.
+    /// Parses a string slice into a `HeaderName` and `HeaderValue`.
     pub fn parse_header(input: &str) -> NetResult<(HeaderName, HeaderValue)> {
         let mut tok = input.splitn(2, ':').map(str::trim);
+
         let tokens = (tok.next(), tok.next());
 
         if let (Some(name), Some(value)) = tokens {
@@ -109,12 +88,8 @@ impl Request {
         // Parse the request line.
         let (method, uri, version) = {
             match client.read_line(&mut buf) {
-                Err(e) => {
-                    return Err(NetError::from(e));
-                }
-                Ok(0) => {
-                    return Err(NetError::from_kind(UnexpectedEof));
-                }
+                Err(e) => return Err(NetError::from(e)),
+                Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
                 Ok(_) => Self::parse_request_line(&buf)?,
             }
         };
@@ -126,12 +101,8 @@ impl Request {
             buf.clear();
 
             match client.read_line(&mut buf) {
-                Err(e) => {
-                    return Err(NetError::from(e));
-                }
-                Ok(0) => {
-                    return Err(NetError::from_kind(UnexpectedEof));
-                }
+                Err(e) => return Err(NetError::from(e)),
+                Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
                 Ok(_) => {
                     let trim = buf.trim();
 
@@ -164,8 +135,8 @@ impl Request {
     }
 
     #[must_use]
-    pub const fn method(&self) -> &Method {
-        &self.method
+    pub const fn method(&self) -> Method {
+        self.method
     }
 
     #[must_use]
@@ -179,8 +150,8 @@ impl Request {
     }
 
     #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.version
+    pub const fn version(&self) -> Version {
+        self.version
     }
 
     #[must_use]
@@ -225,15 +196,5 @@ impl Request {
     /// Logs the response status and request line for new requests.
     pub fn log_with_status(&self, status: u16) {
         println!("[{}|{status}] {}", self.remote_ip(), self);
-    }
-
-    /// Logs the request headers, request line, and response status for new
-    /// requests.
-    pub fn log_verbose(&self, status: u16) {
-        println!("[{}|{status}] {}", self.remote_ip(), self);
-
-        for (name, val) in &self.headers {
-            println!("{name}: {}", String::from_utf8_lossy(val.as_bytes()));
-        }
     }
 }

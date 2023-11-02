@@ -69,7 +69,7 @@ impl Method {
 }
 
 /// HTTP status codes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Status(pub u16);
 
 impl Display for Status {
@@ -218,7 +218,7 @@ impl Status {
 }
 
 // The HTTP protocol version.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Version {
     ZeroDotNine,
     OneDotZero,

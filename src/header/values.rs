@@ -22,6 +22,12 @@ impl From<&[u8]> for HeaderValue {
     }
 }
 
+impl From<usize> for HeaderValue {
+    fn from(num: usize) -> Self {
+        Self(Vec::from(num.to_string().as_bytes()))
+    }
+}
+
 impl HeaderValue {
     #[must_use]
     pub fn new(bytes: &[u8]) -> Self {

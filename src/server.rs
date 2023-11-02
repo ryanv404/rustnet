@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
-use crate::consts::NUM_WORKERS;
+use crate::consts::NUM_WORKER_THREADS;
 use crate::{
     Method, NetError, NetResult, RemoteConnect, Request, Response, Route,
     Router, ThreadPool,
@@ -159,7 +159,7 @@ impl Server {
 
         // Spawns a thread that listens for new incoming connections.
         let handle = spawn(move || {
-            let pool = ThreadPool::new(NUM_WORKERS);
+            let pool = ThreadPool::new(NUM_WORKER_THREADS);
 
             while listener_running.load(Ordering::Relaxed) {
                 match listener.accept() {

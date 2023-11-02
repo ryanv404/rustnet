@@ -1,6 +1,31 @@
-use std::{env, io};
+use std::env;
+use std::io;
 
 use rustnet::Client;
+
+// Simple coloring on unix-like systems.
+#[cfg(unix)]
+pub mod ansi {
+    pub const RED: &str = "\x1b[31m";
+    pub const GREEN: &str = "\x1b[32m";
+    pub const CYAN: &str = "\x1b[36m";
+    pub const RESET: &str = "\x1b[0m";
+}
+
+#[cfg(unix)]
+use ansi::*;
+
+// Skip coloring if not on a unix-like system.
+#[cfg(not(unix))]
+pub mod not_ansi {
+    pub const RED: &str = "";
+    pub const GREEN: &str = "";
+    pub const CYAN: &str = "";
+    pub const RESET: &str = "";
+}
+
+#[cfg(not(unix))]
+use not_ansi::*;
 
 const HELP_MSG: &str = "\
 Usage:\n  \
@@ -34,15 +59,15 @@ fn main() -> io::Result<()> {
             .uri(&uri)
             .send()?;
 
-        println!("--[Request]-->\n{}\n", &client);
+        println!("{CYAN}---[Request]--->{RESET}\n{}\n", &client);
 
         let res = client.recv()?;
 
-        println!("<--[Response]--\n{res}");
+        println!("{GREEN}<---[Response]---{RESET}\n{res}");
 
         Ok(())
     } else {
-        eprintln!("Must provide a URL or IP address.\n\n{HELP_MSG}");
+        eprintln!("{RED}Must provide a URL or IP address.{RESET}\n\n{HELP_MSG}");
         Ok(())
     }
 }

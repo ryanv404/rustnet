@@ -43,7 +43,7 @@ pub use util::{trim_whitespace_bytes, try_date};
 
 pub mod consts {
     pub use crate::header::header_names::*;
-    pub const NUM_WORKERS: usize = 4;
+    pub const NUM_WORKER_THREADS: usize = 4;
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
 }

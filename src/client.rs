@@ -9,9 +9,10 @@ use crate::{
     Response, Status, Version,
 };
 use crate::consts::{
-    ACCEPT, HOST, USER_AGENT, UPGRADE_INSECURE_REQUESTS, CONTENT_LENGTH
+    ACCEPT, HOST, USER_AGENT, UPGRADE_INSECURE_REQUESTS, CONTENT_LENGTH, CONTENT_TYPE,
 };
 
+/// Builder for the `Client` object.
 #[derive(Clone, Debug)]
 pub struct ClientBuilder<A: ToSocketAddrs> {
     method: Option<Method>,
@@ -80,7 +81,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         Client::default_headers(addr)
     }
 
-    pub fn set_header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
+    pub fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
         if let Some(map) = self.headers.as_mut() {
             map.entry(name)
                 .and_modify(|val| *val = value.clone())
@@ -91,9 +92,9 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
-    pub fn body(&mut self, content: &[u8]) -> &mut Self {
-        if !content.is_empty() {
-            self.body = Some(content.to_vec());
+    pub fn body(&mut self, data: &[u8]) -> &mut Self {
+        if !data.is_empty() {
+            self.body = Some(data.to_vec());
         }
         self
     }
@@ -125,9 +126,12 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         let uri = self.uri.take().unwrap_or_else(|| String::from("/"));
         let version = self.version.take().unwrap_or_default();
 
-        let headers = self.headers.take().unwrap_or_else(
-            || Self::default_headers(&remote_addr.to_string())
-        );
+        let headers = self
+            .headers
+            .take()
+            .unwrap_or_else(|| {
+                Self::default_headers(&remote_addr.to_string())
+            });
 
         let body = self.body.take().unwrap_or_default();
 
@@ -151,6 +155,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
     }
 }
 
+/// An HTTP client that can send and receive messages with a remote host.
 #[derive(Debug)]
 pub struct Client {
     method: Method,
@@ -166,8 +171,8 @@ pub struct Client {
 
 impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        let request_line = self.request_line();
         let headers = self.headers_to_string();
-        let request_line = self.get_request_line();
         write!(f, "{request_line}\n{}", headers.trim())?;
         Ok(())
     }
@@ -262,17 +267,18 @@ impl Client {
         self.remote_addr
     }
 
-    pub fn get_request_line(&self) -> String {
+    pub fn request_line(&self) -> String {
         format!("{} {} {}", self.method, self.uri, self.version)
     }
 
+    /// Sends an HTTP request to a remote host.
     pub fn send(&mut self) -> IoResult<()> {
         // Request line
-        let request_line = self.get_request_line();
+        let request_line = self.request_line();
         self.write_all(request_line.as_bytes())?;
         self.write_all(b"\r\n")?;
 
-        // Headers
+        // Request headers
         let headers = {
             let remote_addr = self.remote_addr().to_string();
 
@@ -299,8 +305,21 @@ impl Client {
         self.write_all(headers.as_bytes())?;
         self.write_all(b"\r\n")?;
 
-        // Body
+        // Request body
         if !self.body.is_empty() {
+            let len = self.body.len();
+
+            // Ensure Content-Length and Content-Type are accurate.
+            self.headers
+                .entry(CONTENT_LENGTH)
+                .and_modify(|val| *val = HeaderValue::from(len))
+                .or_insert_with(|| HeaderValue::from(len));
+
+            // Assume that the body is plain text if not previously set.
+            self.headers
+                .entry(CONTENT_TYPE)
+                .or_insert_with(|| HeaderValue::from("plain/text; charset=UTF-8"));
+
             self.writer.write_all(&self.body)?;
         }
 
@@ -308,65 +327,18 @@ impl Client {
         Ok(())
     }
 
+    /// Receives an HTTP response from the remote host.
     pub fn recv(&mut self) -> IoResult<Response> {
-        let mut buf = String::new();
+        let uri = self.uri.clone();
+        let method = self.method();
 
-        // Parse the response status line.
-        let (version, status) = {
-            match self.read_line(&mut buf) {
-                Err(e) => return Err(e),
-                Ok(0) => return Err(IoError::from(IoErrorKind::UnexpectedEof)),
-                Ok(_) => Self::parse_status_line(&buf)?,
-            }
-        };
+        let (version, status) = self.parse_status_line()?;
 
         let mut headers = BTreeMap::new();
+        self.parse_headers(&mut headers)?;
 
-        // Parse the response headers.
-        loop {
-            buf.clear();
-
-            match self.read_line(&mut buf) {
-                Err(e) => return Err(e),
-                Ok(0) => return Err(IoError::from(IoErrorKind::UnexpectedEof)),
-                Ok(_) => {
-                    let trim = buf.trim();
-
-                    // A blank line indicates the end of the headers section.
-                    if trim.is_empty() {
-                        break;
-                    }
-
-                    let (name, value) = Self::parse_header(trim)?;
-
-                    headers.insert(name, value);
-                }
-            }
-        }
-
-        // Parse the request body.
-        let body = match headers.get(&CONTENT_LENGTH) {
-            Some(value) => {
-                let len_str = value.to_string();
-                let len = len_str.parse::<u32>()
-                    .map_err(|_| NetError::ParseError("content length"))?;
-
-                let mut body_buf = Vec::with_capacity(len as usize);
-
-                let mut reader_ref = self
-                    .reader
-                    .by_ref()
-                    .take(u64::from(len));
-
-                reader_ref.read_to_end(&mut body_buf)?;
-
-                body_buf
-            },
-            None => Vec::new(),
-        };
-
-        let method = self.method();
-        let uri = self.uri.clone();
+        let maybe_content_len = headers.get(&CONTENT_LENGTH);
+        let body = self.parse_body(maybe_content_len)?;
 
         Ok(Response {
             method,
@@ -379,42 +351,100 @@ impl Client {
     }
 
     /// Parses the first line of a response into a `Version` and `Status`.
-    fn parse_status_line(line: &str) -> IoResult<(Version, Status)> {
-        let trim = line.trim();
+    pub fn parse_status_line(&mut self) -> IoResult<(Version, Status)> {
+        let mut buf = String::new();
 
-        if trim.is_empty() {
-            return Err(IoError::from(IoErrorKind::InvalidData));
-        }
+        match self.read_line(&mut buf) {
+            Err(e) => Err(e),
+            Ok(0) => Err(IoError::from(IoErrorKind::UnexpectedEof)),
+            Ok(_) => {
+                let line = buf.trim();
 
-        let mut tok = trim.splitn(3, ' ').map(str::trim);
+                if line.is_empty() {
+                    let payload = "response status line is empty".to_string();
+                    return Err(IoError::new(IoErrorKind::Other, payload));
+                }
 
-        let tokens = (tok.next(), tok.next(), tok.next());
+                let mut tok = line.splitn(3, ' ').map(str::trim);
 
-        let (Some(ver), Some(code), Some(msg)) = tokens else {
-            return Err(IoError::from(IoErrorKind::InvalidData));
-        };
+                let tokens = (tok.next(), tok.next(), tok.next());
 
-        let ver = ver.parse::<Version>()?;
+                let (Some(ver), Some(code), Some(msg)) = tokens else {
+                    let payload = "cannot parse response status line".to_string();
+                    return Err(IoError::new(IoErrorKind::Other, payload));
+                };
 
-        if msg.eq_ignore_ascii_case("OK") {
-            Ok((ver, Status(200)))
-        } else if let Ok(status) = code.parse::<Status>() {
-            Ok((ver, status))
-        } else {
-            Err(IoError::new(IoErrorKind::Other, format!("invalid status code: {code}")))
+                let Ok(version) = ver.parse::<Version>() else {
+                    let payload = format!("cannot parse HTTP version: {ver}");
+                    return Err(IoError::new(IoErrorKind::Other, payload));
+                };
+
+                if code.eq_ignore_ascii_case("200") {
+                    Ok((version, Status(200)))
+                } else if let Ok(status) = code.parse::<Status>() {
+                    Ok((version, status))
+                } else {
+                    let payload = format!("cannot parse status code: {code} ({msg})");
+                    Err(IoError::new(IoErrorKind::Other, payload))
+                }
+            },
         }
     }
 
-    /// Parses a string slice into a `HeaderName` and `HeaderValue`.
-    pub fn parse_header(input: &str) -> IoResult<(HeaderName, HeaderValue)> {
-        let mut tok = input.splitn(2, ':').map(str::trim);
+    pub fn parse_headers(&mut self, headers: &mut HeadersMap) -> IoResult<()> {
+        let mut buf = String::new();
 
-        let tokens = (tok.next(), tok.next());
+        // Read and parse the response headers until there is an empty line.
+        loop {
+            match self.read_line(&mut buf) {
+                Err(e) => return Err(e),
+                Ok(0) => return Err(IoError::from(IoErrorKind::UnexpectedEof)),
+                Ok(_) => {
+                    let line = buf.trim();
 
-        if let (Some(name), Some(value)) = tokens {
-            Ok((name.parse()?, value.into()))
-        } else {
-            Err(NetError::ParseError("request header").into())
+                    if line.is_empty() {
+                        return Ok(());
+                    }
+
+                    let mut tok = line.splitn(2, ':').map(str::trim);
+
+                    let tokens = (tok.next(), tok.next());
+
+                    if let (Some(name), Some(value)) = tokens {
+                        headers.insert(name.parse()?, value.into());
+                        buf.clear();
+                    } else {
+                        return Err(NetError::ParseError("request header").into());
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn parse_body(&mut self, content_len: Option<&HeaderValue>) -> IoResult<Vec<u8>> {
+        match content_len {
+            Some(value) => {
+                let len_str = value.to_string();
+                let len = len_str
+                    .parse::<u32>()
+                    .map_err(|_| NetError::ParseError("content-length"))?;
+
+                if len == 0 {
+                    return Ok(Vec::new());
+                }
+
+                let mut buf = Vec::with_capacity(len as usize);
+
+                // Take by reference instead of consuming the reader.
+                let mut reader_ref = self
+                    .reader
+                    .by_ref()
+                    .take(u64::from(len));
+
+                reader_ref.read_to_end(&mut buf)?;
+                Ok(buf)
+            },
+            None => Ok(Vec::new()),
         }
     }
 }
