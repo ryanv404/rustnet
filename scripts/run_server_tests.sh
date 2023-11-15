@@ -24,10 +24,10 @@ run_all_tests() {
     launch_server
     confirm_server_is_live
 
-    run_test "get_index_linux" "/"
-    run_test "get_about_linux" "/about"
-    run_test "get_foo_linux" "/foo"
-    run_test "get_favicon_headers" "/favicon.ico"
+    run_test "get_index" "/"
+    run_test "get_about" "/about"
+    run_test "get_foo" "/foo"
+    run_test "get_favicon" "/favicon.ico"
 
     if (( ($NUM_TESTS == $NUM_PASSED) && ($NUM_TESTS > 0) )); then
         echo -e "\n${GRN}${NUM_PASSED} / ${NUM_TESTS} tests passed.${CLR}"

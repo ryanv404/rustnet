@@ -1,11 +1,11 @@
 # Test 1: GET /
-$test1Params = @{ TestName = "get_index_win"; Uri = "/"; }
+$test1Params = @{ TestName = "get_index"; Uri = "/"; }
 # Test 2: GET /
-$test2Params = @{ TestName = "get_about_win"; Uri = "/about"; }
+$test2Params = @{ TestName = "get_about"; Uri = "/about"; }
 # Test 3: GET /
-$test3Params = @{ TestName = "get_foo_win"; Uri = "/foo"; }
+$test3Params = @{ TestName = "get_foo"; Uri = "/foo"; }
 # Test 4: GET /
-$test4Params = @{ TestName = "get_favicon_headers"; Uri = "/favicon.ico"; }
+$test4Params = @{ TestName = "get_favicon"; Uri = "/favicon.ico"; }
 
 # Create a dictionary to track the test results.
 $tracker = New-Object 'System.Collections.Generic.Dictionary[String, bool]'
@@ -247,10 +247,13 @@ function Start-OneTest {
     }
 
     foreach ($idx in 0..$expectedHeaders.Count) {
-        if (!($testHeaders[$idx] -ceq $expectedHeaders[$idx])) {
+        $expHdr = $expectedHeaders[$idx]
+        $testHdr = $testHeaders[$idx]
+
+        if (!($testHdr -ceq $expHdr)) {
             Write-Host @red "✗ Did not match the expected headers."
-            Write-Host @yellow "`n[EXPECTED] $expectedHeaders[$idx]"
-            Write-Host @magenta "[OUTPUT]   $testHeaders[$idx]`n"
+            Write-Host @yellow "`n[EXPECTED] $expHdr"
+            Write-Host @magenta "[OUTPUT]   $testHdr`n"
             $tracker.Add($testName, $false)
             return
         }
