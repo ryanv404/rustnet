@@ -45,8 +45,8 @@ impl Router {
     #[must_use]
     pub fn resolve(&self, req: &Request) -> Resolved {
         self.routes.get(&req.route()).map_or_else(
+            // No local resource path found for the URI.
             || {
-                // No local resource path found for the URI.
                 req.log_with_status(404);
                 Resolved::new(Status(404), self.get_error_page())
             },

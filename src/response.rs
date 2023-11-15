@@ -4,12 +4,15 @@ use std::fs;
 use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
 
-use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
+use crate::consts::{
+    CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE
+};
 use crate::{
     HeaderName, HeadersMap, HeaderValue, Method, NetResult, RemoteConnect,
     Request, Router, Status, Version,
 };
 
+// A random HTTP response:
 //HTTP/1.1 200 OK
 //Accept-Ranges: bytes
 //Age: 499402
@@ -58,10 +61,10 @@ impl Display for Response {
             }
         }
 
-        if !self.body.is_empty() {
+        // Print the body if it is unencoded text or application MIME types.
+        if !self.body.is_empty() && self.body_is_printable() {
             let body = String::from_utf8_lossy(&self.body);
             let body = body.trim();
-
             if !body.is_empty() {
                 write!(f, "\n\n{body}")?;
             }
@@ -92,10 +95,10 @@ impl Response {
             }
         };
 
-        let uri = req.uri.clone();
-        let status = resolved.status();
         let method = req.method;
+        let uri = req.uri.clone();
         let version = req.version;
+        let status = resolved.status;
 
         Ok(Self {
             method,
@@ -187,9 +190,32 @@ impl Response {
     pub fn content_type(&self) -> Option<&HeaderValue> {
         self.headers.get(&CONTENT_TYPE)
     }
-
+    
     pub fn set_content_type(&mut self, value: HeaderValue) {
         self.set_header(CONTENT_TYPE, value);
+    }
+
+    #[must_use]
+    pub fn content_encoding(&self) -> Option<&HeaderValue> {
+        self.headers.get(&CONTENT_ENCODING)
+    }
+
+    /// Returns true if the body is unencoded text or application MIME types.
+    #[must_use]
+    pub fn body_is_printable(&self) -> bool {
+        if self.content_encoding().is_some() {
+            return false;
+        }
+
+        if let Some(value) = self.content_type() {
+            match value.to_string() {
+                ct if ct.contains("text") => true,
+                ct if ct.contains("application") => true,
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 
     #[must_use]

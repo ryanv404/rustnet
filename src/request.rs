@@ -10,6 +10,7 @@ use crate::{
     RemoteConnect, Route, Version
 };
 
+// A random HTTP request:
 //GET / HTTP/1.1
 //Accept: */* (*/ for syntax coloring bug)
 //Accept-Encoding: gzip, deflate, br
@@ -79,7 +80,7 @@ impl Request {
         }
     }
 
-    /// Parse a `Request` sent by a `RemoteConnect`.
+    /// Parse a `Request` from a `RemoteConnect`.
     pub fn from_client(client: &mut RemoteConnect) -> NetResult<Self> {
         let remote_addr = client.remote_addr;
 

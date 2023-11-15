@@ -20,6 +20,7 @@ CLR=$'\e[0m'
 
 run_all_tests() {
     build_server
+
     launch_server
     confirm_server_is_live
 
@@ -59,7 +60,7 @@ launch_server() {
 	cargo run --bin server &> /dev/null &
     SERVER_PID="$!"
 
-	# Give server time to go live.
+	# Give server a little time to go live.
 	sleep 2
 }
 
@@ -120,8 +121,8 @@ print_result() {
         (( NUM_PASSED++ ))
     else
         echo -e "${RED}✗ (The test output did not match the expected output).${CLR}"
-        echo -e "${YLW}---[EXPECTED]---\n${EXPECTED}${CLR}\n"
-        echo -e "${PURP}===[TEST OUTPUT]===\n${TRIM_RESULT}${CLR}"
+        echo -e "${YLW}--[EXPECTED]--\n${EXPECTED}${CLR}\n"
+        echo -e "${PURP}--[TEST OUTPUT]--\n${TRIM_RESULT}${CLR}"
     fi
 }
 
@@ -129,7 +130,7 @@ clean_up() {
     if [[ ! -z "$SERVER_PID" ]]; then
         ps -p "$SERVER_PID" &> /dev/null
 
-        if (( $? == 0 )); then 
+        if (( $? == 0 )); then
             kill -SIGTERM "$SERVER_PID" &> /dev/null
             wait -f "$SERVER_PID" &> /dev/null
         fi
@@ -144,6 +145,7 @@ clean_up() {
     exit
 }
 
+# Run a single test.
 run_test() {
     local TEST_RESULT=""
     local TEST_NAME="$1"

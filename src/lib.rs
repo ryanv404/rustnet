@@ -32,7 +32,7 @@ pub mod util;
 pub use client::Client;
 pub use connection::{NetReader, NetWriter, RemoteConnect};
 pub use errors::NetError;
-pub use header::{HeaderName, HeadersMap, HeaderValue};
+pub use header::{HeaderName, HeaderValue};
 pub use http::{Method, Status, Version};
 pub use request::Request;
 pub use response::Response;
@@ -47,6 +47,9 @@ pub mod consts {
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
 }
+
+use std::collections::BTreeMap;
+pub type HeadersMap = BTreeMap<HeaderName, HeaderValue>;
 
 use std::result::Result as StdResult;
 pub type NetResult<T> = StdResult<T, NetError>;

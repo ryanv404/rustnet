@@ -61,12 +61,12 @@ impl HeaderValue {
             |ext| {
                 Self(Vec::from(match ext.to_str() {
                     Some("html" | "htm") => "text/html; charset=UTF-8",
-                    Some("ico") => "image/x-icon",
                     Some("txt") => "text/plain; charset=UTF-8",
                     Some("json") => "application/json",
+                    Some("pdf") => "application/pdf",
+                    Some("ico") => "image/x-icon",
                     Some("jpg" | "jpeg") => "image/jpeg",
                     Some("png") => "image/png",
-                    Some("pdf") => "application/pdf",
                     Some("gif") => "image/gif",
                     _ => "text/plain",
                 }))
