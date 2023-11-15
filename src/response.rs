@@ -207,15 +207,13 @@ impl Response {
             return false;
         }
 
-        if let Some(value) = self.content_type() {
-            match value.to_string() {
+        self.content_type().map_or(
+            false,
+            |value| match value.to_string() {
                 ct if ct.contains("text") => true,
                 ct if ct.contains("application") => true,
                 _ => false,
-            }
-        } else {
-            false
-        }
+            })
     }
 
     #[must_use]
