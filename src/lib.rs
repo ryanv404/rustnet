@@ -49,7 +49,9 @@ pub mod consts {
 }
 
 use std::collections::BTreeMap;
-pub type HeadersMap = BTreeMap<HeaderName, HeaderValue>;
-
+use std::path::PathBuf;
 use std::result::Result as StdResult;
+
+pub type RoutesMap = BTreeMap<Route, PathBuf>;
+pub type HeadersMap = BTreeMap<HeaderName, HeaderValue>;
 pub type NetResult<T> = StdResult<T, NetError>;

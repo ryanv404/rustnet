@@ -1,19 +1,11 @@
 [package]
 name = "rustnet"
 authors = ["ryanv404"]
-description = "An http networking library and server."
+description = "An HTTP networking library."
 version = "0.1.0"
 edition = "2021"
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/ryanv404/rustnet.git"
-keywords = ["http, server, networking"]
+keywords = ["http", "server", "client", "networking"]
 categories = ["network-programming"]
-
-[[bin]]
-name = "server"
-path = "src/bin/server.rs"
-
-[[bin]]
-name = "client"
-path = "src/bin/client.rs"

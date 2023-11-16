@@ -15,14 +15,14 @@ use crate::{
 /// Builder for the `Client` object.
 #[derive(Clone, Debug)]
 pub struct ClientBuilder<A: ToSocketAddrs> {
-    method: Option<Method>,
-    ip: Option<String>,
-    port: Option<u16>,
-    addr: Option<A>,
-    uri: Option<String>,
-    version: Option<Version>,
-    headers: Option<HeadersMap>,
-    body: Option<Vec<u8>>,
+    pub method: Option<Method>,
+    pub ip: Option<String>,
+    pub port: Option<u16>,
+    pub addr: Option<A>,
+    pub uri: Option<String>,
+    pub version: Option<Version>,
+    pub headers: Option<HeadersMap>,
+    pub body: Option<Vec<u8>>,
 }
 
 impl<A: ToSocketAddrs> Default for ClientBuilder<A> {
@@ -156,15 +156,15 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 /// An HTTP client that can send and receive messages with a remote host.
 #[derive(Debug)]
 pub struct Client {
-    method: Method,
-    uri: String,
-    version: Version,
-    headers: HeadersMap,
-    body: Vec<u8>,
-    local_addr: SocketAddr,
-    remote_addr: SocketAddr,
-    reader: NetReader,
-    writer: NetWriter,
+    pub method: Method,
+    pub uri: String,
+    pub version: Version,
+    pub headers: HeadersMap,
+    pub body: Vec<u8>,
+    pub local_addr: SocketAddr,
+    pub remote_addr: SocketAddr,
+    pub reader: NetReader,
+    pub writer: NetWriter,
 }
 
 impl Display for Client {
@@ -228,9 +228,9 @@ impl Client {
     #[must_use]
     pub fn default_headers(host: &str) -> HeadersMap {
         BTreeMap::from([
+            (ACCEPT, "text/html,application/json;q=0.9,*/*;q=0.8".into()),
             (HOST, host.into()),
             (UPGRADE_INSECURE_REQUESTS, "0".into()),
-            (ACCEPT, "text/html,application/json;q=0.9,*/*;q=0.8".into()),
             (USER_AGENT, "rustnet/0.1".into()),
         ])
     }

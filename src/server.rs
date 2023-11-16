@@ -35,59 +35,52 @@ impl<A: ToSocketAddrs> ServerConfig<A> {
         Server::new(addr, router)
     }
 
-    /// Configures handling of a GET request for the provided URI. Mounts the local
-    /// resource at the provided path to this URI.
+    /// Configures handling of a GET request.
     pub fn get<P: Into<PathBuf>>(&mut self, uri: &str, path: P) {
         let route = Route::new(Method::Get, uri);
         self.router.mount_with_path(route, path);
     }
 
-    /// Configures handling of POST requests for the provided URI.
+    /// Configures handling of a POST request.
     pub fn post(&mut self, uri: &str) {
         let route = Route::new(Method::Post, uri);
         self.router.mount(route);
     }
 
-    /// Configures handling of PUT requests for the provided URI.
+    /// Configures handling of a PUT request.
     pub fn put(&mut self, uri: &str) {
         let route = Route::new(Method::Put, uri);
         self.router.mount(route);
     }
 
-    /// Configures handling of PATCH requests for the provided URI.
+    /// Configures handling of a PATCH request.
     pub fn patch(&mut self, uri: &str) {
         let route = Route::new(Method::Patch, uri);
         self.router.mount(route);
     }
 
-    /// Configures handling of DELETE requests for the provided URI.
+    /// Configures handling of a DELETE request.
     pub fn delete(&mut self, uri: &str) {
         let route = Route::new(Method::Delete, uri);
         self.router.mount(route);
     }
 
-    /// Configures handling of HEAD requests for the provided URI.
-    pub fn head(&mut self, uri: &str) {
-        let route = Route::new(Method::Head, uri);
+    /// Configures handling of a TRACE request.
+    pub fn trace(&mut self, uri: &str) {
+        let route = Route::new(Method::Trace, uri);
         self.router.mount(route);
     }
 
-    /// Configures handling of CONNECT requests.
-    #[allow(dead_code)]
-    fn connect(&mut self) {
-        todo!();
+    /// Configures handling of a CONNECT request.
+    pub fn connect(&mut self, uri: &str) {
+        let route = Route::new(Method::Connect, uri);
+        self.router.mount(route);
     }
 
-    /// Configures handling of OPTIONS requests.
-    #[allow(dead_code)]
-    fn options(&mut self) {
-        todo!();
-    }
-
-    /// Configures handling of TRACE requests.
-    #[allow(dead_code)]
-    fn trace(&mut self) {
-        todo!();
+    /// Configures handling of an OPTIONS request.
+    pub fn options(&mut self, uri: &str) {
+        let route = Route::new(Method::Options, uri);
+        self.router.mount(route);
     }
 
     /// Sets the local path to the favicon.
@@ -101,6 +94,7 @@ impl<A: ToSocketAddrs> ServerConfig<A> {
     }
 }
 
+/// A wrapper around a `TcpListener` instance.
 pub struct Listener {
     pub inner: TcpListener,
 }
@@ -154,7 +148,7 @@ impl Server {
         let close_trigger = Arc::new(AtomicBool::new(true));
         let listener_running = Arc::clone(&close_trigger);
 
-        Self::log_server_start(&local_addr);
+        Self::log_start_up(&local_addr);
 
         // Spawns a thread that listens for new incoming connections.
         let handle = spawn(move || {
@@ -173,7 +167,7 @@ impl Server {
                     }
                     Err(e) => {
                         let _ = NetError::from_kind(e.kind());
-                    }
+                    },
                 }
             }
         });
@@ -185,11 +179,11 @@ impl Server {
         })
     }
 
-    /// Handles a remote client connection.
-    pub fn respond(mut client: RemoteConnect, router: &Arc<Router>) -> NetResult<()> {
-        let req = Request::from_client(&mut client)?;
+    /// Handles a request from a remote connection.
+    pub fn respond(mut remote: RemoteConnect, router: &Arc<Router>) -> NetResult<()> {
+        let req = Request::from_remote(&mut remote)?;
         let res = Response::from_request(&req, router)?;
-        res.send(&mut client)?;
+        res.send(&mut remote)?;
         Ok(())
     }
 
@@ -205,23 +199,21 @@ impl Server {
         self.local_addr.port()
     }
 
-    /// Logs a start up message to stdout.
-    pub fn log_server_start(addr: &SocketAddr) {
-        println!(
-            "[SERVER] Listening on {} at port {}.",
-            addr.ip(),
-            addr.port()
-        );
+    /// Logs a server start up message to stdout.
+    pub fn log_start_up(addr: &SocketAddr) {
+        let ip = addr.ip();
+        let port = addr.port();
+        println!("[SERVER] Listening on {ip} at port {port}.");
     }
 
-    /// Logs a shutdown message to stdout.
-    pub fn log_server_shutdown(&self) {
+    /// Logs a server shutdown message to stdout.
+    pub fn log_shutdown(&self) {
         println!("[SERVER] Now shutting down.");
     }
 
     /// Triggers graceful shutdown of the server.
     pub fn shutdown(&self) {
-        self.log_server_shutdown();
+        self.log_shutdown();
 
         // Stops the listener thread's loop.
         self.close_trigger.store(false, Ordering::Relaxed);

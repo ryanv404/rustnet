@@ -1,0 +1,35 @@
+GET /json HTTP/1.1
+Accept: text/html,application/json;q=0.9,*/*;q=0.8
+User-Agent: rustnet/0.1
+Upgrade-Insecure-Requests: 0
+
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Origin: *
+Connection: keep-alive
+Content-Length: 429
+Content-Type: application/json
+Server: gunicorn/19.9.0
+
+{
+  "slideshow": {
+    "author": "Yours Truly",
+    "date": "date of publication",
+    "slides": [
+      {
+        "title": "Wake up to WonderWidgets!",
+        "type": "all"
+      },
+      {
+        "items": [
+          "Why <em>WonderWidgets</em> are great",
+          "Who <em>buys</em> WonderWidgets"
+        ],
+        "title": "Overview",
+        "type": "all"
+      }
+    ],
+    "title": "Sample Slide Show"
+  }
+
+}

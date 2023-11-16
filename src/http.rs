@@ -99,6 +99,7 @@ impl TryFrom<u16> for Status {
 }
 
 impl Status {
+    #[rustfmt::skip]
     #[must_use]
     pub const fn msg(&self) -> &'static str {
         match self.0 {
@@ -134,7 +135,7 @@ impl Status {
             400 => "Bad Request",
 
             // 4xx (client error) status codes.
-            401 | 561 => "Unauthorized",
+            401 => "Unauthorized",
             402 => "Payment Required",
             403 => "Forbidden",
             404 => "Not Found",
@@ -202,6 +203,7 @@ impl Status {
             527 => "Railgun Listener to Origin",
             529 => "The Service Is Overloaded",
             530 => "Site Frozen",
+            561 => "Unauthorized",
             598 => "Network Read Timeout Error",
             599 => "Network Connect Timeout Error",
             _ => "",

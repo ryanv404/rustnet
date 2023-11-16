@@ -1,0 +1,12 @@
+GET /image/svg HTTP/1.1
+Accept: text/html,application/json;q=0.9,*/*;q=0.8
+User-Agent: rustnet/0.1
+Upgrade-Insecure-Requests: 0
+
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Origin: *
+Connection: keep-alive
+Content-Length: 8984
+Content-Type: image/svg+xml
+Server: gunicorn/19.9.0

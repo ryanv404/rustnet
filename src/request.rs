@@ -6,16 +6,9 @@ use std::str;
 
 use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH};
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult, RemoteConnect, Route, Version,
+    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult,
+    RemoteConnect, Route, Version,
 };
-
-// A random HTTP request:
-//GET / HTTP/1.1
-//Accept: */* (*/ for syntax coloring bug)
-//Accept-Encoding: gzip, deflate, br
-//Connection: keep-alive
-//Host: example.com
-//User-Agent: xh/0.19.3
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
@@ -47,7 +40,7 @@ impl Display for Request {
 }
 
 impl Request {
-    /// Parses the first line of a request.
+    /// Parses the first line of an HTTP request into an HTTP method, URI, and HTTP version.
     pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
         let trim = line.trim();
 
@@ -80,14 +73,14 @@ impl Request {
     }
 
     /// Parse a `Request` from a `RemoteConnect`.
-    pub fn from_client(client: &mut RemoteConnect) -> NetResult<Self> {
-        let remote_addr = client.remote_addr;
+    pub fn from_remote(remote: &mut RemoteConnect) -> NetResult<Self> {
+        let remote_addr = remote.remote_addr;
 
         let mut buf = String::new();
 
         // Parse the request line.
         let (method, uri, version) = {
-            match client.read_line(&mut buf) {
+            match remote.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
                 Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
                 Ok(_) => Self::parse_request_line(&buf)?,
@@ -100,7 +93,7 @@ impl Request {
         loop {
             buf.clear();
 
-            match client.read_line(&mut buf) {
+            match remote.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
                 Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
                 Ok(_) => {
@@ -134,26 +127,31 @@ impl Request {
         Vec::new()
     }
 
+    /// Returns the HTTP method.
     #[must_use]
     pub const fn method(&self) -> Method {
         self.method
     }
 
+    /// Returns the requested URI.
     #[must_use]
     pub fn uri(&self) -> &str {
         &self.uri
     }
 
+    /// Returns the `Route` representation of the `Request`.
     #[must_use]
     pub fn route(&self) -> Route {
         Route::new(self.method, &self.uri)
     }
 
+    /// Returns the HTTP version.
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
     }
 
+    /// Returns a reference to the `Request` object's headers.
     #[must_use]
     pub const fn headers(&self) -> &HeadersMap {
         &self.headers
@@ -168,33 +166,38 @@ impl Request {
         ])
     }
 
+    /// Returns true if the `Request` contains the given `HeaderName`.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
         self.headers.contains_key(name)
     }
 
+    /// Returns the `HeaderValue` associated with a given `HeaderName` key, if present.
     #[must_use]
     pub fn get_header_value(&self, name: &HeaderName) -> Option<&HeaderValue> {
         self.headers.get(name)
     }
 
+    /// The `SocketAddr` of the remote connection.
     #[must_use]
     pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
+    /// The `IpAddr` of the remote connection.
     #[must_use]
     pub const fn remote_ip(&self) -> IpAddr {
         self.remote_addr.ip()
     }
 
+    /// The port being used by the remote connection.
     #[must_use]
     pub const fn remote_port(&self) -> u16 {
         self.remote_addr.port()
     }
 
-    /// Logs the response status and request line for new requests.
-    pub fn log_with_status(&self, status: u16) {
-        println!("[{}|{status}] {}", self.remote_ip(), self);
+    /// Logs the response status and request line.
+    pub fn log(&self, status_code: u16) {
+        println!("[{}|{status_code}] {}", self.remote_ip(), self);
     }
 }

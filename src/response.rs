@@ -75,28 +75,33 @@ impl Display for Response {
 impl Response {
     pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
         let resolved = router.resolve(req);
+        let method = resolved.method;
+        let status = resolved.status;
+
+        let uri = req.uri.clone();
+        let version = req.version;
 
         let mut headers = BTreeMap::new();
 
         let body = {
-            if let Some(path) = resolved.path() {
-                let body = fs::read(path)?;
-                let len = format!("{}", body.len());
+            if resolved.path.is_some() {
+                let path = resolved.path.as_ref().unwrap();
+                let content = fs::read(path)?;
+                let len = content.len().to_string();
 
                 headers.insert(CACHE_CONTROL, HeaderValue::cache_control_from_path(path));
                 headers.insert(CONTENT_LENGTH, len.as_str().into());
                 headers.insert(CONTENT_TYPE, HeaderValue::content_type_from_path(path));
 
-                body
+                if method == Method::Head {
+                    Vec::new()
+                } else {
+                    content
+                }
             } else {
                 Vec::new()
             }
         };
-
-        let method = req.method;
-        let uri = req.uri.clone();
-        let version = req.version;
-        let status = resolved.status;
 
         Ok(Self {
             method,
