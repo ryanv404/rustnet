@@ -6,8 +6,7 @@ use std::str;
 
 use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH};
 use crate::{
-    HeaderName, HeadersMap, HeaderValue, Method, NetError, NetResult,
-    RemoteConnect, Route, Version
+    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult, RemoteConnect, Route, Version,
 };
 
 // A random HTTP request:

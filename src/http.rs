@@ -82,10 +82,7 @@ impl FromStr for Status {
     type Err = NetError;
 
     fn from_str(code: &str) -> NetResult<Self> {
-        u16::from_str(code).map_or_else(
-            |_| Err(NetError::BadStatusCode),
-            Self::try_from
-        )
+        u16::from_str(code).map_or_else(|_| Err(NetError::BadStatusCode), Self::try_from)
     }
 }
 

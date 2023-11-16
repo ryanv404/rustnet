@@ -4,12 +4,10 @@ use std::fs;
 use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
 
-use crate::consts::{
-    CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE
-};
+use crate::consts::{CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
 use crate::{
-    HeaderName, HeadersMap, HeaderValue, Method, NetResult, RemoteConnect,
-    Request, Router, Status, Version,
+    HeaderName, HeaderValue, HeadersMap, Method, NetResult, RemoteConnect, Request, Router, Status,
+    Version,
 };
 
 // A random HTTP response:
@@ -106,7 +104,7 @@ impl Response {
             version,
             status,
             headers,
-            body
+            body,
         })
     }
 
@@ -190,7 +188,7 @@ impl Response {
     pub fn content_type(&self) -> Option<&HeaderValue> {
         self.headers.get(&CONTENT_TYPE)
     }
-    
+
     pub fn set_content_type(&mut self, value: HeaderValue) {
         self.set_header(CONTENT_TYPE, value);
     }
@@ -207,9 +205,8 @@ impl Response {
             return false;
         }
 
-        self.content_type().map_or(
-            false,
-            |value| match value.to_string() {
+        self.content_type()
+            .map_or(false, |value| match value.to_string() {
                 ct if ct.contains("text") => true,
                 ct if ct.contains("application") => true,
                 _ => false,

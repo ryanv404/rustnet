@@ -1,25 +1,24 @@
 #[cfg(test)]
 mod std_headers {
-    use crate::HeaderName;
     use crate::header::names::TEST_HEADERS;
+    use crate::HeaderName;
 
     #[test]
     fn from_lowercase_bytes() {
-        TEST_HEADERS.iter().for_each(|&(std, bytes)| {
+        for &(std, bytes) in TEST_HEADERS {
             let std_hdr = HeaderName::from(std);
             let parsed_hdr = HeaderName::try_from(bytes).unwrap();
             assert_eq!(std_hdr, parsed_hdr);
-        });
+        }
     }
 
     #[test]
     fn from_uppercase_bytes() {
-        TEST_HEADERS.iter().for_each(|&(std, bytes)| {
+        for &(std, bytes) in TEST_HEADERS {
             let std_hdr = HeaderName::from(std);
-            let parsed_hdr = HeaderName::try_from(bytes
-                .to_ascii_uppercase().as_slice()).unwrap();
+            let parsed_hdr = HeaderName::try_from(bytes.to_ascii_uppercase().as_slice()).unwrap();
             assert_eq!(std_hdr, parsed_hdr);
-        });
+        }
     }
 }
 
@@ -47,9 +46,18 @@ mod http_method {
         assert_eq!(Request::parse_request_line(head).unwrap().0, Method::Head);
         assert_eq!(Request::parse_request_line(patch).unwrap().0, Method::Patch);
         assert_eq!(Request::parse_request_line(trace).unwrap().0, Method::Trace);
-        assert_eq!(Request::parse_request_line(delete).unwrap().0, Method::Delete);
-        assert_eq!(Request::parse_request_line(options).unwrap().0, Method::Options);
-        assert_eq!(Request::parse_request_line(connect).unwrap().0, Method::Connect);
+        assert_eq!(
+            Request::parse_request_line(delete).unwrap().0,
+            Method::Delete
+        );
+        assert_eq!(
+            Request::parse_request_line(options).unwrap().0,
+            Method::Options
+        );
+        assert_eq!(
+            Request::parse_request_line(connect).unwrap().0,
+            Method::Connect
+        );
         assert!(Request::parse_request_line(bad1).is_err());
         assert!(Request::parse_request_line(bad2).is_err());
         assert!(Request::parse_request_line(bad3).is_err());
@@ -66,10 +74,22 @@ mod http_version {
         let onezero = "GET /test HTTP/1.0";
         let oneone = "GET /test HTTP/1.1";
         let twozero = "POST /test HTTP/2.0";
-        assert_eq!(Request::parse_request_line(zeronine).unwrap().2, Version::ZeroDotNine);
-        assert_eq!(Request::parse_request_line(onezero).unwrap().2, Version::OneDotZero);
-        assert_eq!(Request::parse_request_line(oneone).unwrap().2, Version::OneDotOne);
-        assert_eq!(Request::parse_request_line(twozero).unwrap().2, Version::TwoDotZero);
+        assert_eq!(
+            Request::parse_request_line(zeronine).unwrap().2,
+            Version::ZeroDotNine
+        );
+        assert_eq!(
+            Request::parse_request_line(onezero).unwrap().2,
+            Version::OneDotZero
+        );
+        assert_eq!(
+            Request::parse_request_line(oneone).unwrap().2,
+            Version::OneDotOne
+        );
+        assert_eq!(
+            Request::parse_request_line(twozero).unwrap().2,
+            Version::TwoDotZero
+        );
     }
 }
 
@@ -96,10 +116,10 @@ mod http_status {
 
 #[cfg(test)]
 mod request {
-    use std::collections::BTreeMap;
     use crate::consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT};
     use crate::header::names::HdrRepr;
     use crate::{HeaderName, HeadersMap, Request};
+    use std::collections::BTreeMap;
 
     #[test]
     fn multiple_headers_from_str() {
@@ -130,18 +150,19 @@ mod request {
         for line in test.split('\n') {
             let trim = line.trim();
 
-            if trim.is_empty() { break; }
+            if trim.is_empty() {
+                break;
+            }
 
             let (name, value) = Request::parse_header(trim).unwrap();
             output.insert(name, value);
         }
 
         assert_eq!(output.len(), expected.len());
-        assert!(output.iter()
-                      .zip(expected)
-                      .all(|((k_out, v_out), (k_exp, v_exp))| {
-                          *k_out == k_exp && *v_out == v_exp
-                      }));
+        assert!(output
+            .iter()
+            .zip(expected)
+            .all(|((k_out, v_out), (k_exp, v_exp))| { *k_out == k_exp && *v_out == v_exp }));
     }
 }
 
@@ -168,13 +189,12 @@ mod utils {
 
 #[cfg(test)]
 mod client {
-    use crate::{Client, HeaderValue as HdVal, Status, Version};
     use crate::consts::{
-        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
-        ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION as CONN,
-        CONTENT_LENGTH as CONLEN, CONTENT_TYPE as CONTYPE, DATE, LOCATION,
-        SERVER
+        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC, ACCESS_CONTROL_ALLOW_ORIGIN as ACAO,
+        CONNECTION as CONN, CONTENT_LENGTH as CONLEN, CONTENT_TYPE as CONTYPE, DATE, LOCATION,
+        SERVER,
     };
+    use crate::{Client, HeaderValue as HdVal, Status, Version};
     const SERVER_ADDR: &str = "httpbin.org:80";
 
     // Responds with the status code corresponding to `code`.
@@ -183,11 +203,7 @@ mod client {
             #[test]
             fn $label() {
                 let uri = format!("/status/{}", $code);
-                let mut client = Client::http()
-                    .addr(&SERVER_ADDR)
-                    .uri(&uri)
-                    .build()
-                    .unwrap();
+                let mut client = Client::http().addr(&SERVER_ADDR).uri(&uri).build().unwrap();
                 client.send().unwrap();
                 let res = client.recv().unwrap();
 
@@ -196,23 +212,26 @@ mod client {
                 assert_eq!(res.headers.get(&ACAC), Some(&HdVal::new(b"true")));
                 assert_eq!(res.headers.get(&ACAO), Some(&HdVal::new(b"*")));
                 if $code == 101 {
-                    assert_eq!(res.headers.get(&CONN),
-                        Some(&HdVal::new(b"upgrade")));
-                } else  {
-                    assert_eq!(res.headers.get(&CONN),
-                        Some(&HdVal::new(b"keep-alive")));
-                    assert_eq!(res.headers.get(&CONLEN),
-                        Some(&HdVal::new(b"0")));
+                    assert_eq!(res.headers.get(&CONN), Some(&HdVal::new(b"upgrade")));
+                } else {
+                    assert_eq!(res.headers.get(&CONN), Some(&HdVal::new(b"keep-alive")));
+                    assert_eq!(res.headers.get(&CONLEN), Some(&HdVal::new(b"0")));
                 }
                 if $code == 303 {
-                    assert_eq!(res.headers.get(&LOCATION),
-                        Some(&HdVal::new(b"/redirect/1")));
+                    assert_eq!(
+                        res.headers.get(&LOCATION),
+                        Some(&HdVal::new(b"/redirect/1"))
+                    );
                 } else {
-                    assert_eq!(res.headers.get(&CONTYPE),
-                        Some(&HdVal::new(b"text/html; charset=utf-8")));
+                    assert_eq!(
+                        res.headers.get(&CONTYPE),
+                        Some(&HdVal::new(b"text/html; charset=utf-8"))
+                    );
                 }
-                assert_eq!(res.headers.get(&SERVER),
-                    Some(&HdVal::new(b"gunicorn/19.9.0")));
+                assert_eq!(
+                    res.headers.get(&SERVER),
+                    Some(&HdVal::new(b"gunicorn/19.9.0"))
+                );
                 assert!(res.headers.contains_key(&DATE));
                 //assert_eq!(res.body, Vec::new());
             }

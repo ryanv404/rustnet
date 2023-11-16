@@ -1,7 +1,4 @@
-use std::io::{
-    BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult,
-    Write
-};
+use std::io::{BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::sync::Mutex;
 

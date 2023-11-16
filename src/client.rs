@@ -4,12 +4,12 @@ use std::io::{BufRead, Read, Write};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 
-use crate::{
-    HeaderName, HeadersMap, HeaderValue, Method, NetError, NetReader, NetWriter,
-    Response, Status, Version,
-};
 use crate::consts::{
-    ACCEPT, HOST, USER_AGENT, UPGRADE_INSECURE_REQUESTS, CONTENT_LENGTH, CONTENT_TYPE,
+    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
+};
+use crate::{
+    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetReader, NetWriter, Response, Status,
+    Version,
 };
 
 /// Builder for the `Client` object.
@@ -129,9 +129,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         let headers = self
             .headers
             .take()
-            .unwrap_or_else(|| {
-                Self::default_headers(&remote_addr.to_string())
-            });
+            .unwrap_or_else(|| Self::default_headers(&remote_addr.to_string()));
 
         let body = self.body.take().unwrap_or_default();
 
@@ -144,7 +142,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
             local_addr,
             remote_addr,
             reader,
-            writer
+            writer,
         })
     }
 
@@ -233,7 +231,7 @@ impl Client {
             (HOST, host.into()),
             (UPGRADE_INSECURE_REQUESTS, "0".into()),
             (ACCEPT, "text/html,application/json;q=0.9,*/*;q=0.8".into()),
-            (USER_AGENT, "rustnet/0.1".into())
+            (USER_AGENT, "rustnet/0.1".into()),
         ])
     }
 
@@ -283,13 +281,14 @@ impl Client {
             let remote_addr = self.remote_addr().to_string();
 
             if self.headers.is_empty() {
-                Self::default_headers(&remote_addr)
-                .iter()
-                .fold(String::new(), |mut acc, (name, value)| {
-                    let header = format!("{name}: {value}\r\n");
-                    acc.push_str(&header);
-                    acc
-                })
+                Self::default_headers(&remote_addr).iter().fold(
+                    String::new(),
+                    |mut acc, (name, value)| {
+                        let header = format!("{name}: {value}\r\n");
+                        acc.push_str(&header);
+                        acc
+                    },
+                )
             } else {
                 // Ensure the default headers are included.
                 let default_headers = Self::default_headers(&remote_addr);
@@ -346,7 +345,7 @@ impl Client {
             version,
             status,
             headers,
-            body
+            body,
         })
     }
 
@@ -387,7 +386,7 @@ impl Client {
                     let payload = format!("cannot parse status code: {code} ({msg})");
                     Err(IoError::new(IoErrorKind::Other, payload))
                 }
-            },
+            }
         }
     }
 
@@ -436,14 +435,11 @@ impl Client {
                 let mut buf = Vec::with_capacity(len as usize);
 
                 // Take by reference instead of consuming the reader.
-                let mut reader_ref = self
-                    .reader
-                    .by_ref()
-                    .take(u64::from(len));
+                let mut reader_ref = self.reader.by_ref().take(u64::from(len));
 
                 reader_ref.read_to_end(&mut buf)?;
                 Ok(buf)
-            },
+            }
             None => Ok(Vec::new()),
         }
     }

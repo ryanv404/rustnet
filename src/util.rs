@@ -2,7 +2,7 @@ use std::process::Command;
 
 // Trims ASCII whitespace bytes from both ends of a slice of bytes.
 //
-// Whitespace is: b'\t' (0x09), b'\n' (0x0a), b'\f' (0x0c), b'\r' (0x0d),
+// Whitespace is b'\t' (0x09), b'\n' (0x0a), b'\f' (0x0c), b'\r' (0x0d),
 // or b' ' (0x20).
 #[must_use]
 pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
@@ -87,6 +87,7 @@ pub const fn is_token(b: u8) -> bool {
 
 // ASCII codes to accept URI string.
 // i.e. A-Za-z0-9!#$%&'*+-._();:@=,/?[]~^
+#[rustfmt::skip]
 #[allow(dead_code)]
 static URI_MAP: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x0x
@@ -122,6 +123,7 @@ pub fn is_uri_token(b: u8) -> bool {
     URI_MAP[b as usize] == 1
 }
 
+#[rustfmt::skip]
 #[allow(dead_code)]
 static HEADER_NAME_MAP: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -148,6 +150,7 @@ pub fn is_header_name_token(b: u8) -> bool {
     HEADER_NAME_MAP[b as usize] == 1
 }
 
+#[rustfmt::skip]
 #[allow(dead_code)]
 static HEADER_VALUE_MAP: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,

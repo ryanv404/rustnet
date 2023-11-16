@@ -2,4 +2,4 @@
 /tools
 /.vscode
 scripts/server_log.txt
-Cargo.lock
+/Cargo.lock

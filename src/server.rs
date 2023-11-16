@@ -8,8 +8,7 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetError, NetResult, RemoteConnect, Request, Response, Route,
-    Router, ThreadPool,
+    Method, NetError, NetResult, RemoteConnect, Request, Response, Route, Router, ThreadPool,
 };
 
 /// Configures the socket address and the router for a `Server`.

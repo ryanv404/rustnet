@@ -4,7 +4,6 @@ use rustnet::Client;
 
 pub mod ansi {
     pub const RED: &str = "\x1b[91m";
-    pub const GREEN: &str = "\x1b[92m";
     pub const PURP: &str = "\x1b[95m";
     pub const CYAN: &str = "\x1b[96m";
     pub const RESET: &str = "\x1b[0m";
@@ -23,6 +22,7 @@ Options:\n  \
   -h, --help  Displays this help message.\
 ";
 
+#[rustfmt::skip]
 fn main() -> io::Result<()> {
     let mut args = env::args().skip(1);
 
