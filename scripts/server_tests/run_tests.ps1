@@ -1,73 +1,76 @@
-# Test 1: GET /
-$test1Params = @{ TestName = "get_index"; Uri = "/"; }
-# Test 2: GET /
-$test2Params = @{ TestName = "get_about"; Uri = "/about"; }
-# Test 3: GET /
-$test3Params = @{ TestName = "get_foo"; Uri = "/foo"; }
-# Test 4: GET /
-$test4Params = @{ TestName = "get_favicon"; Uri = "/favicon.ico"; }
+# Script-level variables to track testing results.
+$script:numTests = 0
+$script:numPassed = 0
 
-# Create a dictionary to track the test results.
-$tracker = New-Object 'System.Collections.Generic.Dictionary[String, bool]'
-
-function Remove-OldCargoJobsIfPresent {
-	$priorCargoJobs = Get-Job | Where-Object -FilterScript {
-		$_.Command -match "cargo"
-	}
-
-	if ($priorCargoJobs.Count -ne 0) {
-        foreach ($cargoJob in $priorCargoJobs) {
-            (Receive-Job -Job $cargoJob) |
-                Where-Object { ($_.GetType()).Name -eq 'String' } |
-                Out-File -FilePath $serverLog
-
-            Stop-Job -Job $cargoJob
-			Remove-Job -Job $cargoJob
-		}
-	}
-}
-
-function Initialize-MyServer {
+# Builds the test server.
+function Build-MyServer {
 	$red = @{ ForegroundColor = 'Red'; }
+	$green = @{ ForegroundColor = 'Green'; }
 	$yellow = @{ ForegroundColor = 'Yellow'; }
 
-	Remove-OldCargoJobsIfPresent
+	Remove-OldCargoJobs
 
 	cargo clean *> $null
 
 	if ($LASTEXITCODE -ne 0) {
-		Write-Host @yellow "Unable to remove the prior build artifacts. Continuing."
+		Write-Host @yellow "Unable to remove the prior build artifacts."
 	}
 
-	Write-Host "Building..."
+	Write-Host -NoNewline "Building..."
 
 	cargo build --bin server *> $null
 
 	if ($LASTEXITCODE -ne 0) {
-		Write-Host @red "`nUnable to build the server. Exiting."
+		Write-Host @red "✗ Unable to build the server."
 		exit
 	}
+    else {
+        Write-Host @green "✔"
+    }
 }
 
+# Starts the test server as a background job.
 function Start-MyServer {
-    $serverJob = Start-Job -ScriptBlock {
-		cargo run --bin server *>&1
+    $red = @{ ForegroundColor = 'Red'; }
+
+    Build-MyServer
+
+    $crateDir = ($PSScriptRoot | Get-Item).Parent.Parent
+
+    $joinParams = @{
+        Path = $crateDir
+        ChildPath = 'target'
+        AdditionalChildPath = 'debug', 'server.exe'
+    }
+
+    $serverExe = Join-Path @joinParams
+
+	if (!(Test-Path -Path $serverExe)) {
+		Write-Host @red "`n✗ Cannot locate the server executable file."
+        Remove-BuildArtifacts
+    }
+
+    $serverJob = Start-Job -ScriptBlock { & $using:serverExe *>&1 }
+
+    # Pause briefly to allow the server to start up.
+    Start-Sleep -Seconds 1
+
+    if (($null -eq $serverJob.Id) -or ($serverJob.Id -eq 0)) {
+		Write-Host @red "✗ Unable to start the server in a background job."
+		Remove-BuildArtifacts
 	}
 
-	if (($null -eq $serverJob.Id) -or ($serverJob.Id -eq 0)) {
-		$red = @{ ForegroundColor = 'Red'; }
-		Write-Host @red "`nUnable to start a job to run the server. Exiting."
-		Remove-MyTestDebris
-	}
+    Confirm-MyServerIsLive
 }
 
-function Initialize-MyConnection {
+# Confirms the server is live and reachable.
+function Confirm-MyServerIsLive {
 	$red = @{ ForegroundColor = 'Red'; }
 	$green = @{ ForegroundColor = 'Green'; }
 
 	$attemptNum = 0
 	$maxAttempts = 5
-	$stillConnecting = $true
+	$stillNotLive = $true
 
 	$initConnectParams = @{
 		Method = 'Get'
@@ -80,275 +83,418 @@ function Initialize-MyConnection {
 		Write-Host -NoNewline "Connecting..."
 
 		try {
-			$res = $null
-			$res = (Invoke-WebRequest @initConnectParams).StatusCode
+			$statusCode = (Invoke-WebRequest @initConnectParams).StatusCode
 		}
 		catch {
-			Write-Host @red "Got an exception."
-			Write-Host "$($_.Exception.Message)"
+			Write-Host @red "✗ Connection error."
+			Write-Host @red $_.Exception.Message
 		}
 
-		if ($res -eq 200) {
-			Write-Host @green "Server is live!`n"
-			$stillConnecting = $false
+		if ($statusCode -eq 200) {
+			Write-Host @green "✔`n"
+			$stillNotLive = $false
 			return
 		}
 		else {
 			$attemptNum++
 		}
 
-	} while (($attemptNum -lt $maxAttempts) -and ($stillConnecting))
+	} while (($attemptNum -lt $maxAttempts) -and ($stillNotLive))
 
-	if ($stillConnecting) {
-		Write-Host @red "`nServer is unreachable. Exiting."
-		Remove-MyTestDebris
+	if ($stillNotLive) {
+		Write-Host @red "`n✗ The server is unreachable."
+		Remove-BuildArtifacts
 	}
 }
 
-function Remove-MyTestDebris {
-	Remove-OldCargoJobsIfPresent
+# Removes any background Cargo jobs that may be running.
+function Remove-OldCargoJobs {
+	$priorCargoJobs = Get-Job | Where-Object -FilterScript {
+		(($_.Command -like "*cargo*") -or ($_.Command -like "*serverExe*"))
+	}
+
+	if ($priorCargoJobs.Count -ne 0) {
+        $serverLog = Join-Path -Path $PSScriptRoot -ChildPath 'server.log'
+
+        New-Item -Path $serverLog -ItemType File -Force | Out-Null
+
+        foreach ($cargoJob in $priorCargoJobs) {
+            (Receive-Job -Job $cargoJob) |
+                Where-Object { $_ -is [string] } |
+                Out-File -FilePath $serverLog
+
+            Stop-Job -Job $cargoJob
+			Remove-Job -Job $cargoJob
+		}
+	}
+}
+
+# Remove old build artifacts.
+function Remove-BuildArtifacts {
+	Remove-OldCargoJobs
 	cargo clean *> $null
 	exit
 }
 
-function Start-OneTest {
+# Writes a message to indicate the test passed.
+function Write-TestPassed {
     param(
 		[Parameter(Mandatory = $true)]
-		[System.String]$testName,
+		[string]
+        $label
+    )
+
+    $blue = @{ ForegroundColor = 'Blue'; }
+    $green = @{ ForegroundColor = 'Green'; }
+
+    Write-Host -NoNewline "["
+    Write-Host -NoNewline @green "✔"
+    Write-Host -NoNewline "] "
+    Write-Host @blue $label
+}
+
+# Writes a message to indicate the test failed.
+function Write-TestFailed {
+    param(
+		[Parameter(Mandatory = $true)]
+		[string]
+        $label,
 
 		[Parameter(Mandatory = $true)]
-		[System.String]$uri
-	)
+		[string]
+        $reason
+    )
 
-    # Initialize variables that will use null testing.
-    $res = $null
-    $testHeaders = $null
-    $testContentType = $null
-    $expectedOutput = $null
-
-    # Color settings for Write-Host
     $red = @{ ForegroundColor = 'Red'; }
-	$blue = @{ ForegroundColor = 'Blue'; }
-	$green = @{ ForegroundColor = 'Green'; }
-	$yellow = @{ ForegroundColor = 'Yellow'; }
-	$magenta = @{ ForegroundColor = 'Magenta'; }
+    $blue = @{ ForegroundColor = 'Blue'; }
 
-    # Construct the path "${crateDir}\scripts\tests\${testName}.txt"
-    $joinParams = @{
-		Path = $crateDir
-		ChildPath = 'scripts'
-		AdditionalChildPath = 'tests', "${testName}.txt"
-	}
+    Write-Host -NoNewline "["
+    Write-Host -NoNewline @red "✗"
+    Write-Host -NoNewline "] "
+    Write-Host -NoNewline @blue $label
+    Write-Host -NoNewline ": "
+    Write-Host @red $reason
+}
 
-	$expectedOutputFile = Join-Path @joinParams
+# Runs a single test.
+function Test-OneRoute {
+    param(
+		[Parameter(Mandatory = $true)]
+		[string]
+        $method,
 
-	Write-Host "[" -NoNewline
-	Write-Host @blue $testName -NoNewline
-	Write-Host "]: " -NoNewline
+        [Parameter(Mandatory = $true)]
+		[string]
+        $uri,
 
-	if (!(Test-Path -Path $expectedOutputFile)) {
-		Write-Host @red "✗ No expected output file found."
-		$tracker.Add($testName, $false)
+        [Parameter(Mandatory = $true)]
+		[string]
+        $label,
+
+        [Parameter(Mandatory = $true)]
+		[string]
+        $file
+    )
+
+    $expOutputFile = Join-Path -Path $PSScriptRoot -ChildPath $file
+
+	if (!(Test-Path -Path $expOutputFile)) {
+        Write-TestFailed $label "No expected output file found."
 		return
 	}
 
-	$expectedOutput = Get-Content -Path $expectedOutputFile -Encoding 'utf8' |
+	$expOutput = Get-Content -Path $expOutputFile -Encoding 'utf8' -Raw
+    $expOutput = $expOutput -split "`n" |
         ForEach-Object { $_.Trim() }
 
-    if (($null -eq $expectedOutput) -or ($expectedOutput.Count -eq 0)) {
-        Write-Host @red "✗ The expected output file was empty."
-        $tracker.Add($testName, $false)
+    if (($null -eq $expOutput) -or ($expOutput.Count -eq 0)) {
+        Write-TestFailed $label "The expected output file was empty."
         return
     }
 
 	try {
-        # We want to analyze 4xx and 5xx responses so set SkipHttpErrorCheck
-        $connectParams = @{
-            Method = 'Get'
-            Uri = "http://127.0.0.1:7878${uri}"
-            SkipHttpErrorCheck = $true
+        if ($method -eq "CONNECT") {
+            $headers = @{
+                'Host' = 'localhost:7878'
+            }
+
+            $connectParams = @{
+                CustomMethod = $method
+                Headers = $headers
+                Uri = 'http://127.0.0.1:7878'
+                SkipHttpErrorCheck = $true
+            }
+        }
+        else {
+            $connectParams = @{
+                Method = $method
+                Uri = "http://127.0.0.1:7878${uri}"
+                SkipHttpErrorCheck = $true
+            }
         }
 
         $res = Invoke-WebRequest @connectParams
     }
     catch {
-        Write-Host @red "✗ Connection error. $($_.Exception.Message)."
-        $tracker.Add($testName, $false)
+        Write-TestFailed $label "Connection error.`n$($_.Exception.Message)"
+        return
     }
 
     if ($null -eq $res) {
-        Write-Host @red "✗ No response received."
-        $tracker.Add($testName, $false)
+        Write-TestFailed $label "No response received."
         return
     }
 
-    # Test whether the output status line matches the expected status line.
-    #
-    # $res changes the status message from 'Not Found' to 'NotFound' which
-    # messes with the upcoming comparisons. So I'll just rebuild all status
-    # lines from scratch using the BaseResponse, which contains exactly what
-    # the server sent back.
-    $version = $res.BaseResponse.Version
-    $statusCode = $res.StatusCode
-    $statusMsg = $res.BaseResponse.ReasonPhrase
+    $expStatusLine = ($expOutput.Count -gt 1) ? $expOutput[0] : $expOutput
 
-    $testStatusLine = "HTTP/$($version) $($statusCode) $($statusMsg)"
-    $expectedStatusLine = $expectedOutput[0]
-
-    if (!($testStatusLine -ceq $expectedStatusLine)) {
-        Write-Host @red "✗ Did not match the expected status line."
-        Write-Host @yellow "`n[EXPECTED] $expectedStatusLine"
-        Write-Host @magenta "[OUTPUT] $testStatusLine`n"
-        $tracker.Add($testName, $false)
-        return
+    $statusLineParams = @{
+        Label = $label
+        BaseResponse = $res.BaseResponse
+        StatusCode = $res.StatusCode
+        ExpStatusLine = $expStatusLine
     }
 
-    # Test whether the output headers match the expected headers.
-    $testHeaders = ${res}?.Headers
+    $testPassed = $false
+    $testPassed = Test-StatusLine @statusLineParams
 
-    if ($null -eq $testHeaders) {
-        Write-Host @red "✗ Response does not contain any headers."
-        $tracker.Add($testName, $false)
-        return
-    }
-
-    $testContentType = ${testHeaders}?["Content-Type"]?[0]
-
-    if ($null -eq $testContentType) {
-        Write-Host @red "✗ Response does not contain a Content-Type header."
-        $tracker.Add($testName, $false)
+    if ($testPassed -eq $false) {
         return
     }
 
     # IndexOf returns -1 if the string cannot be found.
-    $blankLineIndex = $expectedOutput.IndexOf("")
+    $HeadersEnd = $expOutput.IndexOf("")
 
-    # We expect the expected headers to start at index 1.
-    if ($blankLineIndex -le 1) {
-        Write-Host @red "✗ Expected headers are formatted incorrectly."
-        Write-Host @yellow "`nEnsure that the expected headers section starts `
-            on the 2nd line and ends with a blank line.`n"
-        $tracker.Add($testName, $false)
+    if ($HeadersEnd -eq -1) {
+        Write-TestFailed $label "End of expected headers section not found."
         return
     }
 
-    # The index of the first blank line is greater than 1.
-    $expectedHeaders = $expectedOutput[1..($blankLineIndex - 1)]
+    # If headers end at line index 1 then there are no headers and no body.
+    if ($HeadersEnd -gt 1) {
+        [string[]] $testHeaders = ${res}?.Headers.GetEnumerator() |
+            ForEach-Object { "$($_.Key): $($_.Value?[0])" }
 
-    $testHeaders = $testHeaders.GetEnumerator() |
-        ForEach-Object { "$($_.Key): $($_.Value)" }
+        [string[]] $expHeaders = $expOutput[1..($HeadersEnd - 1)]
 
-    if ($testHeaders.Count -ne $expectedHeaders.Count) {
-        Write-Host @red "✗ Did not match the expected number of headers."
-        Write-Host @yellow "`n[EXPECTED TOTAL] $($expectedHeaders.Count)"
+        $headersParams = @{
+            Label = $label
+            TestHeaders = $testHeaders
+            ExpHeaders = $expHeaders
+        }
+
+        $testPassed = $false
+        $testPassed = Test-ResponseHeaders @headersParams
+
+        if ($testPassed -eq $false) {
+            return
+        }
+
+        $contentType = ${res}.Headers?["Content-Type"]?[0]
+
+        # Only test the body if appropriate.
+        if (($method -ne 'Head') -and
+            ($null -ne $contentType) -and
+            ($contentType -notlike "*image*"))
+        {
+            $bodyStart = $HeadersEnd + 1
+            $bodyEnd = $expOutput.Count - 1
+
+            $expBody = $expOutput[($bodyStart)..($bodyEnd)] |
+                Join-String -Separator "`n"
+
+            $testBody = $res.Content -split "`n" |
+                ForEach-Object { $_.Trim() } |
+                Join-String -Separator "`n"
+
+            $bodyParams = @{
+                Label = $label
+                TestBody = $testBody
+                ExpBody = $expBody
+            }
+
+            $testPassed = $false
+            $testPassed = Test-ResponseBody @bodyParams
+
+            if ($testPassed -eq $false) {
+                return
+            }
+        }
+    }
+
+    # Only tests that have not failed a prior step make it to this point.
+    Write-TestPassed $label
+    $script:numPassed++
+}
+
+# Test whether the output status line matches the expected status line.
+function Test-StatusLine {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $label,
+
+        [Parameter(Mandatory = $true)]
+        [System.Net.Http.HttpResponseMessage]
+        $baseResponse,
+
+        [Parameter(Mandatory = $true)]
+        [Int32]
+        $statusCode,
+
+        [Parameter(Mandatory = $true)]
+        [string]
+        $expStatusLine
+    )
+
+    # Color settings for Write-Host
+	$yellow = @{ ForegroundColor = 'Yellow'; }
+	$magenta = @{ ForegroundColor = 'Magenta'; }
+
+    $version = $baseResponse.Version
+    $statusMsg = $baseResponse.ReasonPhrase
+    $testStatusLine = "HTTP/$($version) $($statusCode) $($statusMsg)"
+
+    if ($testStatusLine -cne $expStatusLine) {
+        Write-TestFailed $label "Did not match the expected status line."
+        Write-Host @yellow "`n[EXPECTED] $expStatusLine"
+        Write-Host @magenta "[OUTPUT] $testStatusLine`n"
+        return $false
+    }
+    else {
+        return $true
+    }
+}
+
+# Test whether the output headers match the expected headers.
+function Test-ResponseHeaders {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $label,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]
+        $testHeaders,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]
+        $expHeaders
+    )
+
+    # Color settings for Write-Host
+	$yellow = @{ ForegroundColor = 'Yellow'; }
+	$magenta = @{ ForegroundColor = 'Magenta'; }
+
+    if ($null -eq $testHeaders) {
+        Write-TestFailed $label "Response does not contain any headers."
+        return $false
+    }
+
+    if ($testHeaders.Count -ne $expHeaders.Count) {
+        Write-TestFailed $label "Incorrect number of headers."
+        Write-Host @yellow "`n[EXPECTED TOTAL] $($expHeaders.Count)"
         Write-Host @magenta "[OUTPUT TOTAL] $($testHeaders.Count)`n"
-        $tracker.Add($testName, $false)
-        return
+        return $false
     }
 
-    foreach ($idx in 0..$expectedHeaders.Count) {
-        $expHdr = $expectedHeaders[$idx]
+    foreach ($idx in 0..$expHeaders.Count) {
+        $expHdr = $expHeaders[$idx]
         $testHdr = $testHeaders[$idx]
 
-        if (!($testHdr -ceq $expHdr)) {
-            Write-Host @red "✗ Did not match the expected headers."
+        if ($testHdr -cne $expHdr) {
+            Write-TestFailed $label "Did not match the expected headers."
             Write-Host @yellow "`n[EXPECTED] $expHdr"
-            Write-Host @magenta "[OUTPUT]   $testHdr`n"
-            $tracker.Add($testName, $false)
-            return
+            Write-Host @magenta "[OUTPUT] $testHdr`n"
+            return $false
         }
     }
 
-    # Test whether the output body matches the expected body, if applicable.
-    if ($testContentType.Contains("text")) {
-        $testBody = $res.Content -split "`r?`n" |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { $_.Length -gt 0 } |
-            Join-String -Separator "`r`n"
-
-        $expectedEnd = $expectedOutput.Count - 1
-        $expectedBody = $expectedOutput[($blankLineIndex + 1)..($expectedEnd)] |
-            ForEach-Object { $_.Trim() } |
-            Join-String -Separator "`r`n"
-
-        if (!($testBody -ceq $expectedBody)) {
-            Write-Host @red "✗ Did not match the expected body."
-            Write-Host @magenta "`n[OUTPUT]`n$testBody"
-            Write-Host @yellow "`n[EXPECTED]`n$expectedBody"
-            $tracker.Add($testName, $false)
-            return
-        }
-    }
-
-    # All tests have passed at this point.
-    Write-Host @green "✔"
-    $tracker.Add($testName, $true)
+    return $true
 }
 
+# Test whether the output body matches the expected body, if applicable.
+function Test-ResponseBody {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $label,
+
+        [Parameter(Mandatory = $true)]
+        [string]
+        $testBody,
+
+        [Parameter(Mandatory = $true)]
+        [string]
+        $expBody
+    )
+
+    # Color settings for Write-Host
+	$yellow = @{ ForegroundColor = 'Yellow'; }
+	$magenta = @{ ForegroundColor = 'Magenta'; }
+
+    if ($testBody -cne $expBody) {
+        Write-TestFailed $label "Did not match the expected body."
+        Write-Host @magenta "`n[OUTPUT]`n$testBody"
+        Write-Host @yellow "`n[EXPECTED]`n$expBody"
+        return $false
+    }
+    else {
+        return $true
+    }
+}
+
+# Runs all server tests and reports the results.
 function Test-MyServer {
-	$crateDirParams = @{
-		Name = "crateDir"
-		Option = "AllScope", "Constant"
-		Value = (($PSScriptRoot | Get-Item).Parent)
-	}
-
-	New-Variable @crateDirParams
-
-    $serverLogJoinParams = @{
-        Path = $crateDir
-        ChildPath = 'scripts'
-        AdditionalChildPath = 'server_log.txt'
-    }
-
-    $serverLogParams = @{
-        Name = "serverLog"
-		Option = "AllScope", "Constant"
-		Value = (Join-Path @serverLogJoinParams)
-    }
-
-    New-Variable @serverLogParams
-
-    Set-Location -Path $crateDir
-
-	Initialize-MyServer
-	Start-Sleep -Seconds 2
-
-	Start-MyServer
-	Initialize-MyConnection
-
-	Start-OneTest @test1Params
-	Start-OneTest @test2Params
-	Start-OneTest @test3Params
-	Start-OneTest @test4Params
-
-	Get-MyFinalResult
-	Remove-MyTestDebris
-}
-
-function Get-MyFinalResult {
 	$red = @{ ForegroundColor = 'Red'; }
 	$blue = @{ ForegroundColor = 'Blue'; }
 	$green = @{ ForegroundColor = 'Green'; }
 
     $border = "+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+"
 
-	$numPassed = 0
-	$totalTests = $tracker.Count
+    Start-MyServer
 
-	$tracker.Values | ForEach-Object {
-        if ($_) {
-            $numPassed++
-		}
-	}
+    $tests = Get-ChildItem -Path "${PSScriptRoot}/*.txt" -File |
+        ForEach-Object { $_.BaseName }
 
-    Write-Host @blue "`n$border`n"
+    # Parse the test parameters from each test's file name and run the test.
+    foreach ($test in $tests) {
+        $script:numTests++
 
-    if ($numPassed -eq $totalTests) {
-        Write-Host @green "$numPassed / $totalTests tests passed.`n"
+        $parts = $test -split "_"
+        $method = $parts[0].ToUpper()
+
+        $uri = switch ($parts[1]) {
+            "index"   { "/"; Break }
+            "favicon" { "/favicon.ico"; Break }
+            Default   {
+                if ($method -eq "CONNECT") {
+                    "localhost:7878"
+                }
+                else {
+                    "/$($parts[1])"
+                }
+            }
+        }
+
+        $label = "$method $uri"
+        $file = "${test}.txt"
+
+        Test-OneRoute $method $uri $label $file
+    }
+
+    # Write the overall results to the terminal.
+    Write-Host @blue "`n$border"
+
+    if ($script:numPassed -eq $script:numTests) {
+        Write-Host @green "$script:numPassed / $script:numTests tests passed."
 	}
 	else {
-		Write-Host @red "$numPassed / $totalTests tests passed.`n"
+        Write-Host @red "$script:numPassed / $script:numTests tests passed."
 	}
+
+    Write-Host @blue $border
+
+    Remove-BuildArtifacts
 }
 
 # Run all tests.

@@ -1,5 +1,6 @@
 /target
 /tools
+/notes
 /.vscode
-scripts/server_log.txt
+/scripts/server_tests/server.log
 /Cargo.lock

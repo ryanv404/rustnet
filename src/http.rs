@@ -237,15 +237,15 @@ impl Status {
 /// The HTTP protocol version.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Version {
-    /// HTTP protocol version 0.9.
+    /// HTTP/0.9
     ZeroDotNine,
-    /// HTTP protocol version 1.0.
+    /// HTTP/1.0
     OneDotZero,
-    /// HTTP protocol version 1.1.
+    /// HTTP/1.1
     OneDotOne,
-    /// HTTP protocol version 2.
+    /// HTTP/2.0
     TwoDotZero,
-    /// HTTP protocol version 3.
+    /// HTTP/3.0
     ThreeDotZero,
 }
 
@@ -288,8 +288,8 @@ impl Version {
             Self::ZeroDotNine => "HTTP/0.9",
             Self::OneDotZero => "HTTP/1.0",
             Self::OneDotOne => "HTTP/1.1",
-            Self::TwoDotZero => "HTTP/2",
-            Self::ThreeDotZero => "HTTP/3",
+            Self::TwoDotZero => "HTTP/2.0",
+            Self::ThreeDotZero => "HTTP/3.0",
         }
     }
 
