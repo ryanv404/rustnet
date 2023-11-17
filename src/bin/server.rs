@@ -7,12 +7,12 @@ fn main() -> io::Result<()> {
     let mut s = Server::http("127.0.0.1:7878");
 
     // Set up static routes.
-    s.get("/", "examples/static/index.html");
-    s.get("/about", "examples/static/about.html");
-    s.set_favicon("examples/static/favicon.ico");
-    s.set_error_page("examples/static/error.html");
+    s.get("/", "static/index.html");
+    s.get("/about", "static/about.html");
+    s.set_favicon("static/favicon.ico");
+    s.set_error_page("static/error.html");
 
-    // Set up additional routes with various HTTP methods.
+    // Set up additional routes with other HTTP methods.
     s.post("/about");
     s.put("/about");
     s.patch("/about");

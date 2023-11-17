@@ -6,14 +6,25 @@ use crate::{NetError, NetResult};
 /// HTTP methods.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Method {
+    /// The representation of the current state of the target resource.
     Get,
-    Put,
+    /// Sends content to be processed by the target resource.
     Post,
-    Head,
+    /// Updates and replaces the current state of the target resource.
+    Put,
+    /// Updates the current state of the target resource without replacing
+    /// the state.
     Patch,
-    Trace,
+    /// Removes the target resource.
     Delete,
+    /// Returns the status-line and headers section as though the request were
+    /// a GET request.
+    Head,
+    /// TRACE method.
+    Trace,
+    /// CONNECT method.
     Connect,
+    /// OPTIONS method.
     Options,
 }
 
@@ -47,11 +58,13 @@ impl FromStr for Method {
             "OPTIONS" => Self::Options,
             _ => return Err(NetError::ParseError("http method")),
         };
+
         Ok(method)
     }
 }
 
 impl Method {
+    /// Returns the HTTP method as a string slice.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -68,7 +81,7 @@ impl Method {
     }
 }
 
-/// HTTP status codes.
+/// HTTP status.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Status(pub u16);
 
@@ -82,7 +95,10 @@ impl FromStr for Status {
     type Err = NetError;
 
     fn from_str(code: &str) -> NetResult<Self> {
-        u16::from_str(code).map_or_else(|_| Err(NetError::BadStatusCode), Self::try_from)
+        u16::from_str(code).map_or_else(
+            |_| Err(NetError::BadStatusCode),
+            Self::try_from
+        )
     }
 }
 
@@ -99,17 +115,18 @@ impl TryFrom<u16> for Status {
 }
 
 impl Status {
-    #[rustfmt::skip]
+    /// Returns the status's reason phrase.
     #[must_use]
+    #[rustfmt::skip]
     pub const fn msg(&self) -> &'static str {
         match self.0 {
-            // 1xx (informational) status codes.
+            // 1xx (Informational) Statuses.
             100 => "Continue",
             101 => "Switching Protocols",
             102 => "Processing",
             103 => "Early Hints",
 
-            // 2xx (successful) status codes.
+            // 2xx (Successful) Statuses.
             200 => "OK",
             201 => "Created",
             202 => "Accepted",
@@ -122,7 +139,7 @@ impl Status {
             218 => "This Is Fine",
             226 => "IM Used",
 
-            // 3xx (redirect) status codes.
+            // 3xx (Redirect) Statuses.
             300 => "Multiple Choices",
             301 => "Moved Permanently",
             302 => "Found",
@@ -134,7 +151,7 @@ impl Status {
             308 => "Permanent Redirect",
             400 => "Bad Request",
 
-            // 4xx (client error) status codes.
+            // 4xx (Client Error) Statuses.
             401 => "Unauthorized",
             402 => "Payment Required",
             403 => "Forbidden",
@@ -180,7 +197,7 @@ impl Status {
             498 => "Invalid Token",
             499 => "Token Required or Client Closed Request",
 
-            // 5xx (server error) status codes.
+            // 5xx (Server Error) Statuses.
             500 => "Internal Server Error",
             501 => "Not Implemented",
             502 => "Bad Gateway",
@@ -210,19 +227,26 @@ impl Status {
         }
     }
 
+    /// Returns the status's numeric code.
     #[must_use]
     pub const fn code(&self) -> u16 {
         self.0
     }
 }
 
-// The HTTP protocol version.
+/// The HTTP protocol version.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Version {
+    /// HTTP protocol version 0.9.
     ZeroDotNine,
+    /// HTTP protocol version 1.0.
     OneDotZero,
+    /// HTTP protocol version 1.1.
     OneDotOne,
+    /// HTTP protocol version 2.
     TwoDotZero,
+    /// HTTP protocol version 3.
+    ThreeDotZero,
 }
 
 impl Default for Version {
@@ -247,39 +271,53 @@ impl FromStr for Version {
             "HTTP/0.9" => Self::ZeroDotNine,
             "HTTP/1.0" => Self::OneDotZero,
             "HTTP/1.1" => Self::OneDotOne,
-            "HTTP/2.0" => Self::TwoDotZero,
+            "HTTP/2" | "HTTP/2.0" => Self::TwoDotZero,
+            "HTTP/3" | "HTTP/3.0" => Self::ThreeDotZero,
             _ => return Err(NetError::ParseError("http version")),
         };
+
         Ok(version)
     }
 }
 
 impl Version {
+    /// Returns the the protocol version as a string slice.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ZeroDotNine => "HTTP/0.9",
             Self::OneDotZero => "HTTP/1.0",
             Self::OneDotOne => "HTTP/1.1",
-            Self::TwoDotZero => "HTTP/2.0",
+            Self::TwoDotZero => "HTTP/2",
+            Self::ThreeDotZero => "HTTP/3",
         }
     }
 
+    /// Returns the protocol's major version number.
     #[must_use]
     pub const fn major(&self) -> u8 {
         match self {
             Self::ZeroDotNine => 0,
             Self::OneDotZero | Self::OneDotOne => 1,
             Self::TwoDotZero => 2,
+            Self::ThreeDotZero => 3,
         }
     }
 
+    /// Returns the protocol's minor version number.
     #[must_use]
     pub const fn minor(&self) -> u8 {
         match self {
-            Self::OneDotZero | Self::TwoDotZero => 0,
+            Self::OneDotZero | Self::TwoDotZero | Self::ThreeDotZero => 0,
             Self::OneDotOne => 1,
             Self::ZeroDotNine => 9,
         }
+    }
+
+    /// Returns whether the protocol version is supported. Currently only
+    /// HTTP version 1.1 is supported.
+    #[must_use]
+    pub fn is_supported(&self) -> bool {
+        *self == Self::OneDotOne
     }
 }

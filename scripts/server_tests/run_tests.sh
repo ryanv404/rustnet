@@ -27,7 +27,7 @@ NUM_TESTS="${#ALL_TESTS[@]}"
 CRATE_DIR="$(pwd)"
 TESTS_DIR="${CRATE_DIR}/scripts/server_tests"
 TEMP_FILE="${TESTS_DIR}/temp.txt"
-SERVER_BIN="${CRATE_DIR}/target/debug/examples/server"
+SERVER_BIN="${CRATE_DIR}/target/debug/server"
 SERVER_ADDR='http://127.0.0.1:7878'
 
 # Terminal colors.
@@ -48,7 +48,7 @@ build_server() {
 
     echo -n "Building..."
 
-    cargo build --example server &> /dev/null
+    cargo build --bin server &> /dev/null
 
     if (( $? != 0 )); then
         echo -e "${RED}✗ Unable to build the server.${CLR}"

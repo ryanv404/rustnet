@@ -1,9 +1,10 @@
+use std::env;
+use std::fs;
 use std::process::Command;
 
+use crate::{HeaderName, HeaderValue, consts::DATE};
+
 // Trims ASCII whitespace bytes from both ends of a slice of bytes.
-//
-// Whitespace is b'\t' (0x09), b'\n' (0x0a), b'\f' (0x0c), b'\r' (0x0d),
-// or b' ' (0x20).
 #[must_use]
 pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
     const EMPTY: &[u8; 0] = &[];
@@ -36,9 +37,6 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
     }
 
     // Only the final byte was non-whitespace.
-    //
-    // Note this could also be true if the original slice had size 1 but all
-    // slices of size 0 or 1 were handled in the match statement above.
     if first == last {
         return &bytes[first..=first];
     }
@@ -53,28 +51,9 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
 
     // Return trimmed slice
     if first == last {
-        // Only the final byte was non-whitespace.
         &bytes[first..=first]
     } else {
-        // Multibyte slice remains.
         &bytes[first..=last]
-    }
-}
-
-/// Attempt to use the terminal `date` program, if available, to get the
-/// current date and time.
-#[must_use]
-pub fn try_date() -> Option<String> {
-    if let Ok(date_out) = Command::new("date")
-        .arg("--utc")
-        .arg("+%a, %d %b %Y %H:%M:%S %Z")
-        .output()
-    {
-        String::from_utf8(date_out.stdout)
-            .map(|s| s.trim().replace("UTC", "GMT"))
-            .ok()
-    } else {
-        None
     }
 }
 
@@ -117,6 +96,7 @@ static URI_MAP: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xFx
 ];
 
+/// Returns true if the given byte corresponds to a valid URI token.
 #[allow(dead_code)]
 #[must_use]
 pub fn is_uri_token(b: u8) -> bool {
@@ -144,6 +124,7 @@ static HEADER_NAME_MAP: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
+/// Returns true if the given byte corresponds to a valid header name token.
 #[allow(dead_code)]
 #[must_use]
 pub fn is_header_name_token(b: u8) -> bool {
@@ -171,8 +152,47 @@ static HEADER_VALUE_MAP: [u8; 256] = [
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 ];
 
+/// Returns true if the given byte corresponds to a valid header value token.
 #[allow(dead_code)]
 #[must_use]
 pub fn is_header_value_token(b: u8) -> bool {
     HEADER_VALUE_MAP[b as usize] == 1
+}
+
+/// Get the current date and time if the `date` program exists.
+#[must_use]
+pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
+    if !date_command_exists() {
+        return None;
+    }
+
+    let date_out = Command::new("date")
+        .env("TZ", "GMT")
+        .arg("+%a, %d %b %Y %T %Z")
+        .output();
+
+    if date_out.is_ok() {
+        let date_out = date_out.unwrap().stdout;
+        let date_str = String::from_utf8_lossy(&date_out);
+        let hdr_value = HeaderValue::from(date_str.trim());
+        Some((DATE, hdr_value))
+    } else {
+        None
+    }
+}
+
+/// Returns true if the `date` exists on the system PATH.
+#[must_use]
+pub fn date_command_exists() -> bool {
+    let Ok(paths) = env::var("PATH") else {
+        return false;
+    };
+
+    for path in paths.split(":") {
+        if fs::metadata(format!("{path}/date")).is_ok() {
+            return true;
+        }
+    }
+
+    false
 }

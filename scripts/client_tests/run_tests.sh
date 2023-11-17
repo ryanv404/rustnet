@@ -22,7 +22,7 @@ NUM_TESTS="${#ALL_TESTS[@]}"
 CRATE_DIR="$(pwd)"
 TESTS_DIR="${CRATE_DIR}/scripts/client_tests"
 TEMP_FILE="${TESTS_DIR}/temp.txt"
-CLIENT_BIN="${CRATE_DIR}/target/debug/examples/client"
+CLIENT_BIN="${CRATE_DIR}/target/debug/client"
 
 # Terminal colors.
 RED=$'\e[91m'
@@ -43,7 +43,7 @@ build_client() {
 
     echo -e -n "Building..."
 
-    cargo build --example client &> /dev/null
+    cargo build --bin client &> /dev/null
 
     if (( $? != 0 )); then
         echo -e "${RED}✗ Unable to build the client.${CLR}"

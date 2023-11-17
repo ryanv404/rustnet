@@ -4,7 +4,7 @@ use std::io::{BufRead, ErrorKind::UnexpectedEof};
 use std::net::{IpAddr, SocketAddr};
 use std::str;
 
-use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH};
+use crate::consts::{ACCEPT, MAX_HEADERS, USER_AGENT};
 use crate::{
     HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult,
     RemoteConnect, Route, Version,
@@ -87,10 +87,14 @@ impl Request {
             }
         };
 
+        let mut hdr_num = 0;
         let mut headers = BTreeMap::new();
 
         // Parse the request headers.
-        loop {
+        //
+        // Guard against DDoS by setting an upper limit to the number of
+        // headers permitted.
+        while hdr_num <= MAX_HEADERS {
             buf.clear();
 
             match remote.read_line(&mut buf) {
@@ -105,6 +109,8 @@ impl Request {
 
                     let (name, value) = Self::parse_header(trim)?;
                     headers.insert(name, value);
+
+                    hdr_num += 1;
                 }
             }
         }
@@ -160,9 +166,11 @@ impl Request {
     /// Default set of request headers.
     #[must_use]
     pub fn default_headers() -> HeadersMap {
+        let ua = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+
         BTreeMap::from([
-            (CACHE_CONTROL, "no-cache".into()),
-            (CONTENT_LENGTH, "0".into()),
+            (ACCEPT, "*/*".into()),
+            (USER_AGENT, ua.as_str().into()),
         ])
     }
 

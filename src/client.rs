@@ -337,7 +337,7 @@ impl Client {
         self.parse_headers(&mut headers)?;
 
         let maybe_content_len = headers.get(&CONTENT_LENGTH);
-        let body = self.parse_body(maybe_content_len)?;
+        let body = self.parse_body(maybe_content_len).ok();
 
         Ok(Response {
             method,

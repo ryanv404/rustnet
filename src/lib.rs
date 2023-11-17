@@ -39,10 +39,11 @@ pub use response::Response;
 pub use router::{Resolved, Route, Router};
 pub use server::{Server, ServerConfig};
 pub use threadpool::{ThreadPool, Worker};
-pub use util::{trim_whitespace_bytes, try_date};
+pub use util::{trim_whitespace_bytes, get_datetime};
 
 pub mod consts {
     pub use crate::header::header_names::*;
+    pub const MAX_HEADERS: u16 = 1024;
     pub const NUM_WORKER_THREADS: usize = 4;
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
