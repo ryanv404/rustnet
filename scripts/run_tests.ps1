@@ -1,6 +1,33 @@
 # Script-level variables to track testing results.
-$script:numTests = 0
-$script:numPassed = 0
+$script:numServerTests = 0
+$script:numClientTests = 0
+$script:numServerPassed = 0
+$script:numClientPassed = 0
+
+# Builds the client.
+function Build-MyClient {
+	$red = @{ ForegroundColor = 'Red'; }
+	$green = @{ ForegroundColor = 'Green'; }
+	$yellow = @{ ForegroundColor = 'Yellow'; }
+
+	cargo clean *> $null
+
+	if ($LASTEXITCODE -ne 0) {
+		Write-Host @yellow "Unable to remove the prior build artifacts."
+	}
+
+	Write-Host -NoNewline "Building client..."
+
+	cargo build --bin client *> $null
+
+	if ($LASTEXITCODE -ne 0) {
+		Write-Host @red "✗ Unable to build the client."
+		exit
+	}
+    else {
+        Write-Host @green "✔`n"
+    }
+}
 
 # Builds the test server.
 function Build-MyServer {
@@ -16,7 +43,7 @@ function Build-MyServer {
 		Write-Host @yellow "Unable to remove the prior build artifacts."
 	}
 
-	Write-Host -NoNewline "Building..."
+	Write-Host -NoNewline "Building server..."
 
 	cargo build --bin server *> $null
 
@@ -74,7 +101,7 @@ function Confirm-MyServerIsLive {
 
 	$initConnectParams = @{
 		Method = 'Get'
-		Uri = 'http://127.0.0.1:7878/'
+		Uri = '127.0.0.1:7878/'
 		SkipHttpErrorCheck = $true
         ErrorAction = 'Stop'
     }
@@ -176,8 +203,8 @@ function Write-TestFailed {
     Write-Host @red $reason
 }
 
-# Runs a single test.
-function Test-OneRoute {
+# Runs a single server test.
+function Test-OneServerRoute {
     param(
 		[Parameter(Mandatory = $true)]
 		[string]
@@ -196,7 +223,13 @@ function Test-OneRoute {
         $file
     )
 
-    $expOutputFile = Join-Path -Path $PSScriptRoot -ChildPath 'server_tests' -AdditionalChildPath $file
+	$joinParams = @{
+		Path = $PSScriptRoot
+		ChildPath = 'server_tests'
+		AdditionalChildPath = $file
+	}
+
+    $expOutputFile = Join-Path @joinParams
 
 	if (!(Test-Path -Path $expOutputFile)) {
         Write-TestFailed $label "No expected output file found."
@@ -228,7 +261,7 @@ function Test-OneRoute {
         else {
             $connectParams = @{
                 Method = $method
-                Uri = "http://127.0.0.1:7878${uri}"
+                Uri = "127.0.0.1:7878${uri}"
                 SkipHttpErrorCheck = $true
             }
         }
@@ -255,7 +288,7 @@ function Test-OneRoute {
     }
 
     $testPassed = $false
-    $testPassed = Test-StatusLine @statusLineParams
+    $testPassed = Test-ResponseStatusLine @statusLineParams
 
     if ($testPassed -eq $false) {
         return
@@ -323,11 +356,11 @@ function Test-OneRoute {
 
     # Only tests that have not failed a prior step make it to this point.
     Write-TestPassed $label
-    $script:numPassed++
+    $script:numServerPassed++
 }
 
 # Test whether the output status line matches the expected status line.
-function Test-StatusLine {
+function Test-ResponseStatusLine {
     param (
         [Parameter(Mandatory = $true)]
         [string]
@@ -443,59 +476,271 @@ function Test-ResponseBody {
     }
 }
 
+# Runs a single client test.
+function Test-OneClientRoute {
+    param(
+		[Parameter(Mandatory = $true)]
+		[string]
+        $method,
+
+        [Parameter(Mandatory = $true)]
+		[string]
+        $uri,
+
+        [Parameter(Mandatory = $true)]
+		[string]
+        $label,
+
+        [Parameter(Mandatory = $true)]
+		[string]
+        $file
+    )
+
+	$joinParams = @{
+		Path = $PSScriptRoot
+		ChildPath = 'client_tests'
+		AdditionalChildPath = $file
+	}
+
+	$expOutputFile = Join-Path @joinParams
+
+	if (!(Test-Path -Path $expOutputFile)) {
+        Write-TestFailed $label "No expected output file found."
+		return
+	}
+
+	$expOutput = Get-Content -Path $expOutputFile -Encoding 'utf8' -Raw
+
+    if ($null -eq $expOutput) {
+        Write-TestFailed $label "The expected output file was empty."
+        return
+    }
+
+	$crateDir = ($PSScriptRoot | Get-Item).Parent
+
+    $joinParams = @{
+        Path = $crateDir
+        ChildPath = 'target'
+        AdditionalChildPath = 'debug', 'client.exe'
+    }
+
+    $clientExe = Join-Path @joinParams
+
+	if (!(Test-Path -Path $clientExe)) {
+		Write-Host @red "`n✗ Cannot locate the client executable file."
+        Remove-BuildArtifacts
+    }
+
+	$clientParams = @('--testing', 'httpbin.org', $uri)
+	
+	$clientJob = Start-Job -ScriptBlock {
+		& $using:clientExe @using:clientParams *>&1
+	}
+
+	# Using Force ensures we wait until the job is in either the Completed,
+	# Stopped, or Failed states.
+	$res = (Receive-Job -Job $clientJob -Wait -Force)
+
+	if ($null -eq $res) {
+        Write-TestFailed $label "No response received."
+        return
+    }
+
+    $expOutput = $expOutput -split "`n" |
+        ForEach-Object { $_.Trim() } |
+		Where-Object { $_.Length -gt 0 } |
+		Join-String -Separator "`n"
+
+	$testOutput = $res -split "`n" |
+        ForEach-Object { $_.Trim() } |
+		Where-Object { $_.Length -gt 0 } |
+		Join-String -Separator "`n"
+
+	if ($expOutput -ceq $testOutput) {
+		Write-TestPassed $label
+		$script:numClientPassed++
+	}
+	else {
+		$charIdx = Compare-String $expOutput $testOutput
+
+		Write-TestFailed $label "Did not match the expected output."
+		Write-Host -NoNewline "Got ""$($testOutput[$charIdx])"" instead of "
+		Write-Host """$($expOutput[$charIdx])"" at character number ${charIdx}."
+	}
+}
+
+# Compares two strings, returning the index of the first non-equal character
+# or -1 if the two strings are identical.
+#
+# https://stackoverflow.com/questions/25169424/using-powershell-to-find-the-differences-in-strings
+function Compare-String {
+	param(
+		[string]
+		$s1,
+
+		[string]
+		$s2
+	)
+
+	if ( $s1 -ceq $s2 ) {
+		return -1
+	}
+
+	$maxLength = ( $s1, $s2 |
+		ForEach-Object {$_.Length} |
+		Measure-Object -Maximum ).Maximum
+
+	for ( $i = 0; $i -lt $maxLength; $i++ ) {
+		if ( $s1[$i] -cne $s2[$i] ) {
+			return $i
+		}
+	}
+
+	return $maxLength
+}
+
 # Runs all server tests and reports the results.
 function Test-MyServer {
+    Start-MyServer
+
+    $tests = Get-ChildItem -Path "${PSScriptRoot}/server_tests/*.txt" -File |
+        ForEach-Object { $_.BaseName }
+
+	Write-Host "SERVER TESTS:"
+
+	# Parse the test parameters from each test's file name and run the test.
+    foreach ($test in $tests) {
+        $script:numServerTests++
+
+        $parts = $test -split "_"
+        $method = $parts[0].ToUpper()
+
+        $uri = switch ($($parts[1].ToLower())) {
+            "index"   { "/"; Break }
+            "favicon" { "/favicon.ico"; Break }
+            Default   { "/$($parts[1])" }
+        }
+
+        $label = "$method $uri"
+        $file = "${test}.txt"
+
+        Test-OneServerRoute $method $uri $label $file
+    }
+}
+
+# Runs all client tests and reports the results.
+function Test-MyClient {
+    Build-MyClient
+
+    $tests = Get-ChildItem -Path "${PSScriptRoot}/client_tests/*.txt" -File |
+        ForEach-Object { $_.BaseName }
+
+	Write-Host "CLIENT TESTS:"
+
+	# Parse the test parameters from each test's file name and run the test.
+    foreach ($test in $tests) {
+        $script:numClientTests++
+
+        $parts = $test -split "_"
+        $method = $parts[0].ToUpper()
+
+		$uri = $parts[1].ToLower()
+        $uri = switch ($uri) {
+			"jpeg"  { "/image/jpeg"; Break }
+			"png"   { "/image/png"; Break }
+			"svg"   { "/image/svg"; Break }
+			"text"  { "/robots.txt"; Break }
+			"utf8"  { "/encoding/utf8"; Break }
+			"webp"  { "/image/webp"; Break }
+			Default { "/$uri" }
+		}
+
+		$label = "$method $uri"
+        $file = "${test}.txt"
+
+        Test-OneClientRoute $method $uri $label $file
+    }
+}
+
+# Write the overall results to the terminal.
+function Write-OverallResults {
 	$red = @{ ForegroundColor = 'Red'; }
 	$blue = @{ ForegroundColor = 'Blue'; }
 	$green = @{ ForegroundColor = 'Green'; }
 
     $border = "+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+"
 
-    Start-MyServer
-
-    $tests = Get-ChildItem -Path "${PSScriptRoot}/server_tests/*.txt" -File |
-        ForEach-Object { $_.BaseName }
-
-    # Parse the test parameters from each test's file name and run the test.
-    foreach ($test in $tests) {
-        $script:numTests++
-
-        $parts = $test -split "_"
-        $method = $parts[0].ToUpper()
-
-        $uri = switch ($parts[1]) {
-            "index"   { "/"; Break }
-            "favicon" { "/favicon.ico"; Break }
-            Default   {
-                if ($method -eq "CONNECT") {
-                    "$($parts[1])"
-                }
-                else {
-                    "/$($parts[1])"
-                }
-            }
-        }
-
-        $label = "$method $uri"
-        $file = "${test}.txt"
-
-        Test-OneRoute $method $uri $label $file
-    }
-
-    # Write the overall results to the terminal.
-    Write-Host @blue "`n$border"
-
-    if ($script:numPassed -eq $script:numTests) {
-        Write-Host @green "$script:numPassed / $script:numTests tests passed."
+	$cTotal = $script:numClientTests
+	$sTotal = $script:numServerTests
+	
+	if (($cTotal -eq 0) -and ($sTotal -eq 0)) {
+		return
 	}
-	else {
-        Write-Host @red "$script:numPassed / $script:numTests tests passed."
+
+	Write-Host @blue "`n$border"
+
+	if ($cTotal -gt 0) {
+		$cPassed = $script:numClientPassed
+		$color = ($cPassed -eq $cTotal) ? $green : $red
+		Write-Host @color "$cPassed / $cTotal client tests passed."
+	}
+
+	if ($sTotal -gt 0) {
+		$sPassed = $script:numServerPassed
+		$color = ($sPassed -eq $sTotal) ? $green : $red
+		Write-Host @color "$sPassed / $sTotal server tests passed."
 	}
 
     Write-Host @blue $border
-
-    Remove-BuildArtifacts
 }
 
-# Run all server tests.
-Test-MyServer
+# Writes a help message to the terminal.
+function Write-MyHelp {
+	$green = @{ ForegroundColor = 'Green'; }
+	$progName = $MyInvocation.ScriptName | Split-Path -Leaf
+
+	Write-Host @green "USAGE"
+	Write-Host "    $progName <ARGUMENT>`n"
+    Write-Host @green "ARGUMENTS"
+    Write-Host "    all      Run all tests."
+    Write-Host "    client   Run all client tests only."
+    Write-Host "    server   Run all server tests only.`n"
+}
+
+# Handle command line arguments.
+if ($args.Count -lt 1) {
+	$red = @{ ForegroundColor = 'Red'; }
+	Write-Host @red "Please select a test group to run.`n"
+	Write-MyHelp
+}
+else {
+	switch ($($args[0].ToLower())) {
+		"client" {
+			Test-MyClient
+			Write-OverallResults
+			Remove-BuildArtifacts
+			Break
+		}
+		"server" {
+			Test-MyServer
+			Write-OverallResults
+			Remove-BuildArtifacts
+			Break
+		}
+		"all" {
+			Test-MyClient
+			Write-Host ""
+			Test-MyServer
+			Write-OverallResults
+			Remove-BuildArtifacts
+			Break
+		}
+		Default {
+			$red = @{ ForegroundColor = 'Red'; }
+			Write-Host @red "Unknown argument: \"$($args[0])\"`n"
+			Write-MyHelp
+		}
+	}
+}
+
+exit

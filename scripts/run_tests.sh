@@ -315,7 +315,7 @@ run_all_server_tests() {
             URI="/"
         elif [[ "$URI" == "favicon" ]]; then
             URI="/favicon.ico"
-        elif [[ "$METHOD" != "CONNECT" ]]; then
+        else
             URI="/$URI"
         fi
 
@@ -457,6 +457,7 @@ else
     esac
 fi
 
+# Clean up after myself since I wasn't born in a barn.
 unset TOTAL_SERVER_TESTS SERVER_NUM_PASSED SERVER_PID SERVER_BIN CLIENT_BIN
 unset CRATE_DIR TESTS_DIR TEMP_FILE RED GRN BLU CYAN YLW PURP CLR
 unset SERVER_TESTS_DIR CLIENT_TESTS_DIR

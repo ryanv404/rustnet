@@ -14,6 +14,10 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::module_name_repetitions)]
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::result::Result as StdResult;
+
 #[cfg(test)]
 mod tests;
 
@@ -48,10 +52,6 @@ pub mod consts {
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
 }
-
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::result::Result as StdResult;
 
 pub type RoutesMap = BTreeMap<Route, PathBuf>;
 pub type HeadersMap = BTreeMap<HeaderName, HeaderValue>;
