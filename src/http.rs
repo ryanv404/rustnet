@@ -118,6 +118,7 @@ impl Status {
     /// Returns the status's reason phrase.
     #[must_use]
     #[rustfmt::skip]
+    #[allow(clippy::match_same_arms)]
     pub const fn msg(&self) -> &'static str {
         match self.0 {
             // 1xx (Informational) Statuses.

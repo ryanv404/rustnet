@@ -44,6 +44,7 @@ impl Router {
     }
 
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn resolve(&self, req: &Request) -> Resolved {
         let req_route = req.route();
         let req_method = req_route.method;

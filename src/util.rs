@@ -188,7 +188,7 @@ pub fn date_command_exists() -> bool {
         return false;
     };
 
-    for path in paths.split(":") {
+    for path in paths.split(':') {
         if fs::metadata(format!("{path}/date")).is_ok() {
             return true;
         }

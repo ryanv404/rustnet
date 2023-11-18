@@ -238,11 +238,7 @@ impl Response {
 
         let ctype = self.content_type().unwrap().to_string();
 
-        if ctype.contains("text") || ctype.contains("application") {
-            true
-        } else {
-            false
-        }
+        ctype.contains("text") || ctype.contains("application")
     }
 
     /// Returns true if the `Response` is permitted to have a message body
@@ -264,7 +260,7 @@ impl Response {
 
     /// Returns an optional reference to the message body, if present.
     #[must_use]
-    pub fn body(&self) -> Option<&Vec<u8>> {
+    pub const fn body(&self) -> Option<&Vec<u8>> {
         self.body.as_ref()
     }
 
