@@ -286,7 +286,7 @@ run_one_client_test() {
 }
 
 # Builds, starts, and tests the server.
-run_all_server_tests() {
+run_server_tests() {
     build_server
     start_server
 
@@ -324,25 +324,10 @@ run_all_server_tests() {
 
         run_one_server_test "$METHOD" "$URI" "$LABEL" "$FILE"
     done
-
-    echo -e "\n${BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+${CLR}"
-
-    local PASSED = $SERVER_NUM_PASSED
-    local TOTAL = $TOTAL_SERVER_TESTS
-
-    if (( ($TOTAL == $PASSED) && ($TOTAL > 0) )); then
-        echo -e "${GRN}${PASSED} of ${TOTAL} server tests passed.${CLR}"
-    else
-        echo -e "${RED}${PASSED} of ${TOTAL} server tests passed.${CLR}"
-    fi
-
-    echo -e "${BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+${CLR}"
-
-    clean_up
 }
 
 # Builds and tests the client.
-run_all_client_tests() {
+run_client_tests() {
     build_client
 
     echo "CLIENT TESTS:"
@@ -388,21 +373,44 @@ run_all_client_tests() {
 
         run_one_client_test "$METHOD" "$URI" "$LABEL" "$FILE"
     done
+}
+
+# Prints the overall results to the terminal.
+print_overall_results() {
+    local C_TOTAL="$TOTAL_CLIENT_TESTS"
+    local S_TOTAL="$TOTAL_SERVER_TESTS"
+
+    if (( ($S_TOTAL == 0) && ($C_TOTAL == 0) )); then
+        return
+    fi
 
     echo -e "\n${BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+${CLR}"
 
-    local PASSED = $CLIENT_NUM_PASSED
-    local TOTAL = $TOTAL_CLIENT_TESTS
+    if (( $C_TOTAL > 0 )); then
+        local C_PASSED="$CLIENT_NUM_PASSED"
 
-    if (( ($TOTAL == $PASSED) && ($TOTAL > 0) )); then
-        echo -e "${GRN}${PASSED} of ${TOTAL} client tests passed.${CLR}"
-    else
-        echo -e "${RED}${PASSED} of ${TOTAL} client tests passed.${CLR}"
+        echo -n "CLIENT: "
+
+        if (( $C_TOTAL == $C_PASSED )); then
+            echo -e "${GRN}${C_PASSED} of ${C_TOTAL} tests passed.${CLR}"
+        else
+            echo -e "${RED}${C_PASSED} of ${C_TOTAL} tests passed.${CLR}"
+        fi
+    fi
+
+    if (( $S_TOTAL > 0 )); then
+        local S_PASSED="$SERVER_NUM_PASSED"
+
+        echo -n "SERVER: "
+
+        if (( $S_TOTAL == $S_PASSED )); then
+            echo -e "${GRN}${S_PASSED} of ${S_TOTAL} tests passed.${CLR}"
+        else
+            echo -e "${RED}${S_PASSED} of ${S_TOTAL} tests passed.${CLR}"
+        fi
     fi
 
     echo -e "${BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+${CLR}"
-
-    clean_up
 }
 
 # Clean up build artifacts and testing debris.
@@ -430,9 +438,9 @@ print_help() {
     echo -e "${GRN}USAGE${CLR}"
     echo -e "    $(basename $0) <ARGUMENT>\n"
     echo -e "${GRN}ARGUMENTS${CLR}"
-    echo -e "    all      Run all tests."
     echo -e "    client   Run all client tests only."
-    echo -e "    server   Run all server tests only.\n"
+    echo -e "    server   Run all server tests only."
+    echo -e "    all      Run all tests.\n"
 }
 
 # Handle command line arguments.
@@ -443,21 +451,26 @@ else
     CLI_ARG="${1,,}"
 
     case "$CLI_ARG" in
-    "all")
-        run_all_client_tests
-        echo
-        run_all_server_tests;;
     "client")
-        run_all_client_tests;;
+        run_client_tests
+        print_overall_results
+        clean_up;;
     "server")
-        run_all_server_tests;;
+        run_server_tests
+        print_overall_results
+        clean_up;;
+    "all")
+        run_client_tests
+        echo
+        run_server_tests
+        print_overall_results
+        clean_up;;
     *)
         echo -e "${YLW}Unknown argument: \"${1}\"${CLR}\n"
         print_help;;
     esac
 fi
 
-# Clean up after myself since I wasn't born in a barn.
 unset TOTAL_SERVER_TESTS SERVER_NUM_PASSED SERVER_PID SERVER_BIN CLIENT_BIN
 unset CRATE_DIR TESTS_DIR TEMP_FILE RED GRN BLU CYAN YLW PURP CLR
 unset SERVER_TESTS_DIR CLIENT_TESTS_DIR

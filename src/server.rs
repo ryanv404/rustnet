@@ -1,3 +1,4 @@
+use std::error::Error as StdError;
 use std::io::Result as IoResult;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetError, NetResult, RemoteConnect, Request, Response, Route, Router, ThreadPool,
+    Method, NetResult, RemoteConnect, Request, Response, Route, Router, ThreadPool,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -83,12 +84,12 @@ impl<A: ToSocketAddrs> ServerConfig<A> {
         self.router.mount(route);
     }
 
-    /// Sets the local path to the favicon.
+    /// Sets the static path to a favicon icon.
     pub fn set_favicon<P: Into<PathBuf>>(&mut self, path: P) {
         self.get("/favicon.ico", path);
     }
 
-    /// Sets the local path to an HTML page returned in error responses.
+    /// Sets the static path to an HTML page returned by 404 responses.
     pub fn set_error_page<P: Into<PathBuf>>(&mut self, path: P) {
         self.get("__error", path);
     }
@@ -106,15 +107,18 @@ impl From<TcpListener> for Listener {
 }
 
 impl Listener {
+    /// Bind the listener to the given socket address.
     pub fn bind<A: ToSocketAddrs>(addr: A) -> IoResult<Self> {
         let inner = TcpListener::bind(addr)?;
         Ok(Self { inner })
     }
 
+    /// Returns the server's socket address.
     pub fn local_addr(&self) -> IoResult<SocketAddr> {
         self.inner.local_addr()
     }
 
+    /// Returns a `RemoteConnect` instance for each incoming connection.
     pub fn accept(&self) -> IoResult<RemoteConnect> {
         self.inner.accept().and_then(RemoteConnect::try_from)
     }
@@ -122,52 +126,48 @@ impl Listener {
 
 /// The `Server` object. This is the main entry point to the public API.
 pub struct Server {
-    /// Thread handle for the server's listening thread.
+    /// Handle for the server's listening thread.
     pub handle: JoinHandle<()>,
     /// The server's socket address.
     pub local_addr: SocketAddr,
     /// Trigger for closing the server.
-    pub close_trigger: Arc<AtomicBool>,
+    pub keep_listening: Arc<AtomicBool>,
 }
 
 impl Server {
-    /// Returns a `ServerConfig` containing the provided socket address.
+    /// Returns a `ServerConfig` builder containing the provided socket address.
     pub fn http<A: ToSocketAddrs>(addr: A) -> ServerConfig<A> {
         ServerConfig::new(addr)
     }
 
-    /// Returns a running `Server` instance.
+    /// Returns a `Server` instance this is bound to the given address.
     pub fn new<A: ToSocketAddrs>(addr: A, router: Arc<Router>) -> IoResult<Self> {
-        // Get server listener.
         let listener = Listener::bind(addr)?;
-
-        // Local server address.
         let local_addr = listener.local_addr()?;
 
-        // Initialize server close trigger.
-        let close_trigger = Arc::new(AtomicBool::new(true));
-        let listener_running = Arc::clone(&close_trigger);
+        let keep_listening = Arc::new(AtomicBool::new(true));
+        let listening = Arc::clone(&keep_listening);
 
         Self::log_start_up(&local_addr);
 
-        // Spawns a thread that listens for new incoming connections.
+        // Spawn listener thread.
         let handle = spawn(move || {
+            // Create a thread pool to handle incoming requests.
             let pool = ThreadPool::new(NUM_WORKER_THREADS);
 
-            while listener_running.load(Ordering::Relaxed) {
+            while listening.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok(client) => {
+                    Ok(conn) => {
                         let rtr = Arc::clone(&router);
 
+                        // Task an available worker thread with responding.
                         pool.execute(move || {
-                            if let Err(e) = Self::respond(client, &rtr) {
-                                let _ = e;
+                            if let Err(e) = Self::respond(conn, &rtr) {
+                                Self::log_error(&e);
                             }
                         });
                     }
-                    Err(e) => {
-                        let _ = NetError::from_kind(e.kind());
-                    },
+                    Err(e) => Self::log_error(&e),
                 }
             }
         });
@@ -175,15 +175,15 @@ impl Server {
         Ok(Self {
             handle,
             local_addr,
-            close_trigger,
+            keep_listening,
         })
     }
 
     /// Handles a request from a remote connection.
-    pub fn respond(mut remote: RemoteConnect, router: &Arc<Router>) -> NetResult<()> {
-        let req = Request::from_remote(&mut remote)?;
+    pub fn respond(mut conn: RemoteConnect, router: &Arc<Router>) -> NetResult<()> {
+        let req = Request::from_remote(&mut conn)?;
         let res = Response::from_request(&req, router)?;
-        res.send(&mut remote)?;
+        res.send(&mut conn)?;
         Ok(())
     }
 
@@ -199,16 +199,21 @@ impl Server {
         self.local_addr.port()
     }
 
+    /// Logs a non-terminating server error.
+    pub fn log_error(e: &dyn StdError) {
+        eprintln!("[SERVER] ERROR: {e}");
+    }
+
     /// Logs a server start up message to stdout.
     pub fn log_start_up(addr: &SocketAddr) {
         let ip = addr.ip();
         let port = addr.port();
-        println!("[SERVER] Listening on {ip} at port {port}.");
+        eprintln!("[SERVER] Listening on {ip} at port {port}.");
     }
 
     /// Logs a server shutdown message to stdout.
     pub fn log_shutdown(&self) {
-        println!("[SERVER] Now shutting down.");
+        eprintln!("[SERVER] Now shutting down.");
     }
 
     /// Triggers graceful shutdown of the server.
@@ -216,14 +221,14 @@ impl Server {
         self.log_shutdown();
 
         // Stops the listener thread's loop.
-        self.close_trigger.store(false, Ordering::Relaxed);
+        self.keep_listening.store(false, Ordering::Relaxed);
 
-        // Connect to and unblock the listener thread.
+        // Briefly connect to ourselves to unblock the listener thread.
         if let Ok(stream) = TcpStream::connect(self.local_addr) {
             stream.shutdown(Shutdown::Both).unwrap();
         }
 
-        // Give worker threads time to shutdown.
-        thread::sleep(Duration::from_millis(100));
+        // Give the worker threads a bit of time to shutdown.
+        thread::sleep(Duration::from_millis(200));
     }
 }

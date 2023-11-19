@@ -196,3 +196,36 @@ pub fn date_command_exists() -> bool {
 
     false
 }
+
+// HTTP Message Format:
+//
+// ( request-line / status-line ) CRLF
+// *( field-line CRLF )
+// CRLF
+// [ message-body ]
+//
+// URI: scheme ":" "//" authority *(path) ["?" query] ["#" fragment]
+// HTTP-URI: "http" "://" authority path-abempty [ "?" query ]
+//
+// authority     = host [":" port]
+// host          = IP-literal / IPv4address / reg-name
+// path          = *("/" *pchar)
+// query         = ["?" *(pchar / "/" / "?")]
+// fragment      = ["#" *(pchar / "/" / "?")]
+// pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+// pct-encoded   = "%" HEXDIG HEXDIG
+// unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+// reserved      = gen-delims / sub-delims
+// gen-delims    = ":" / "/" / "?" / "#" / "[" / "]" / "@"
+// sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" /
+//                 "*" / "+" / "," / ";" / "="
+//
+// start-line = request-line / status-line
+// request-line = method SP request-target SP HTTP-version
+// status-line = HTTP-version SP status-code SP [ reason-phrase ]
+
+/// Parses the provided URI into an authority and a target path.
+#[must_use]
+pub fn parse_uri(_uri: &str) -> Option<(String, String)> {
+    todo!();
+}

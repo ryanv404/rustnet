@@ -10,6 +10,7 @@ use crate::{
     RemoteConnect, Route, Version,
 };
 
+/// Represents the components of an HTTP request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
     pub remote_addr: SocketAddr,
@@ -40,15 +41,17 @@ impl Display for Request {
 }
 
 impl Request {
-    /// Parses the first line of an HTTP request into an HTTP method, URI, and HTTP version.
+    /// Parses the first line of an HTTP request.
+    ///
+    /// request-line = method SP request-target SP HTTP-version
     pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
-        let trim = line.trim();
+        let trimmed = line.trim();
 
-        if trim.is_empty() {
+        if trimmed.is_empty() {
             return Err(NetError::ParseError("request line"));
         }
 
-        let mut tok = trim.splitn(3, ' ').map(str::trim);
+        let mut tok = trimmed.splitn(3, ' ').map(str::trim);
 
         let tokens = (tok.next(), tok.next(), tok.next());
 
@@ -59,16 +62,18 @@ impl Request {
         }
     }
 
-    /// Parses a string slice into a `HeaderName` and `HeaderValue`.
-    pub fn parse_header(input: &str) -> NetResult<(HeaderName, HeaderValue)> {
-        let mut tok = input.splitn(2, ':').map(str::trim);
+    /// Parses a line into a header field name and value.
+    ///
+    /// field-line = field-name ":" OWS field-value OWS
+    pub fn parse_header(line: &str) -> NetResult<(HeaderName, HeaderValue)> {
+        let mut tok = line.splitn(2, ':').map(str::trim);
 
         let tokens = (tok.next(), tok.next());
 
         if let (Some(name), Some(value)) = tokens {
             Ok((name.parse()?, value.into()))
         } else {
-            Err(NetError::ParseError("request header"))
+            Err(NetError::ParseError("header"))
         }
     }
 
@@ -87,30 +92,26 @@ impl Request {
             }
         };
 
-        let mut hdr_num = 0;
+        let mut num = 0;
         let mut headers = BTreeMap::new();
 
         // Parse the request headers.
-        //
-        // Guard against DDoS by setting an upper limit to the number of
-        // headers permitted.
-        while hdr_num <= MAX_HEADERS {
+        while num <= MAX_HEADERS {
             buf.clear();
 
             match remote.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
                 Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
                 Ok(_) => {
-                    let trim = buf.trim();
+                    let trimmed = buf.trim();
 
-                    if trim.is_empty() {
+                    if trimmed.is_empty() {
                         break;
                     }
 
-                    let (name, value) = Self::parse_header(trim)?;
+                    let (name, value) = Self::parse_header(trimmed)?;
                     headers.insert(name, value);
-
-                    hdr_num += 1;
+                    num += 1;
                 }
             }
         }
@@ -128,6 +129,10 @@ impl Request {
         })
     }
 
+    /// Parses the request body.
+    ///
+    /// Presence of a request body depends on the Content-Length and
+    /// Transfer-Encoding headers.
     #[must_use]
     pub const fn parse_body(_buf: &[u8]) -> Vec<u8> {
         Vec::new()
@@ -157,6 +162,12 @@ impl Request {
         self.version
     }
 
+    /// Returns the request line as a String.
+    #[must_use]
+    pub fn request_line(&self) -> String {
+        format!("{} {} {}", &self.method, &self.uri, &self.version)
+    }
+
     /// Returns a reference to the `Request` object's headers.
     #[must_use]
     pub const fn headers(&self) -> &HeadersMap {
@@ -166,11 +177,13 @@ impl Request {
     /// Default set of request headers.
     #[must_use]
     pub fn default_headers() -> HeadersMap {
-        let ua = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        let uagent = format!(
+            "{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")
+        );
 
         BTreeMap::from([
             (ACCEPT, "*/*".into()),
-            (USER_AGENT, ua.as_str().into()),
+            (USER_AGENT, uagent.as_str().into()),
         ])
     }
 
@@ -180,9 +193,9 @@ impl Request {
         self.headers.contains_key(name)
     }
 
-    /// Returns the `HeaderValue` associated with a given `HeaderName` key, if present.
+    /// Returns the header value for the given `HeaderName`, if present.
     #[must_use]
-    pub fn get_header_value(&self, name: &HeaderName) -> Option<&HeaderValue> {
+    pub fn header(&self, name: &HeaderName) -> Option<&HeaderValue> {
         self.headers.get(name)
     }
 

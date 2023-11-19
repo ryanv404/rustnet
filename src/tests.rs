@@ -28,18 +28,20 @@ mod http_method {
 
     #[test]
     fn from_str_request_line() {
-        let get = "GET /test HTTP/1.1";
-        let put = "PUT /test HTTP/1.1";
-        let post = "POST /test HTTP/1.1";
+        let get = "GET /test HTTP/1.1\r\n";
+        let put = "PUT /test HTTP/1.1\n";
+        let post = "POST /test HTTP/1.1\r\n";
         let head = "HEAD /test HTTP/1.1";
-        let patch = "PATCH /test HTTP/1.1";
+        let patch = "  PATCH /test HTTP/1.1";
         let trace = "TRACE /test HTTP/1.1";
         let delete = "DELETE /test HTTP/1.1    ";
         let options = "OPTIONS /test HTTP/1.1";
-        let connect = "CONNECT /test HTTP/1.1";
+        let connect = "CONNECT 127.0.0.1:7878 HTTP/1.1";
+
         let bad1 = "GET";
         let bad2 = "GET /test";
         let bad3 = "FOO bar baz";
+
         assert_eq!(Request::parse_request_line(get).unwrap().0, Method::Get);
         assert_eq!(Request::parse_request_line(put).unwrap().0, Method::Put);
         assert_eq!(Request::parse_request_line(post).unwrap().0, Method::Post);
@@ -74,6 +76,7 @@ mod http_version {
         let onezero = "GET /test HTTP/1.0";
         let oneone = "GET /test HTTP/1.1";
         let twozero = "POST /test HTTP/2.0";
+
         assert_eq!(
             Request::parse_request_line(zeronine).unwrap().2,
             Version::ZeroDotNine
@@ -105,6 +108,7 @@ mod http_status {
         let s403 = "403";
         let s500 = "500";
         let bad = "800";
+
         assert_eq!(s100.parse::<Status>().unwrap(), Status(100));
         assert_eq!(s201.parse::<Status>().unwrap(), Status(201));
         assert_eq!(s301.parse::<Status>().unwrap(), Status(301));
@@ -185,62 +189,4 @@ mod utils {
         assert_eq!(trim_whitespace_bytes(b"x"), b"x");
         assert_eq!(trim_whitespace_bytes(b""), b"");
     }
-}
-
-#[cfg(test)]
-mod client {
-    use crate::consts::{
-        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC, ACCESS_CONTROL_ALLOW_ORIGIN as ACAO,
-        CONNECTION as CONN, CONTENT_LENGTH as CONLEN, CONTENT_TYPE as CONTYPE, DATE, LOCATION,
-        SERVER,
-    };
-    use crate::{Client, HeaderValue as HdVal, Status, Version};
-    const SERVER_ADDR: &str = "httpbin.org:80";
-
-    // Responds with the status code corresponding to `code`.
-    macro_rules! test_by_status_code {
-        ($label:ident: $code:literal) => {
-            #[test]
-            fn $label() {
-                let uri = format!("/status/{}", $code);
-                let mut client = Client::http().addr(&SERVER_ADDR).uri(&uri).build().unwrap();
-                client.send().unwrap();
-                let res = client.recv().unwrap();
-
-                assert_eq!(res.version, Version::OneDotOne);
-                assert_eq!(res.status, Status($code));
-                assert_eq!(res.headers.get(&ACAC), Some(&HdVal::new(b"true")));
-                assert_eq!(res.headers.get(&ACAO), Some(&HdVal::new(b"*")));
-                if $code == 101 {
-                    assert_eq!(res.headers.get(&CONN), Some(&HdVal::new(b"upgrade")));
-                } else {
-                    assert_eq!(res.headers.get(&CONN), Some(&HdVal::new(b"keep-alive")));
-                    assert_eq!(res.headers.get(&CONLEN), Some(&HdVal::new(b"0")));
-                }
-                if $code == 303 {
-                    assert_eq!(
-                        res.headers.get(&LOCATION),
-                        Some(&HdVal::new(b"/redirect/1"))
-                    );
-                } else {
-                    assert_eq!(
-                        res.headers.get(&CONTYPE),
-                        Some(&HdVal::new(b"text/html; charset=utf-8"))
-                    );
-                }
-                assert_eq!(
-                    res.headers.get(&SERVER),
-                    Some(&HdVal::new(b"gunicorn/19.9.0"))
-                );
-                assert!(res.headers.contains_key(&DATE));
-                //assert_eq!(res.body, Vec::new());
-            }
-        };
-    }
-
-    test_by_status_code!(parse_1xx_response: 101);
-    test_by_status_code!(parse_2xx_response: 202);
-    test_by_status_code!(parse_3xx_response: 303);
-    test_by_status_code!(parse_4xx_response: 404);
-    test_by_status_code!(parse_5xx_response: 505);
 }

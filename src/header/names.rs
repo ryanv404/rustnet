@@ -3,11 +3,9 @@ use std::str::{self, FromStr};
 
 use crate::{trim_whitespace_bytes, NetError, NetResult};
 
-/// Header name.
-/// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
+/// Header field name.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct HeaderName {
-    /// Abstraction over standard and non-standard names.
     pub inner: HdrRepr,
 }
 
@@ -28,8 +26,6 @@ impl From<StdHeader> for HeaderName {
 impl FromStr for HeaderName {
     type Err = NetError;
 
-    /// Attempts to convert a string slice into a `HeaderName` returning an error
-    /// if the header name contains any bytes that are not valid UTF-8.
     fn from_str(s: &str) -> NetResult<Self> {
         let name = Self {
             inner: HdrRepr::try_from(s.as_bytes())?,
@@ -42,8 +38,6 @@ impl FromStr for HeaderName {
 impl TryFrom<&[u8]> for HeaderName {
     type Error = NetError;
 
-    /// Attempts to convert a byte slice into a `HeaderName` returning an error
-    /// if the header name contains any bytes that are not valid UTF-8.
     fn try_from(b: &[u8]) -> NetResult<Self> {
         let name = Self {
             inner: HdrRepr::try_from(b)?,
@@ -79,7 +73,6 @@ impl HeaderName {
         let parts = bytes.split(|&b| b == b'-');
 
         for (i, part) in parts.enumerate() {
-            // Skip empty parts.
             if part.is_empty() {
                 continue;
             }
@@ -101,7 +94,7 @@ impl HeaderName {
         title
     }
 
-    /// Returns the header name as a string slice.
+    /// Returns the header field name as a string slice.
     #[must_use]
     pub fn as_str(&mut self) -> &str {
         str::from_utf8(self.as_bytes()).map_or("", |s| s)
@@ -109,7 +102,6 @@ impl HeaderName {
 }
 
 /// Header name representation.
-/// Non-standard headers are confirmed to only contain valid UTF-8 bytes.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HdrRepr {
     Std(StdHeader),
@@ -119,7 +111,6 @@ pub enum HdrRepr {
 impl TryFrom<&[u8]> for HdrRepr {
     type Error = NetError;
 
-    /// Parses a bytes slice into a `HdrRepr`.
     fn try_from(b: &[u8]) -> NetResult<Self> {
         match StdHeader::from_bytes(b) {
             Some(std) => Ok(Self::Std(std)),
@@ -130,7 +121,7 @@ impl TryFrom<&[u8]> for HdrRepr {
 }
 
 impl HdrRepr {
-    /// Returns a byte slice representing the header name.
+    /// Returns the header field name as a bytes slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
@@ -162,7 +153,7 @@ macro_rules! impl_header_names {
             use super::{HdrRepr, HeaderName, StdHeader};
 
             $(
-                // Constants representing all of the standard header names.
+                // Constants representing all of the standard header field names.
                 pub const $constant: HeaderName = HeaderName {
                     inner: HdrRepr::Std(StdHeader::$variant)
                 };
@@ -212,13 +203,21 @@ macro_rules! impl_header_names {
 }
 
 impl_header_names! {
+    // Accept = [ ( media-range [ weight ] ) *( OWS "," OWS ( media-range [ weight ] ) ) ]
     b"accept" => ACCEPT, Accept;
+    // Accept-Charset = [ ( ( token / "*" ) [ weight ] ) *( OWS "," OWS ( (
+    // token / "*" ) [ weight ] ) ) ]
     b"accept-charset" => ACCEPT_CHARSET, AcceptCharset;
     b"accept-datetime" => ACCEPT_DATETIME, AcceptDatetime;
+    // Accept-Encoding = [ ( codings [ weight ] ) *( OWS "," OWS ( codings [
+    // weight ] ) ) ]
     b"accept-encoding" => ACCEPT_ENCODING, AcceptEncoding;
+    // Accept-Language = [ ( language-range [ weight ] ) *( OWS "," OWS (
+    // language-range [ weight ] ) ) ]
     b"accept-language" => ACCEPT_LANGUAGE, AcceptLanguage;
     b"accept-patch" => ACCEPT_PATCH, AcceptPatch;
     b"accept-post" => ACCEPT_POST, AcceptPost;
+    // Accept-Ranges = acceptable-ranges
     b"accept-ranges" => ACCEPT_RANGES, AcceptRanges;
     b"access-control-allow-credentials" => ACCESS_CONTROL_ALLOW_CREDENTIALS,
         AccessControlAllowCredentials;
@@ -236,24 +235,33 @@ impl_header_names! {
     b"access-control-request-method" => ACCESS_CONTROL_REQUEST_METHOD,
         AccessControlRequestMethod;
     b"age" => AGE, Age;
+    // Allow = [ method *( OWS "," OWS method ) ]
     b"allow" => ALLOW, Allow;
     b"alt-svc" => ALT_SVC, AltSvc;
+    // Authorization = credentials
     b"authorization" => AUTHORIZATION, Authorization;
     b"cache-control" => CACHE_CONTROL, CacheControl;
     b"cache-status" => CACHE_STATUS, CacheStatus;
     b"cdn-cache-control" => CDN_CACHE_CONTROL, CdnCacheControl;
     b"clear-site-data" => CLEAR_SITE_DATA, ClearSiteData;
+    // Connection = [ connection-option *( OWS "," OWS connection-option ) ]
     b"connection" => CONNECTION, Connection;
     b"content-disposition" => CONTENT_DISPOSITION, ContentDisposition;
+    // Content-Encoding = [ content-coding *( OWS "," OWS content-coding ) ]
     b"content-encoding" => CONTENT_ENCODING, ContentEncoding;
+    // Content-Language = [ language-tag *( OWS "," OWS language-tag ) ]
     b"content-language" => CONTENT_LANGUAGE, ContentLanguage;
+    // Content-Length = 1*DIGIT
     b"content-length" => CONTENT_LENGTH, ContentLength;
+    // Content-Location = absolute-URI / partial-URI
     b"content-location" => CONTENT_LOCATION, ContentLocation;
+    // Content-Range = range-unit SP ( range-resp / unsatisfied-range )
     b"content-range" => CONTENT_RANGE, ContentRange;
     b"content-security-policy" => CONTENT_SECURITY_POLICY,
         ContentSecurityPolicy;
     b"content-security-policy-report-only" =>
         CONTENT_SECURITY_POLICY_REPORT_ONLY, ContentSecurityPolicyReportOnly;
+    // Content-Type = media-type
     b"content-type" => CONTENT_TYPE, ContentType;
     b"cookie" => COOKIE, Cookie;
     b"cross-origin-embedder-policy" => CROSS_ORIGIN_EMBEDDER_POLICY,
@@ -262,42 +270,60 @@ impl_header_names! {
         CrossOriginOpenerPolicy;
     b"cross-origin-resource-policy" => CROSS_ORIGIN_RESOURCE_POLICY,
         CrossOriginResourcePolicy;
+    // Date = IMF-fixdate / obs-date
     b"date" => DATE, Date;
     b"delta-base" => DELTA_BASE, DeltaBase;
     b"device-memory" => DEVICE_MEMORY, DeviceMemory;
     b"digest" => DIGEST, Digest;
     b"dnt" => DNT, Dnt;
+    // ETag = entity-tag
     b"etag" => ETAG, Etag;
+    // Expect = [ expectation *( OWS "," OWS expectation ) ]
     b"expect" => EXPECT, Expect;
     b"expires" => EXPIRES, Expires;
     b"forwarded" => FORWARDED, Forwarded;
+    // From = mailbox
     b"from" => FROM, From;
+    // Host = uri-host [ ":" port ]
     b"host" => HOST, Host;
+    // If-Match = "*" / [ entity-tag *( OWS "," OWS entity-tag ) ]
     b"if-match" => IF_MATCH, IfMatch;
+    // If-Modified-Since = HTTP-date
     b"if-modified-since" => IF_MODIFIED_SINCE, IfModifiedSince;
+    // If-None-Match = "*" / [ entity-tag *( OWS "," OWS entity-tag ) ]
     b"if-none-match" => IF_NONE_MATCH, IfNoneMatch;
+    // If-Range = entity-tag / HTTP-date
     b"if-range" => IF_RANGE, IfRange;
+    // If-Unmodified-Since = HTTP-date
     b"if-unmodified-since" => IF_UNMODIFIED_SINCE, IfUnmodifiedSince;
     b"http2-settings" => HTTP2_SETTINGS, Http2Settings;
     b"keep-alive" => KEEP_ALIVE, KeepAlive;
+    // Last-Modified = HTTP-date
     b"last-modified" => LAST_MODIFIED, LastModified;
     b"link" => LINK, Link;
+    // Location = URI-reference
     b"location" => LOCATION, Location;
     b"max-forwards" => MAX_FORWARDS, MaxForwards;
     b"origin" => ORIGIN, Origin;
     b"permissions-policy" => PERMISSIONS_POLICY, PermissionsPolicy;
     b"pragma" => PRAGMA, Pragma;
     b"prefer" => PREFER, Prefer;
+    // Proxy-Authenticate = [ challenge *( OWS "," OWS challenge ) ]
     b"proxy-authenticate" => PROXY_AUTHENTICATE, ProxyAuthenticate;
+    // Proxy-Authorization = credentials
     b"proxy-authorization" => PROXY_AUTHORIZATION, ProxyAuthorization;
     b"public-key-pins" => PUBLIC_KEY_PINS, PublicKeyPins;
     b"public-key-pins-report-only" => PUBLIC_KEY_PINS_REPORT_ONLY,
         PublicKeyPinsReportOnly;
     b"purpose" => PURPOSE, Purpose;
+    // Range = ranges-specifier
     b"range" => RANGE, Range;
+    // Referer = absolute-URI / partial-URI
     b"referer" => REFERER, Referer;
     b"referrer-policy" => REFERRER_POLICY, ReferrerPolicy;
     b"refresh" => REFRESH, Refresh;
+    // Max-Forwards = 1*DIGIT
+    // Retry-After = HTTP-date / delay-seconds
     b"retry-after" => RETRY_AFTER, RetryAfter;
     b"sec-ch-ua" => SEC_CH_UA, SecChUa;
     b"sec-ch-ua-mobile" => SEC_CH_UA_MOBILE, SecChUaMobile;
@@ -314,24 +340,33 @@ impl_header_names! {
     b"sec-websocket-key" => SEC_WEBSOCKET_KEY, SecWebsocketKey;
     b"sec-websocket-protocol" => SEC_WEBSOCKET_PROTOCOL, SecWebsocketProtocol;
     b"sec-websocket-version" => SEC_WEBSOCKET_VERSION, SecWebsocketVersion;
+    // Server = product *( RWS ( product / comment ) )
     b"server" => SERVER, Server;
     b"server-timing" => SERVER_TIMING, ServerTiming;
     b"set-cookie" => SET_COOKIE, SetCookie;
     b"sourcemap" => SOURCEMAP, Sourcemap;
     b"strict-transport-security" => STRICT_TRANSPORT_SECURITY,
         StrictTransportSecurity;
+    // TE = [ t-codings *( OWS "," OWS t-codings ) ]
     b"te" => TE, Te;
     b"timing-allow-origin" => TIMING_ALLOW_ORIGIN, TimingAllowOrigin;
+    // Trailer = [ field-name *( OWS "," OWS field-name ) ]
     b"trailer" => TRAILER, Trailer;
     b"transfer-encoding" => TRANSFER_ENCODING, TransferEncoding;
+    // User-Agent = product *( RWS ( product / comment ) )
     b"user-agent" => USER_AGENT, UserAgent;
+    // Upgrade = [ protocol *( OWS "," OWS protocol ) ]
     b"upgrade" => UPGRADE, Upgrade;
     b"upgrade-insecure-requests" => UPGRADE_INSECURE_REQUESTS,
         UpgradeInsecureRequests;
+    // Vary = [ ( "*" / field-name ) *( OWS "," OWS ( "*" / field-name ) ) ]
     b"vary" => VARY, Vary;
+    // Via = [ ( received-protocol RWS received-by [ RWS comment ] ) *( OWS
+    // "," OWS ( received-protocol RWS received-by [ RWS comment ] ) ) ]
     b"via" => VIA, Via;
     b"want-digest" => WANT_DIGEST, WantDigest;
     b"warning" => WARNING, Warning;
+    // WWW-Authenticate = [ challenge *( OWS "," OWS challenge ) ]
     b"www-authenticate" => WWW_AUTHENTICATE, WwwAuthenticate;
     b"x-content-type-options" => X_CONTENT_TYPE_OPTIONS, XContentTypeOptions;
     b"x-dns-prefetch-control" => X_DNS_PREFETCH_CONTROL, XDnsPrefetchControl;

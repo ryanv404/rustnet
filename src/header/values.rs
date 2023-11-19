@@ -29,11 +29,13 @@ impl From<usize> for HeaderValue {
 }
 
 impl HeaderValue {
+    /// Constructs a `HeaderValue` from a bytes slice.
     #[must_use]
     pub fn new(bytes: &[u8]) -> Self {
         Self(bytes.to_vec())
     }
 
+    /// Returns the header field value as a bytes slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0

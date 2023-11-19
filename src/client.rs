@@ -5,11 +5,11 @@ use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 
 use crate::consts::{
-    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
+    CONTENT_LENGTH, CONTENT_TYPE, HOST, MAX_HEADERS,
 };
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetReader, NetWriter, Response, Status,
-    Version,
+    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetReader,
+    NetWriter, Request, Response, Status, Version,
 };
 
 /// Builder for the `Client` object.
@@ -76,11 +76,13 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
+    /// Returns the default request headers.
     #[must_use]
     pub fn default_headers(addr: &str) -> HeadersMap {
         Client::default_headers(addr)
     }
 
+    /// Adds a header field to the request from a `HeaderName` and `HeaderValue`.
     pub fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
         if let Some(map) = self.headers.as_mut() {
             map.entry(name)
@@ -89,9 +91,11 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         } else {
             self.headers = Some(BTreeMap::from([(name, value)]));
         }
+
         self
     }
 
+    /// Adds a request body from a given bytes slice.
     pub fn body(&mut self, data: &[u8]) -> &mut Self {
         if !data.is_empty() {
             self.body = Some(data.to_vec());
@@ -99,6 +103,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
+    /// Returns a `Client` instance from the builder.
     pub fn build(&mut self) -> IoResult<Client> {
         let stream = {
             if let (Some(ip), Some(port)) = (self.ip.as_ref(), self.port) {
@@ -207,19 +212,40 @@ impl BufRead for Client {
 }
 
 impl Client {
+    /// Sends a GET request to the provided URL, returning a `Response`.
+//    pub fn get(url: &str) -> IoResult<Response> {
+//        let (addr, uri) = parse_url(url);
+//
+//        let stream = TcpStream::connect(addr)?;
+//        let remote_addr = stream.peer_addr()?;
+//
+//        let req = Request {
+//            uri,
+//            remote_addr,
+//            ..Request::default()
+//        }
+//
+//        let res = Response::default();
+//        Ok(res)
+//    }
+
+    /// Returns a new `ClientBuilder` instance.
     #[must_use]
     pub fn http<A: ToSocketAddrs>() -> ClientBuilder<A> {
         ClientBuilder::new()
     }
 
+    /// Returns the request method.
     pub const fn method(&self) -> Method {
         self.method
     }
 
+    /// Returns the requested URI.
     pub fn uri(&self) -> &str {
         &self.uri
     }
 
+    /// Returns the request's protocol version.
     pub const fn version(&self) -> Version {
         self.version
     }
@@ -227,18 +253,17 @@ impl Client {
     /// Default set of request headers.
     #[must_use]
     pub fn default_headers(host: &str) -> HeadersMap {
-        BTreeMap::from([
-            (ACCEPT, "text/html,application/json;q=0.9,*/*;q=0.8".into()),
-            (HOST, host.into()),
-            (UPGRADE_INSECURE_REQUESTS, "0".into()),
-            (USER_AGENT, "rustnet/0.1".into()),
-        ])
+        let mut headers = Request::default_headers();
+        headers.insert(HOST, host.into());
+        headers
     }
 
+    /// Returns a reference to the request headers map.
     pub const fn headers(&self) -> &HeadersMap {
         &self.headers
     }
 
+    /// Returns all request headers as a String.
     pub fn headers_to_string(&self) -> String {
         if self.headers.is_empty() {
             String::new()
@@ -253,23 +278,27 @@ impl Client {
         }
     }
 
+    /// Returns the request's body as a slice.
     pub fn body(&self) -> &[u8] {
         &self.body
     }
 
+    /// Returns the client's socket address.
     pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
+    /// Returns the remote server's socket address.
     pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
+    /// Returns the request line as a String.
     pub fn request_line(&self) -> String {
         format!("{} {} {}", self.method, self.uri, self.version)
     }
 
-    /// Sends an HTTP request to a remote host.
+    /// Sends an HTTP request to the remote host.
     pub fn send(&mut self) -> IoResult<()> {
         // Request line
         let request_line = self.request_line();
@@ -291,7 +320,7 @@ impl Client {
                 )
             } else {
                 // Ensure the default headers are included.
-                let default_headers = Self::default_headers(&remote_addr);
+                let default_headers = Request::default_headers();
 
                 for (name, value) in default_headers {
                     self.headers.entry(name).or_insert(value);
@@ -333,10 +362,9 @@ impl Client {
 
         let (version, status) = self.parse_status_line()?;
 
-        let mut headers = BTreeMap::new();
-        self.parse_headers(&mut headers)?;
-
+        let headers = self.parse_headers()?;
         let maybe_content_len = headers.get(&CONTENT_LENGTH);
+
         let body = self.parse_body(maybe_content_len).ok();
 
         Ok(Response {
@@ -390,34 +418,36 @@ impl Client {
         }
     }
 
-    pub fn parse_headers(&mut self, headers: &mut HeadersMap) -> IoResult<()> {
-        let mut buf = String::new();
+    // Reads and parses the headers section into a BTreeMap.
+    pub fn parse_headers(&mut self) -> IoResult<HeadersMap> {
+        let mut num = 0;
+        let mut line = String::new();
+        let mut headers: HeadersMap = BTreeMap::new();
 
-        // Read and parse the response headers until there is an empty line.
-        loop {
-            match self.read_line(&mut buf) {
+        while num <= MAX_HEADERS {
+            line.clear();
+
+            match self.read_line(&mut line) {
                 Err(e) => return Err(e),
                 Ok(0) => return Err(IoError::from(IoErrorKind::UnexpectedEof)),
                 Ok(_) => {
-                    let line = buf.trim();
+                    let trimmed = line.trim();
 
-                    if line.is_empty() {
-                        return Ok(());
+                    if trimmed.is_empty() {
+                        return Ok(headers);
                     }
 
-                    let mut tok = line.splitn(2, ':').map(str::trim);
-
-                    let tokens = (tok.next(), tok.next());
-
-                    if let (Some(name), Some(value)) = tokens {
-                        headers.insert(name.parse()?, value.into());
-                        buf.clear();
-                    } else {
-                        return Err(NetError::ParseError("request header").into());
-                    }
+                    let (name, value) = Request::parse_header(trimmed)?;
+                    headers.insert(name, value);
+                    num += 1;
                 }
             }
         }
+
+        return Err(IoError::new(
+            IoErrorKind::Other,
+            String::from("too many headers")
+        ));
     }
 
     pub fn parse_body(&mut self, content_len: Option<&HeaderValue>) -> IoResult<Vec<u8>> {

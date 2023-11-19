@@ -6,25 +6,25 @@ use crate::{NetError, NetResult};
 /// HTTP methods.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Method {
-    /// The representation of the current state of the target resource.
+    /// Transfers a current representation of the target resource.
     Get,
-    /// Sends content to be processed by the target resource.
+    /// Performs resource-specific processing on the request content.
     Post,
-    /// Updates and replaces the current state of the target resource.
+    /// Replaces all current representations of the target resource with the
+    /// request content.
     Put,
-    /// Updates the current state of the target resource without replacing
-    /// the state.
+    /// Performs a similar action to PUT but can do partial updates.
     Patch,
-    /// Removes the target resource.
+    /// Removes all current representations of the target resource.
     Delete,
-    /// Returns the status-line and headers section as though the request were
-    /// a GET request.
+    /// Performs the same action as GET but does not transfer the response
+    /// content.
     Head,
-    /// TRACE method.
+    /// Performs a message loop-back test along the target resource path.
     Trace,
-    /// CONNECT method.
+    /// Establishes a tunnel to the server identified by the target resource.
     Connect,
-    /// OPTIONS method.
+    /// Describes the communication options for the target resource.
     Options,
 }
 
@@ -44,9 +44,8 @@ impl FromStr for Method {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        let upper_str = s.trim().to_uppercase();
-
-        let method = match &*upper_str {
+        // Request methods are case-sensitive.
+        let method = match s {
             "GET" => Self::Get,
             "PUT" => Self::Put,
             "POST" => Self::Post,
@@ -56,7 +55,7 @@ impl FromStr for Method {
             "DELETE" => Self::Delete,
             "CONNECT" => Self::Connect,
             "OPTIONS" => Self::Options,
-            _ => return Err(NetError::ParseError("http method")),
+            _ => return Err(NetError::ParseError("method")),
         };
 
         Ok(method)
@@ -81,9 +80,15 @@ impl Method {
     }
 }
 
-/// HTTP status.
+/// HTTP status code.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Status(pub u16);
+
+impl Default for Status {
+    fn default() -> Self {
+        Self(200)
+    }
+}
 
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -115,7 +120,7 @@ impl TryFrom<u16> for Status {
 }
 
 impl Status {
-    /// Returns the status's reason phrase.
+    /// Returns the reason phrase for a status.
     #[must_use]
     #[rustfmt::skip]
     #[allow(clippy::match_same_arms)]
@@ -150,9 +155,9 @@ impl Status {
             306 => "Switch Proxy",
             307 => "Temporary Redirect",
             308 => "Permanent Redirect",
-            400 => "Bad Request",
 
             // 4xx (Client Error) Statuses.
+            400 => "Bad Request", // No or multiple Host headers, invalid request line.
             401 => "Unauthorized",
             402 => "Payment Required",
             403 => "Forbidden",
@@ -166,7 +171,7 @@ impl Status {
             411 => "Length Required",
             412 => "Precondition Failed",
             413 => "Payload Too Large",
-            414 => "URI Too Long",
+            414 => "URI Too Long", // Recommended to support 8kb+ request lines.
             415 => "Unsupported Media Type",
             416 => "Range Not Satisfiable",
             417 => "Expectation Failed",
@@ -200,7 +205,7 @@ impl Status {
 
             // 5xx (Server Error) Statuses.
             500 => "Internal Server Error",
-            501 => "Not Implemented",
+            501 => "Not Implemented", // Unimplemented methods, etc.
             502 => "Bad Gateway",
             503 => "Service Unavailable",
             504 => "Gateway Timeout",
@@ -228,7 +233,7 @@ impl Status {
         }
     }
 
-    /// Returns the status's numeric code.
+    /// Returns the status code.
     #[must_use]
     pub const fn code(&self) -> u16 {
         self.0
@@ -238,15 +243,15 @@ impl Status {
 /// The HTTP protocol version.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Version {
-    /// HTTP/0.9
+    /// HTTP version 0.9
     ZeroDotNine,
-    /// HTTP/1.0
+    /// HTTP version 1.0
     OneDotZero,
-    /// HTTP/1.1
+    /// HTTP version 1.1
     OneDotOne,
-    /// HTTP/2.0
+    /// HTTP version 2.0
     TwoDotZero,
-    /// HTTP/3.0
+    /// HTTP version 3.0
     ThreeDotZero,
 }
 
@@ -266,15 +271,15 @@ impl FromStr for Version {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        let upper_str = s.trim().to_uppercase();
-
-        let version = match &*upper_str {
+        // HTTP versions are case-sensitive.
+        // Zero is implied by a missing minor version number.
+        let version = match s {
             "HTTP/0.9" => Self::ZeroDotNine,
             "HTTP/1.0" => Self::OneDotZero,
             "HTTP/1.1" => Self::OneDotOne,
             "HTTP/2" | "HTTP/2.0" => Self::TwoDotZero,
             "HTTP/3" | "HTTP/3.0" => Self::ThreeDotZero,
-            _ => return Err(NetError::ParseError("http version")),
+            _ => return Err(NetError::ParseError("version")),
         };
 
         Ok(version)
@@ -294,7 +299,7 @@ impl Version {
         }
     }
 
-    /// Returns the protocol's major version number.
+    /// Returns the major version number.
     #[must_use]
     pub const fn major(&self) -> u8 {
         match self {
@@ -305,7 +310,7 @@ impl Version {
         }
     }
 
-    /// Returns the protocol's minor version number.
+    /// Returns the minor version number.
     #[must_use]
     pub const fn minor(&self) -> u8 {
         match self {
@@ -315,8 +320,8 @@ impl Version {
         }
     }
 
-    /// Returns whether the protocol version is supported. Currently only
-    /// HTTP version 1.1 is supported.
+    /// Returns whether the protocol version is supported.
+    /// Currently only HTTP version 1.1 is supported.
     #[must_use]
     pub fn is_supported(&self) -> bool {
         *self == Self::OneDotOne

@@ -4,28 +4,15 @@ use std::fs;
 use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
 
-use crate::consts::{CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
+use crate::consts::{
+    CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE,
+};
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetResult, RemoteConnect, Request, Router, Status,
-    Version,
+    HeaderName, HeaderValue, HeadersMap, Method, NetResult, RemoteConnect,
+    Request, Router, Status, Version,
 };
 
-// A random HTTP response:
-//HTTP/1.1 200 OK
-//Accept-Ranges: bytes
-//Age: 499402
-//Cache-Control: max-age=604800
-//Content-Encoding: gzip
-//Content-Length: 648
-//Content-Type: text/html; charset=UTF-8
-//Date: Mon, 23 Oct 2023 20:14:46 GMT
-//Etag: "3147526947+gzip"
-//Expires: Mon, 30 Oct 2023 20:14:46 GMT
-//Last-Modified: Thu, 17 Oct 2019 07:18:26 GMT
-//Server: ECS (dcb/7EA3)
-//Vary: Accept-Encoding
-//X-Cache: HIT
-
+/// Represents the components of an HTTP response.
 #[derive(Debug)]
 pub struct Response {
     pub method: Method,
@@ -64,15 +51,10 @@ impl Display for Response {
         // End of the headers section.
         write!(f, "\r\n")?;
 
-        // Print the body if the current context allows for a message body and
-        // if it is an unencoded text or application MIME type.
-        if self.body.is_some() && self.body_is_permitted() && self.body_is_printable() {
-            let body = self.body.as_ref().unwrap();
-            let body = String::from_utf8_lossy(body);
-            let body = body.trim();
-
-            if !body.is_empty() {
-                write!(f, "{body}")?;
+        // Print the body if the current context allows for a message body.
+        if self.body_is_permitted() && self.body_is_printable() {
+            if let Some(b) = self.body.as_ref() {
+                write!(f, "{}", String::from_utf8_lossy(b))?;
             }
         }
 
@@ -86,7 +68,6 @@ impl Response {
         let resolved = router.resolve(req);
         let method = resolved.method;
         let status = resolved.status;
-
         let uri = req.uri.clone();
         let version = req.version;
 
@@ -98,9 +79,11 @@ impl Response {
                 let content = fs::read(path)?;
                 let len = content.len().to_string();
 
-                headers.insert(CACHE_CONTROL, HeaderValue::cache_control_from_path(path));
                 headers.insert(CONTENT_LENGTH, len.as_str().into());
-                headers.insert(CONTENT_TYPE, HeaderValue::content_type_from_path(path));
+                headers.insert(
+                    CONTENT_TYPE,
+                    HeaderValue::content_type_from_path(path)
+                );
 
                 if method == Method::Head {
                     None
@@ -146,13 +129,13 @@ impl Response {
         &self.status
     }
 
-    /// Returns the numeric status code.
+    /// Returns the status code.
     #[must_use]
     pub const fn status_code(&self) -> u16 {
         self.status.code()
     }
 
-    /// Returns the reason phrase for the status.
+    /// Returns the status reason phrase.
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
         self.status.msg()
@@ -167,11 +150,8 @@ impl Response {
     /// A default set of response headers.
     #[must_use]
     pub fn default_headers() -> HeadersMap {
-        BTreeMap::from([
-            (CACHE_CONTROL, "no-cache".into()),
-            (CONTENT_LENGTH, "0".into()),
-            (CONTENT_TYPE, "text/plain; charset=UTF-8".into()),
-        ])
+        // TODO: Are there any headers that are always present?
+        BTreeMap::new()
     }
 
     /// Returns true if the header field represented by `HeaderName` is present.
@@ -180,8 +160,7 @@ impl Response {
         self.headers.contains_key(name)
     }
 
-    /// Adds or modifies the header field represented by the given `HeaderName`
-    /// and `HeaderValue`.
+    /// Adds or modifies the header field represented by `HeaderName`.
     pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
         if self.has_header(&name) {
             self.headers.entry(name).and_modify(|v| *v = val);
@@ -190,70 +169,45 @@ impl Response {
         }
     }
 
-    /// Returns the Cache-Control header value, if present.
+    /// Returns the header value for the given `HeaderName`, if present.
     #[must_use]
-    pub fn cache_control(&self) -> Option<&HeaderValue> {
-        self.headers.get(&CACHE_CONTROL)
-    }
-
-    /// Adds or modifies the Cache-Control header field.
-    pub fn set_cache_control(&mut self, value: HeaderValue) {
-        self.set_header(CACHE_CONTROL, value);
-    }
-
-    /// Returns the Content-Length header value, if present.
-    #[must_use]
-    pub fn content_len(&self) -> Option<&HeaderValue> {
-        self.headers.get(&CONTENT_LENGTH)
-    }
-
-    /// Adds or modifies the Content-Length header field.
-    pub fn set_content_len(&mut self, value: HeaderValue) {
-        self.set_header(CONTENT_LENGTH, value);
-    }
-
-    /// Returns the Content-Type header value, if present.
-    #[must_use]
-    pub fn content_type(&self) -> Option<&HeaderValue> {
-        self.headers.get(&CONTENT_TYPE)
-    }
-
-    /// Adds or modifies the Content-Type header field.
-    pub fn set_content_type(&mut self, value: HeaderValue) {
-        self.set_header(CONTENT_TYPE, value);
-    }
-
-    /// Returns the Content-Encoding header value, if present.
-    #[must_use]
-    pub fn content_encoding(&self) -> Option<&HeaderValue> {
-        self.headers.get(&CONTENT_ENCODING)
+    pub fn header(&self, name: &HeaderName) -> Option<&HeaderValue> {
+        self.headers.get(name)
     }
 
     /// Returns true if the body is an unencoded text or application MIME type.
     #[must_use]
     pub fn body_is_printable(&self) -> bool {
-        if self.content_encoding().is_some() || self.content_type().is_none() {
+        if self.has_header(&CONTENT_ENCODING) ||
+            !self.has_header(&CONTENT_TYPE)
+        {
             return false;
         }
 
-        let ctype = self.content_type().unwrap().to_string();
-
-        ctype.contains("text") || ctype.contains("application")
+        if let Some(ct) = self.header(&CONTENT_TYPE) {
+            match ct.to_string() {
+                s if s.contains("text") => true,
+                s if s.contains("application") => true,
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 
-    /// Returns true if the `Response` is permitted to have a message body
-    /// in the current context.
+    /// Returns true if a response body is allowed.
+    ///
+    /// Presence of a response body depends upon the request method and the
+    /// response status code.
     #[must_use]
     pub fn body_is_permitted(&self) -> bool {
         match self.status_code() {
-            // All responses with a 1xx (Informational), 204 (No Content), or
-            // 304 (Not Modified) status lack a body.
+            // 1xx (Informational), 204 (No Content), and 304 (Not Modified).
             100..=199 | 204 | 304 => false,
-            // All CONNECT responses with a 2xx (Success) status lack a body.
+            // CONNECT responses with a 2xx (Success) status.
             200..=299 if self.method == Method::Connect => false,
-            // All HEAD responses lack a body.
+            // HEAD responses.
             _ if self.method == Method::Head => false,
-            // Message bodies are permitted for all other responses.
             _ => true,
         }
     }
@@ -270,13 +224,13 @@ impl Response {
         format!("{} {}", &self.version, &self.status)
     }
 
-    /// Writes the response's status line to the given stream.
+    /// Writes the response's status line to a stream.
     pub fn write_status_line(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         write!(writer, "{} {}\r\n", &self.version, &self.status)?;
         Ok(())
     }
 
-    /// Writes the response's headers to the given stream.
+    /// Writes the response's headers to a stream.
     pub fn write_headers(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         if !self.headers.is_empty() {
             self.headers.iter().for_each(|(name, value)| {
@@ -291,7 +245,7 @@ impl Response {
         Ok(())
     }
 
-    /// Writes the response's body to the given stream, if applicable.
+    /// Writes the response's body to a stream, if applicable.
     pub fn write_body(&self, writer: &mut RemoteConnect) -> IoResult<()> {
         if self.body.is_some() && self.body_is_permitted() {
             let body = self.body.as_ref().unwrap();
@@ -307,7 +261,6 @@ impl Response {
         self.write_status_line(writer)?;
         self.write_headers(writer)?;
         self.write_body(writer)?;
-
         writer.flush()?;
         Ok(())
     }
