@@ -426,7 +426,9 @@ function Test-ResponseHeaders {
     if ($testHeaders.Count -ne $expHeaders.Count) {
         Write-TestFailed $label "Incorrect number of headers."
         Write-Host @yellow "`n[EXPECTED TOTAL] $($expHeaders.Count)"
+        Write-Host @yellow "$expHeaders"
         Write-Host @magenta "[OUTPUT TOTAL] $($testHeaders.Count)`n"
+        Write-Host @magenta "$testHeaders"
         return $false
     }
 
@@ -552,8 +554,8 @@ function Test-OneClientRoute {
 		Join-String -Separator "`n"
 
 	$testOutput = $res -split "`n" |
-        ForEach-Object { $_.Trim() } |
-		Where-Object { $_.Length -gt 0 } |
+	ForEach-Object { $_.Trim() } |
+	Where-Object { (($_.Length -gt 0) -and ($_ -notlike "*Host:*")) } |
 		Join-String -Separator "`n"
 
 	if ($expOutput -ceq $testOutput) {
@@ -566,6 +568,9 @@ function Test-OneClientRoute {
 		Write-TestFailed $label "Did not match the expected output."
 		Write-Host -NoNewline "Got ""$($testOutput[$charIdx])"" instead of "
 		Write-Host """$($expOutput[$charIdx])"" at character number ${charIdx}."
+		Write-Host "EXPECTED:`n$expOutput"
+		Write-Host "TEST:`n$testOutput"
+		exit
 	}
 }
 

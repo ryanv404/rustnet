@@ -5,10 +5,10 @@ use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 
 use crate::consts::{
-    CONTENT_LENGTH, CONTENT_TYPE, HOST, MAX_HEADERS,
+    CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS,
 };
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetReader,
+    HeaderName, HeaderValue, HeadersMap, Method, NetReader,
     NetWriter, Request, Response, Status, Version,
 };
 
@@ -41,51 +41,54 @@ impl<A: ToSocketAddrs> Default for ClientBuilder<A> {
 }
 
 impl<A: ToSocketAddrs> ClientBuilder<A> {
-    #[must_use]
+	/// Returns a new `ClientBuilder` instance.
+	#[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+	/// Sets the HTTP method.
     pub fn method(&mut self, method: Method) -> &mut Self {
         self.method = Some(method);
         self
     }
 
+	/// Sets the remote host's IP address.
     pub fn ip(&mut self, ip: &str) -> &mut Self {
         self.ip = Some(ip.to_string());
         self
     }
 
+	/// Sets the remote host's port.
     pub fn port(&mut self, port: u16) -> &mut Self {
         self.port = Some(port);
         self
     }
 
+	/// Sets the socket address of the remote server.
     pub fn addr(&mut self, addr: A) -> &mut Self {
         self.addr = Some(addr);
         self
     }
 
+	/// Sets the target URI.
     pub fn uri(&mut self, uri: &str) -> &mut Self {
         self.uri = Some(uri.to_string());
         self
     }
 
-    pub fn version(&mut self, version: Version) -> &mut Self {
+	/// Sets the protocol version.
+	pub fn version(&mut self, version: Version) -> &mut Self {
         self.version = Some(version);
         self
     }
 
-    /// Returns the default request headers.
-    #[must_use]
-    pub fn default_headers(addr: &str) -> HeadersMap {
-        Client::default_headers(addr)
-    }
+    /// Adds a header field line to the request.
+    pub fn header(&mut self, name: HeaderName, value: &str) -> &mut Self {
+		let value = HeaderValue::from(value);
 
-    /// Adds a header field to the request from a `HeaderName` and `HeaderValue`.
-    pub fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
-        if let Some(map) = self.headers.as_mut() {
-            map.entry(name)
+		if let Some(map) = self.headers.as_mut() {
+			map.entry(name)
                 .and_modify(|val| *val = value.clone())
                 .or_insert(value);
         } else {
@@ -95,57 +98,118 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
-    /// Adds a request body from a given bytes slice.
-    pub fn body(&mut self, data: &[u8]) -> &mut Self {
-        if !data.is_empty() {
-            self.body = Some(data.to_vec());
-        }
-        self
+	/// Returns true if the header is present.
+    #[must_use]
+    pub fn has_header(&self, name: &HeaderName) -> bool {
+        if let Some(hdrs) = self.headers.as_ref() {
+			if hdrs.contains_key(name) {
+				true
+			} else {
+				false
+			}
+		} else {
+			false
+		}
     }
 
-    /// Returns a `Client` instance from the builder.
+	/// Updates the Content-Length and Content-Type headers based on
+	/// the client's body field.
+    pub fn update_content_headers(&mut self) {
+		if let Some(body) = self.body.as_ref() {
+			if body.is_empty() {
+				// Body is Some but is empty.
+				self.body = None;
+				
+				if let Some(headers) = self.headers.as_mut() {
+					// Body is empty and headers are present.
+					headers.remove(&CONTENT_LENGTH);
+					headers.remove(&CONTENT_TYPE);
+				}
+			} else {
+				let len = body.len();
+				
+				if let Some(headers) = self.headers.as_mut() {
+					// Body is not empty and headers are present.
+					if !headers.contains_key(&CONTENT_LENGTH) {
+						headers.insert(CONTENT_LENGTH, len.into());
+					}
+					
+					if !headers.contains_key(&CONTENT_TYPE) {
+						// Default to plain text if not previously set.
+						headers.insert(CONTENT_TYPE, "text/plain".into());
+					}
+				}
+			}
+		} else {
+			if let Some(headers) = self.headers.as_mut() {
+				// Body is None and headers are present.
+				if headers.contains_key(&CONTENT_LENGTH) {
+					headers.remove(&CONTENT_LENGTH);
+				}
+				
+				if headers.contains_key(&CONTENT_TYPE) {
+					headers.remove(&CONTENT_TYPE);
+				}
+			}
+		}
+	}
+
+	/// Sets the request body.
+	pub fn body(&mut self, data: &[u8]) -> &mut Self {
+		if !data.is_empty() {
+			self.body = Some(data.to_vec());
+		}
+		
+		self
+	}
+	
+    /// Builds and returns a new `Client` instance.
     pub fn build(&mut self) -> IoResult<Client> {
         let stream = {
-            if let (Some(ip), Some(port)) = (self.ip.as_ref(), self.port) {
-                let remote = format!("{ip}:{port}");
-                TcpStream::connect(remote)?
-            } else if let Some(addr) = self.addr.as_ref() {
-                TcpStream::connect(addr)?
+			if let Some(addr) = self.addr.take() {
+				TcpStream::connect(addr)?
+            } else if self.ip.is_some() && self.port.is_some() {
+				let ip = self.ip.take().unwrap();
+				let port = self.port.take().unwrap();
+				let addr = format!("{ip}:{port}");
+				TcpStream::connect(&addr)?
             } else {
                 return Err(IoError::from(IoErrorKind::InvalidInput));
             }
         };
 
-        let (local_addr, remote_addr) = {
-            let local = stream.local_addr()?;
-            let remote = stream.peer_addr()?;
-            (local, remote)
-        };
+        let local_addr = stream.local_addr()?;
+		let remote_addr = stream.peer_addr()?;
 
-        let (reader, writer) = {
-            let (r, w) = (stream.try_clone()?, stream);
-            (NetReader::from(r), NetWriter::from(w))
-        };
+        let reader = NetReader::from(stream.try_clone()?);
+        let writer = NetWriter::from(stream);
 
         let method = self.method.take().unwrap_or_default();
-        let uri = self.uri.take().unwrap_or_else(|| String::from("/"));
         let version = self.version.take().unwrap_or_default();
+        let uri = self.uri.take().unwrap_or_else(|| String::from("/"));
 
-        let headers = self
+		self.update_content_headers();
+
+		let headers = self
             .headers
             .take()
-            .unwrap_or_else(|| Self::default_headers(&remote_addr.to_string()));
+            .unwrap_or_else(|| Request::default_headers(&remote_addr));
 
-        let body = self.body.take().unwrap_or_default();
 
-        Ok(Client {
+		let body = self.body.take();
+
+		let req = Request {
+            remote_addr,
             method,
             uri,
             version,
             headers,
             body,
+        };
+
+        Ok(Client {
+            req,
             local_addr,
-            remote_addr,
             reader,
             writer,
         })
@@ -161,24 +225,16 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 /// An HTTP client that can send and receive messages with a remote host.
 #[derive(Debug)]
 pub struct Client {
-    pub method: Method,
-    pub uri: String,
-    pub version: Version,
-    pub headers: HeadersMap,
-    pub body: Vec<u8>,
-    pub local_addr: SocketAddr,
-    pub remote_addr: SocketAddr,
+	pub req: Request,
+	pub local_addr: SocketAddr,
     pub reader: NetReader,
     pub writer: NetWriter,
 }
 
 impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let request_line = self.request_line();
-        let headers = self.headers_to_string();
-        write!(f, "{request_line}\n{}", headers.trim())?;
-        Ok(())
-    }
+		self.req.fmt(f)
+	}
 }
 
 impl Write for Client {
@@ -213,21 +269,9 @@ impl BufRead for Client {
 
 impl Client {
     /// Sends a GET request to the provided URL, returning a `Response`.
-//    pub fn get(url: &str) -> IoResult<Response> {
-//        let (addr, uri) = parse_url(url);
-//
-//        let stream = TcpStream::connect(addr)?;
-//        let remote_addr = stream.peer_addr()?;
-//
-//        let req = Request {
-//            uri,
-//            remote_addr,
-//            ..Request::default()
-//        }
-//
-//        let res = Response::default();
-//        Ok(res)
-//    }
+   pub fn get(_url: &str) -> IoResult<Response> {
+		todo!();
+	}
 
     /// Returns a new `ClientBuilder` instance.
     #[must_use]
@@ -235,40 +279,50 @@ impl Client {
         ClientBuilder::new()
     }
 
-    /// Returns the request method.
+    /// Returns the method.
     pub const fn method(&self) -> Method {
-        self.method
+        self.req.method
     }
 
-    /// Returns the requested URI.
+    /// Returns the target URI.
     pub fn uri(&self) -> &str {
-        &self.uri
+        &self.req.uri
     }
 
-    /// Returns the request's protocol version.
+    /// Returns the protocol version.
     pub const fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Default set of request headers.
-    #[must_use]
-    pub fn default_headers(host: &str) -> HeadersMap {
-        let mut headers = Request::default_headers();
-        headers.insert(HOST, host.into());
-        headers
+        self.req.version
     }
 
     /// Returns a reference to the request headers map.
     pub const fn headers(&self) -> &HeadersMap {
-        &self.headers
+        &self.req.headers()
     }
 
-    /// Returns all request headers as a String.
+	/// Returns true if the header is present.
+    #[must_use]
+    pub fn has_header(&self, name: &HeaderName) -> bool {
+        self.req.has_header(name)
+    }
+
+    /// Returns the header value for the given `HeaderName`, if present.
+    #[must_use]
+    pub fn header(&self, name: &HeaderName) -> Option<&HeaderValue> {
+        self.req.header(name)
+    }
+
+	/// Adds or modifies the header field represented by `HeaderName`.
+    pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
+        self.req.set_header(name, val)
+    }
+
+    /// Returns a formatted string of all of the request headers.
     pub fn headers_to_string(&self) -> String {
-        if self.headers.is_empty() {
+        if self.req.headers.is_empty() {
             String::new()
         } else {
-            self.headers
+            self.req
+				.headers
                 .iter()
                 .fold(String::new(), |mut acc, (name, value)| {
                     let header = format!("{name}: {value}\r\n");
@@ -278,96 +332,85 @@ impl Client {
         }
     }
 
-    /// Returns the request's body as a slice.
-    pub fn body(&self) -> &[u8] {
-        &self.body
+    /// Returns a reference to the request body, if present.
+    pub fn body(&self) -> Option<&Vec<u8>> {
+        self.req.body()
     }
 
-    /// Returns the client's socket address.
+    /// Returns the local socket address.
     pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
     /// Returns the remote server's socket address.
     pub const fn remote_addr(&self) -> SocketAddr {
-        self.remote_addr
+        self.req.remote_addr
     }
 
     /// Returns the request line as a String.
     pub fn request_line(&self) -> String {
-        format!("{} {} {}", self.method, self.uri, self.version)
+		self.req.request_line()
     }
 
     /// Sends an HTTP request to the remote host.
     pub fn send(&mut self) -> IoResult<()> {
-        // Request line
-        let request_line = self.request_line();
-        self.write_all(request_line.as_bytes())?;
-        self.write_all(b"\r\n")?;
+		let request_line = self.request_line();
+		let writer = self.writer.by_ref();
 
-        // Request headers
-        let headers = {
-            let remote_addr = self.remote_addr().to_string();
+		// The request line.
+		writer.write_all(request_line.as_bytes())?;
+		writer.write_all(b"\r\n")?;
 
-            if self.headers.is_empty() {
-                Self::default_headers(&remote_addr).iter().fold(
-                    String::new(),
-                    |mut acc, (name, value)| {
-                        let header = format!("{name}: {value}\r\n");
-                        acc.push_str(&header);
-                        acc
-                    },
-                )
-            } else {
-                // Ensure the default headers are included.
-                let default_headers = Request::default_headers();
+		// The request headers.
+		for (name, value) in &self.req.headers {
+			let hdr_name = format!("{name}: ");
+			let hdr_name = hdr_name.as_bytes();
+			writer.write_all(hdr_name)?;
 
-                for (name, value) in default_headers {
-                    self.headers.entry(name).or_insert(value);
-                }
+			// Values may not be UTF-8 so write the bytes directly.
+			writer.write_all(value.as_bytes())?;
+			writer.write_all(b"\r\n")?;
+		}
 
-                self.headers_to_string()
-            }
-        };
+		// End of the headers section.
+		writer.write_all(b"\r\n")?;
 
-        self.write_all(headers.as_bytes())?;
-        self.write_all(b"\r\n")?;
+		// The request message body, if present.
+		if let Some(body) = self.req.body.as_ref() {
+			if !body.is_empty() {
+				writer.write_all(body)?;
+			}
+		}
 
-        // Request body
-        if !self.body.is_empty() {
-            let len = self.body.len();
-
-            // Ensure Content-Length and Content-Type are accurate.
-            self.headers
-                .entry(CONTENT_LENGTH)
-                .and_modify(|val| *val = HeaderValue::from(len))
-                .or_insert_with(|| HeaderValue::from(len));
-
-            // Assume that the body is plain text if not previously set.
-            self.headers
-                .entry(CONTENT_TYPE)
-                .or_insert_with(|| HeaderValue::from("plain/text; charset=UTF-8"));
-
-            self.writer.write_all(&self.body)?;
-        }
-
-        self.flush()?;
+		writer.flush()?;
         Ok(())
-    }
+	}
 
     /// Receives an HTTP response from the remote host.
     pub fn recv(&mut self) -> IoResult<Response> {
-        let uri = self.uri.clone();
-        let method = self.method();
+        let uri = self.req.uri.clone();
+        let method = self.req.method;
 
         let (version, status) = self.parse_status_line()?;
 
         let headers = self.parse_headers()?;
-        let maybe_content_len = headers.get(&CONTENT_LENGTH);
 
-        let body = self.parse_body(maybe_content_len).ok();
+		let body = {
+			// Only parse the body if a valid Content-Length is present.
+			if let Some(len_val) = headers.get(&CONTENT_LENGTH) {
+				let str_len = len_val.to_string();
+				
+				if let Ok(len) = usize::from_str_radix(&str_len, 10) {
+					self.parse_body(len)
+				} else {
+					None
+				}
+			} else {
+				None
+			}
+		};
 
-        Ok(Response {
+		Ok(Response {
             method,
             uri,
             version,
@@ -397,12 +440,12 @@ impl Client {
                 let tokens = (tok.next(), tok.next(), tok.next());
 
                 let (Some(ver), Some(code), Some(msg)) = tokens else {
-                    let payload = "cannot parse response status line".to_string();
+                    let payload = "cannot parse the response status line".to_string();
                     return Err(IoError::new(IoErrorKind::Other, payload));
                 };
 
                 let Ok(version) = ver.parse::<Version>() else {
-                    let payload = format!("cannot parse HTTP version: {ver}");
+                    let payload = format!("cannot parse the HTTP version: {ver}");
                     return Err(IoError::new(IoErrorKind::Other, payload));
                 };
 
@@ -450,27 +493,22 @@ impl Client {
         ));
     }
 
-    pub fn parse_body(&mut self, content_len: Option<&HeaderValue>) -> IoResult<Vec<u8>> {
-        match content_len {
-            Some(value) => {
-                let len_str = value.to_string();
-                let len = len_str
-                    .parse::<u32>()
-                    .map_err(|_| NetError::ParseError("content-length"))?;
+    pub fn parse_body(&mut self, len: usize) -> Option<Vec<u8>> {
+        if len == 0 {
+			return None;
+		}
 
-                if len == 0 {
-                    return Ok(Vec::new());
-                }
+		let Ok(num_bytes) = u64::try_from(len) else {
+			return None;
+		};
 
-                let mut buf = Vec::with_capacity(len as usize);
-
-                // Take by reference instead of consuming the reader.
-                let mut reader_ref = self.reader.by_ref().take(u64::from(len));
-
-                reader_ref.read_to_end(&mut buf)?;
-                Ok(buf)
-            }
-            None => Ok(Vec::new()),
-        }
-    }
+		let mut body = Vec::with_capacity(len);
+		let mut handle = self.reader.by_ref().take(num_bytes);
+	
+		// TODO: handle chunked data and partial reads.
+		match handle.read_to_end(&mut body) {
+			Ok(n) if n == len => Some(body),
+			Ok(_) | Err(_) => None,
+		}
+	}
 }

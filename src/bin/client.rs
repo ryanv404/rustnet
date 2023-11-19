@@ -1,6 +1,6 @@
 use std::{env, io};
 
-use rustnet::{Client, consts::{DATE, HOST}};
+use rustnet::{Client, consts::DATE};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -71,7 +71,6 @@ fn main() -> io::Result<()> {
     let mut res = client.recv()?;
 
     if use_testing_output {
-        let _ = client.headers.remove(&HOST);
         let _ = res.headers.remove(&DATE);
     }
 

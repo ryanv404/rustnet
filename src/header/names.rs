@@ -1,10 +1,10 @@
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
 use crate::{trim_whitespace_bytes, NetError, NetResult};
 
 /// Header field name.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct HeaderName {
     pub inner: HdrRepr,
 }
@@ -13,6 +13,12 @@ impl Display for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", &self.to_titlecase())
     }
+}
+
+impl Debug for HeaderName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		Debug::fmt(&self.to_titlecase(), f)
+	}
 }
 
 impl From<StdHeader> for HeaderName {
@@ -48,7 +54,7 @@ impl TryFrom<&[u8]> for HeaderName {
 }
 
 impl HeaderName {
-    /// Creates a new `HeaderName` from a `HdrRepr` representation.
+    /// Creates a new `HeaderName` from the given `HdrRepr`.
     #[must_use]
     pub const fn new(inner: HdrRepr) -> Self {
         Self { inner }
@@ -68,36 +74,27 @@ impl HeaderName {
         }
 
         let bytes = self.inner.as_bytes();
-        let mut title = String::with_capacity(bytes.len());
 
-        let parts = bytes.split(|&b| b == b'-');
+		let mut title = String::with_capacity(bytes.len());
 
-        for (i, part) in parts.enumerate() {
-            if part.is_empty() {
-                continue;
-            }
+        bytes.split(|&b| b == b'-')
+			.filter(|&part| !part.is_empty())
+			.for_each(|part| {
+				if let Some((first, rest)) = part.split_first() {
+					// Prepend every part but the first with a hyphen.
+					if !title.is_empty() {
+						title.push('-');
+					}
 
-            // Prepend every part but the first with a hyphen.
-            if i > 0 {
-                title.push('-');
-            }
+					title.push(first.to_ascii_uppercase() as char);
 
-            // Make the first letter of each part uppercase.
-            title.push(part[0].to_ascii_uppercase() as char);
+					if !rest.is_empty() {
+						title.push_str(&String::from_utf8_lossy(rest));
+					}
+				}
+			});
 
-            if part.len() > 1 {
-                // Leave the rest of the slice as is.
-                title.push_str(str::from_utf8(&part[1..]).unwrap());
-            }
-        }
-
-        title
-    }
-
-    /// Returns the header field name as a string slice.
-    #[must_use]
-    pub fn as_str(&mut self) -> &str {
-        str::from_utf8(self.as_bytes()).map_or("", |s| s)
+		title
     }
 }
 

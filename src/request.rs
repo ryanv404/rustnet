@@ -1,43 +1,87 @@
 use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{BufRead, ErrorKind::UnexpectedEof};
 use std::net::{IpAddr, SocketAddr};
 use std::str;
 
-use crate::consts::{ACCEPT, MAX_HEADERS, USER_AGENT};
+use crate::consts::{
+	ACCEPT, CONTENT_ENCODING, CONTENT_TYPE, HOST, MAX_HEADERS, USER_AGENT,
+};
 use crate::{
     HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult,
     RemoteConnect, Route, Version,
 };
 
 /// Represents the components of an HTTP request.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Request {
     pub remote_addr: SocketAddr,
     pub method: Method,
     pub uri: String,
     pub version: Version,
     pub headers: HeadersMap,
-    pub body: Vec<u8>,
+    pub body: Option<Vec<u8>>,
 }
 
 impl Default for Request {
     fn default() -> Self {
-        Self {
-            remote_addr: SocketAddr::new([127, 0, 0, 1].into(), 8787),
+		let remote_addr = SocketAddr::new([127, 0, 0, 1].into(), 8787);
+
+		Self {
+            remote_addr,
             method: Method::default(),
             uri: "/".to_string(),
             version: Version::default(),
-            headers: Self::default_headers(),
-            body: Vec::new(),
+            headers: Self::default_headers(&remote_addr),
+            body: None,
         }
     }
 }
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{} {} {}", &self.version, &self.method, &self.uri)
+		// The request line.
+		write!(f, "{}\r\n", self.request_line())?;
+
+		// The request headers.
+		if !self.headers.is_empty() {
+			for (name, value) in &self.headers {
+				write!(f, "{name}: {value}\r\n")?;
+			}
+		}
+
+		// End of the headers section.
+		write!(f, "\r\n")?;
+
+		// The request message body, if present.
+		if let Some(body) = self.body.as_ref() {
+			if !body.is_empty() && self.body_is_printable() {
+				let body = String::from_utf8_lossy(&body);
+				write!(f, "{}", &body)?;
+			}
+		}
+
+		Ok(())
     }
+}
+
+impl Debug for Request {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		let mut dbg = f.debug_struct("Request");
+
+		let dbg = dbg.field("remote_addr", &self.remote_addr)
+			.field("method", &self.method)
+			.field("uri", &self.uri)
+			.field("version", &self.version)
+			.field("headers", &self.headers);
+
+		if self.body.is_none() || !self.body_is_printable() {
+			dbg.field("body", &self.body).finish()
+		} else {
+			let body = self.body.as_ref().map(|b| String::from_utf8_lossy(b));
+			dbg.field("body", &body).finish()
+		}
+	}
 }
 
 impl Request {
@@ -134,8 +178,9 @@ impl Request {
     /// Presence of a request body depends on the Content-Length and
     /// Transfer-Encoding headers.
     #[must_use]
-    pub const fn parse_body(_buf: &[u8]) -> Vec<u8> {
-        Vec::new()
+    pub const fn parse_body(_buf: &[u8]) -> Option<Vec<u8>> {
+		// TODO
+		None
     }
 
     /// Returns the HTTP method.
@@ -150,7 +195,7 @@ impl Request {
         &self.uri
     }
 
-    /// Returns the `Route` representation of the `Request`.
+    /// Returns the `Route` representation of the target resource.
     #[must_use]
     pub fn route(&self) -> Route {
         Route::new(self.method, &self.uri)
@@ -176,18 +221,21 @@ impl Request {
 
     /// Default set of request headers.
     #[must_use]
-    pub fn default_headers() -> HeadersMap {
+    pub fn default_headers(host: &SocketAddr) -> HeadersMap {
         let uagent = format!(
             "{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")
         );
 
-        BTreeMap::from([
-            (ACCEPT, "*/*".into()),
+		let host = format!("{}:{}", host.ip(), host.port());
+
+		BTreeMap::from([
+			(ACCEPT, "*/*".into()),
+			(HOST, host.as_str().into()),
             (USER_AGENT, uagent.as_str().into()),
         ])
     }
 
-    /// Returns true if the `Request` contains the given `HeaderName`.
+    /// Returns true if the header is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
         self.headers.contains_key(name)
@@ -197,6 +245,15 @@ impl Request {
     #[must_use]
     pub fn header(&self, name: &HeaderName) -> Option<&HeaderValue> {
         self.headers.get(name)
+    }
+
+	/// Adds or modifies the header field represented by `HeaderName`.
+    pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
+        if self.has_header(&name) {
+            self.headers.entry(name).and_modify(|v| *v = val);
+        } else {
+            self.headers.insert(name, val);
+        }
     }
 
     /// The `SocketAddr` of the remote connection.
@@ -219,6 +276,37 @@ impl Request {
 
     /// Logs the response status and request line.
     pub fn log(&self, status_code: u16) {
-        println!("[{}|{status_code}] {}", self.remote_ip(), self);
+        println!("[{}|{status_code}] {}", self.remote_ip(), self.request_line());
     }
+
+	/// Returns true if the body is unencoded and has a text or application
+	/// Content-Type header.
+    #[must_use]
+    pub fn body_is_printable(&self) -> bool {
+        if self.has_header(&CONTENT_ENCODING)
+            || !self.has_header(&CONTENT_TYPE)
+        {
+            return false;
+        }
+
+        if let Some(contype) = self.header(&CONTENT_TYPE) {
+            let contype = contype.to_string();
+
+			if contype.contains("text") {
+				true
+			} else if contype.contains("application") {
+				true
+			} else {
+				false
+			}
+        } else {
+            false
+        }
+    }
+
+	/// Returns a referense to the request body, if present.
+	#[must_use]
+	pub fn body(&self) -> Option<&Vec<u8>> {
+		self.body.as_ref()
+	}
 }

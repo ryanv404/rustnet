@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
@@ -13,7 +13,6 @@ use crate::{
 };
 
 /// Represents the components of an HTTP response.
-#[derive(Debug)]
 pub struct Response {
     pub method: Method,
     pub uri: String,
@@ -30,7 +29,7 @@ impl Default for Response {
             uri: String::from("/"),
             version: Version::default(),
             status: Status(200),
-            headers: Self::default_headers(),
+            headers: BTreeMap::new(),
             body: None,
         }
     }
@@ -52,14 +51,39 @@ impl Display for Response {
         write!(f, "\r\n")?;
 
         // Print the body if the current context allows for a message body.
-        if self.body_is_permitted() && self.body_is_printable() {
-            if let Some(b) = self.body.as_ref() {
-                write!(f, "{}", String::from_utf8_lossy(b))?;
-            }
-        }
+		if let Some(body) = self.body.as_ref() {
+			if !body.is_empty()
+				&& self.body_is_printable()
+				&& self.body_is_permitted()
+			{
+				let body = String::from_utf8_lossy(&body);
+				write!(f, "{}", &body)?;
+			}
+		}
 
-        Ok(())
+		Ok(())
     }
+}
+
+impl Debug for Response {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		let mut dbg = f.debug_struct("Response");
+
+		let dbg = dbg.field("method", &self.method)
+			.field("uri", &self.uri)
+			.field("version", &self.version)
+			.field("status", &self.status)
+			.field("headers", &self.headers);
+
+		if self.body.is_none() || !self.body_is_printable() {
+			dbg.field("body", &self.body).finish()
+		} else if !self.body_is_permitted() {
+			dbg.field("body", &"...").finish()
+		} else {
+			let body = self.body.as_ref().map(|b| String::from_utf8_lossy(b));
+			dbg.field("body", &body).finish()
+		}
+	}
 }
 
 impl Response {
@@ -74,23 +98,24 @@ impl Response {
         let mut headers = BTreeMap::new();
 
         let body = {
-            if resolved.path.is_some() {
-                let path = resolved.path.as_ref().unwrap();
+            if let Some(path) = resolved.path.as_ref() {
                 let content = fs::read(path)?;
-                let len = content.len().to_string();
 
-                headers.insert(CONTENT_LENGTH, len.as_str().into());
-                headers.insert(
-                    CONTENT_TYPE,
-                    HeaderValue::content_type_from_path(path)
-                );
+				if !content.is_empty() {
+					headers.insert(CONTENT_LENGTH, content.len().into());
 
-                if method == Method::Head {
-                    None
-                } else {
-                    Some(content)
-                }
-            } else {
+					let contype = HeaderValue::infer_content_type(path);
+					headers.insert(CONTENT_TYPE, contype);
+					
+					if method == Method::Head {
+						None
+					} else {
+						Some(content)
+					}
+				} else {
+					None
+				}
+			} else {
                 None
             }
         };
@@ -147,14 +172,7 @@ impl Response {
         &self.headers
     }
 
-    /// A default set of response headers.
-    #[must_use]
-    pub fn default_headers() -> HeadersMap {
-        // TODO: Are there any headers that are always present?
-        BTreeMap::new()
-    }
-
-    /// Returns true if the header field represented by `HeaderName` is present.
+    /// Returns true if the header is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
         self.headers.contains_key(name)
@@ -175,25 +193,30 @@ impl Response {
         self.headers.get(name)
     }
 
-    /// Returns true if the body is an unencoded text or application MIME type.
-    #[must_use]
+	/// Returns true if the body is unencoded and has a text or application
+	/// Content-Type header.
+	#[must_use]
     pub fn body_is_printable(&self) -> bool {
-        if self.has_header(&CONTENT_ENCODING) ||
-            !self.has_header(&CONTENT_TYPE)
+        if self.has_header(&CONTENT_ENCODING)
+			|| !self.has_header(&CONTENT_TYPE)
         {
             return false;
         }
 
-        if let Some(ct) = self.header(&CONTENT_TYPE) {
-            match ct.to_string() {
-                s if s.contains("text") => true,
-                s if s.contains("application") => true,
-                _ => false,
-            }
+        if let Some(contype) = self.header(&CONTENT_TYPE) {
+            let contype = contype.to_string();
+
+			if contype.contains("text") {
+				true
+			} else if contype.contains("application") {
+				true
+			} else {
+				false
+			}
         } else {
             false
         }
-    }
+	}
 
     /// Returns true if a response body is allowed.
     ///
@@ -247,10 +270,11 @@ impl Response {
 
     /// Writes the response's body to a stream, if applicable.
     pub fn write_body(&self, writer: &mut RemoteConnect) -> IoResult<()> {
-        if self.body.is_some() && self.body_is_permitted() {
-            let body = self.body.as_ref().unwrap();
-            writer.write_all(body)?;
-        }
+		if let Some(body) = self.body.as_ref() {
+			if !body.is_empty() && self.body_is_permitted() {
+				writer.write_all(body)?;
+			}
+		}
 
         Ok(())
     }

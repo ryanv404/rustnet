@@ -7,7 +7,7 @@ macro_rules! test_by_status_code {
         fn $label() {
             $(
                 let mut client = Client::http()
-                    .addr("httpbin.org")
+                    .addr("httpbin.org:80")
                     .uri(concat!("/status/", $code))
                     .send()
                     .unwrap();

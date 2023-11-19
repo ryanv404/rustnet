@@ -1,13 +1,19 @@
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::Path;
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
 
 impl Display for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", String::from_utf8_lossy(self.as_bytes()))
     }
+}
+
+impl Debug for HeaderValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		Debug::fmt(&self.to_string(), f)
+	}
 }
 
 impl From<&str> for HeaderValue {
@@ -24,7 +30,7 @@ impl From<&[u8]> for HeaderValue {
 
 impl From<usize> for HeaderValue {
     fn from(num: usize) -> Self {
-        Self(Vec::from(num.to_string().as_bytes()))
+        Self(Vec::from(&*num.to_string()))
     }
 }
 
@@ -41,25 +47,12 @@ impl HeaderValue {
         &self.0
     }
 
+	/// Infers the Content-Type value from a resource's file extension.
+	/// Defaults to "text/plain" if the extension is not recognized.
     #[must_use]
-    pub fn cache_control_from_path(path: &Path) -> Self {
+    pub fn infer_content_type(path: &Path) -> Self {
         path.extension().map_or_else(
-            || Self(Vec::from("no-cache")),
-            |ext| {
-                Self(Vec::from(match ext.to_str() {
-                    // Allow caching of the favicon for 1 day.
-                    Some("ico") => "max-age=86400",
-                    // Don't cache HTML pages, etc during development.
-                    Some(_) | None => "no-cache",
-                }))
-            },
-        )
-    }
-
-    #[must_use]
-    pub fn content_type_from_path(path: &Path) -> Self {
-        path.extension().map_or_else(
-            || Self(Vec::from("text/plain; charset=UTF-8")),
+            || Self(Vec::from("text/plain")),
             |ext| {
                 Self(Vec::from(match ext.to_str() {
                     Some("html" | "htm") => "text/html; charset=UTF-8",
