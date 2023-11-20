@@ -19,7 +19,7 @@ pub struct ClientBuilder<A: ToSocketAddrs> {
     pub ip: Option<String>,
     pub port: Option<u16>,
     pub addr: Option<A>,
-    pub uri: Option<String>,
+    pub path: Option<String>,
     pub version: Option<Version>,
     pub headers: Option<HeadersMap>,
     pub body: Option<Vec<u8>>,
@@ -32,7 +32,7 @@ impl<A: ToSocketAddrs> Default for ClientBuilder<A> {
             ip: None,
             port: None,
             addr: None,
-            uri: None,
+            path: None,
             version: None,
             headers: None,
             body: None,
@@ -71,9 +71,9 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
-	/// Sets the target URI.
-    pub fn uri(&mut self, uri: &str) -> &mut Self {
-        self.uri = Some(uri.to_string());
+	/// Sets the URI path to the target resource.
+    pub fn path(&mut self, path: &str) -> &mut Self {
+        self.path = Some(path.to_string());
         self
     }
 
@@ -168,7 +168,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 
         let method = self.method.take().unwrap_or_default();
         let version = self.version.take().unwrap_or_default();
-        let uri = self.uri.take().unwrap_or_else(|| String::from("/"));
+        let path = self.path.take().unwrap_or_else(|| String::from("/"));
 
 		self.update_content_headers();
 
@@ -183,7 +183,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 		let req = Request {
             remote_addr,
             method,
-            uri,
+            path,
             version,
             headers,
             body,
@@ -215,7 +215,7 @@ pub struct Client {
 
 impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		write!(f, "{}", self.req)
+		self.req.fmt(f)
 	}
 }
 
@@ -266,9 +266,9 @@ impl Client {
         self.req.method
     }
 
-    /// Returns the target URI.
-    pub fn uri(&self) -> &str {
-        &self.req.uri
+	/// Returns the URI path to the target resource.
+    pub fn path(&self) -> &str {
+        &self.req.path
     }
 
     /// Returns the protocol version.
@@ -336,20 +336,16 @@ impl Client {
 
     /// Sends an HTTP request to the remote host.
     pub fn send(&mut self) -> IoResult<()> {
-		let request_line = self.request_line();
 		let writer = self.writer.by_ref();
 
 		// The request line.
+		let request_line = self.req.request_line();
 		writer.write_all(request_line.as_bytes())?;
 		writer.write_all(b"\r\n")?;
 
 		// The request headers.
 		for (name, value) in &self.req.headers {
-			let hdr_name = format!("{name}: ");
-			let hdr_name = hdr_name.as_bytes();
-			writer.write_all(hdr_name)?;
-
-			// Values may not be UTF-8 so write the bytes directly.
+			writer.write_all(format!("{name}: ").as_bytes())?;
 			writer.write_all(value.as_bytes())?;
 			writer.write_all(b"\r\n")?;
 		}
@@ -370,11 +366,7 @@ impl Client {
 
     /// Receives an HTTP response from the remote host.
     pub fn recv(&mut self) -> IoResult<Response> {
-        let uri = self.req.uri.clone();
-        let method = self.req.method;
-
         let (version, status) = self.parse_status_line()?;
-
         let headers = self.parse_headers()?;
 
 		let body = {
@@ -385,9 +377,12 @@ impl Client {
 			})
 		};
 
+        let path = self.req.path.clone();
+        let method = self.req.method;
+
 		Ok(Response {
             method,
-            uri,
+            path,
             version,
             status,
             headers,
@@ -478,9 +473,10 @@ impl Client {
 		let mut handle = self.reader.by_ref().take(num_bytes);
 	
 		// TODO: handle chunked data and partial reads.
-		match handle.read_to_end(&mut body) {
-			Ok(n) if n == len => Some(body),
-			Ok(_) | Err(_) => None,
+		if handle.read_to_end(&mut body).is_ok() {
+            Some(body)
+		} else {
+		    None
 		}
 	}
 }

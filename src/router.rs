@@ -2,19 +2,19 @@ use std::path::PathBuf;
 
 use crate::{Method, Request, RoutesMap, Status};
 
-/// Represents an endpoint defined by an HTTP method and a URI.
+/// Represents an endpoint defined by an HTTP method and a URI path.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct Route {
     pub method: Method,
-    pub uri: String,
+    pub path: String,
 }
 
 impl Route {
-    /// Constructs a `Route` instance from an HTTP method and a URI.
+    /// Constructs a new `Route` instance.
     #[must_use]
-    pub fn new(method: Method, uri: &str) -> Self {
-        let uri = uri.to_string();
-        Self { method, uri }
+    pub fn new(method: Method, path: &str) -> Self {
+        let path = path.to_string();
+        Self { method, path }
     }
 }
 
@@ -33,8 +33,8 @@ impl Router {
         self.routes.insert(route, PathBuf::new());
     }
 
-    pub fn mount_with_path<P: Into<PathBuf>>(&mut self, route: Route, path: P) {
-        self.routes.insert(route, path.into());
+    pub fn mount_with_filepath<P: Into<PathBuf>>(&mut self, route: Route, filepath: P) {
+        self.routes.insert(route, filepath.into());
     }
 
     #[must_use]
@@ -48,7 +48,6 @@ impl Router {
     pub fn resolve(&self, req: &Request) -> Resolved {
         let req_route = req.route();
         let req_method = req_route.method;
-
         let maybe_route = self.routes.get(&req_route);
         let route_exists = maybe_route.is_some();
 
@@ -61,7 +60,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
@@ -70,7 +68,6 @@ impl Router {
                 // Check if the route exists as a GET route.
                 let mut req_route = req_route;
                 req_route.method = Method::Get;
-
                 self.routes.get(&req_route).map_or_else(
                     || {
                         // Handle HEAD request for GET routes that do not exist.
@@ -81,13 +78,11 @@ impl Router {
                     |path| {
                         // Handle a HEAD request for a GET route that exists.
                         req.log_status(200);
-
                         let maybe_path = if path.as_os_str().is_empty() {
                             None
                         } else {
                             Some(path.clone())
                         };
-
                         Resolved::new(Status(200), Method::Head, maybe_path)
                     })
             },
@@ -99,7 +94,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(201);
                 Resolved::new(Status(201), req_method, maybe_path)
             },
@@ -111,7 +105,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
@@ -123,7 +116,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
@@ -135,7 +127,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
@@ -147,7 +138,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
@@ -159,7 +149,6 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
@@ -171,14 +160,14 @@ impl Router {
                 } else {
                     Some(maybe_path.clone())
                 };
-
                 req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle routes that do not exist.
             _ => {
+                let maybe_path = self.get_error_page();
                 req.log_status(404);
-                Resolved::new(Status(404), req_method, self.get_error_page())
+                Resolved::new(Status(404), req_method, maybe_path)
             },
         }
     }
@@ -190,27 +179,30 @@ impl Router {
 pub struct Resolved {
     pub status: Status,
     pub method: Method,
-    pub path: Option<PathBuf>,
+    pub filepath: Option<PathBuf>,
 }
 
 impl Resolved {
     #[must_use]
-    pub const fn new(status: Status, method: Method, path: Option<PathBuf>) -> Self {
-        Self { status, method, path }
+    pub const fn new(status: Status, method: Method, filepath: Option<PathBuf>) -> Self {
+        Self { status, method, filepath }
     }
 
+    /// Returns the response status.
     #[must_use]
     pub const fn status(&self) -> Status {
         self.status
     }
 
+    /// Returns the HTTP method.
     #[must_use]
     pub const fn method(&self) -> Method {
         self.method
     }
 
+    /// Returns the file path to a static resource.
     #[must_use]
-    pub const fn path(&self) -> Option<&PathBuf> {
-        self.path.as_ref()
+    pub const fn filepath(&self) -> Option<&PathBuf> {
+        self.filepath.as_ref()
     }
 }

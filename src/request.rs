@@ -17,7 +17,7 @@ use crate::{
 pub struct Request {
     pub remote_addr: SocketAddr,
     pub method: Method,
-    pub uri: String,
+    pub path: String,
     pub version: Version,
     pub headers: HeadersMap,
     pub body: Option<Vec<u8>>,
@@ -30,7 +30,7 @@ impl Default for Request {
 		Self {
             remote_addr,
             method: Method::default(),
-            uri: "/".to_string(),
+            path: "/".to_string(),
             version: Version::default(),
             headers: Self::default_headers(&remote_addr),
             body: None,
@@ -50,13 +50,11 @@ impl Display for Request {
 			}
 		}
 
-        writeln!(f)?;
-
 		// The request message body, if present.
 		if let Some(body) = self.body.as_ref() {
 			if !body.is_empty() && self.body_is_printable() {
 				let body = String::from_utf8_lossy(body);
-				write!(f, "{body}")?;
+				write!(f, "\n{body}")?;
 			}
 		}
 
@@ -70,7 +68,7 @@ impl Debug for Request {
 
 		let dbg = dbg.field("remote_addr", &self.remote_addr)
 			.field("method", &self.method)
-			.field("uri", &self.uri)
+			.field("path", &self.path)
 			.field("version", &self.version)
 			.field("headers", &self.headers);
 
@@ -98,8 +96,8 @@ impl Request {
 
         let tokens = (tok.next(), tok.next(), tok.next());
 
-        if let (Some(meth), Some(uri), Some(ver)) = tokens {
-            Ok((meth.parse()?, uri.to_string(), ver.parse()?))
+        if let (Some(meth), Some(path), Some(ver)) = tokens {
+            Ok((meth.parse()?, path.to_string(), ver.parse()?))
         } else {
             Err(NetError::ParseError("request line"))
         }
@@ -127,7 +125,7 @@ impl Request {
         let mut buf = String::new();
 
         // Parse the request line.
-        let (method, uri, version) = {
+        let (method, path, version) = {
             match remote.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
                 Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
@@ -165,7 +163,7 @@ impl Request {
         Ok(Self {
             remote_addr,
             method,
-            uri,
+            path,
             version,
             headers,
             body,
@@ -188,16 +186,16 @@ impl Request {
         self.method
     }
 
-    /// Returns the requested URI.
+    /// Returns the URI path to the target resource.
     #[must_use]
-    pub fn uri(&self) -> &str {
-        &self.uri
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     /// Returns the `Route` representation of the target resource.
     #[must_use]
     pub fn route(&self) -> Route {
-        Route::new(self.method, &self.uri)
+        Route::new(self.method, &self.path)
     }
 
     /// Returns the HTTP version.
@@ -209,7 +207,7 @@ impl Request {
     /// Returns the request line as a String.
     #[must_use]
     pub fn request_line(&self) -> String {
-        format!("{} {} {}", &self.method, &self.uri, &self.version)
+        format!("{} {} {}", &self.method, &self.path, &self.version)
     }
 
     /// Returns a reference to the `Request` object's headers.

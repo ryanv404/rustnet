@@ -15,7 +15,7 @@ use crate::{
 /// Represents the components of an HTTP response.
 pub struct Response {
     pub method: Method,
-    pub uri: String,
+    pub path: String,
     pub version: Version,
     pub status: Status,
     pub headers: HeadersMap,
@@ -26,7 +26,7 @@ impl Default for Response {
     fn default() -> Self {
         Self {
             method: Method::default(),
-            uri: String::from("/"),
+            path: String::from("/"),
             version: Version::default(),
             status: Status(200),
             headers: BTreeMap::new(),
@@ -47,13 +47,11 @@ impl Display for Response {
             }
         }
 
-        writeln!(f)?;
-
         // The response body.
 		if let Some(body) = self.body.as_ref() {
 			if !body.is_empty() && self.body_is_printable() {
 				let body = String::from_utf8_lossy(body);
-				write!(f, "{body}")?;
+				write!(f, "\n{body}")?;
 			}
 		}
 
@@ -66,7 +64,7 @@ impl Debug for Response {
 		let mut dbg = f.debug_struct("Response");
 
 		let dbg = dbg.field("method", &self.method)
-			.field("uri", &self.uri)
+			.field("path", &self.path)
 			.field("version", &self.version)
 			.field("status", &self.status)
 			.field("headers", &self.headers);
@@ -85,7 +83,7 @@ impl Debug for Response {
 impl Response {
     /// Parses a `Response` object from a `Request`.
     pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
-        let uri = req.uri.clone();
+        let path = req.path.clone();
         let version = req.version;
 
         let resolved = router.resolve(req);
@@ -94,13 +92,13 @@ impl Response {
 
         let mut headers = BTreeMap::new();
         let body = {
-            if let Some(path) = resolved.path.as_ref() {
-                let content = fs::read(path)?;
+            if let Some(filepath) = resolved.filepath.as_ref() {
+                let content = fs::read(filepath)?;
 
 				if content.is_empty() {
 					None
 				} else {
-					let contype = HeaderValue::infer_content_type(path);
+					let contype = HeaderValue::infer_content_type(filepath);
 					headers.insert(CONTENT_TYPE, contype);
 					headers.insert(CONTENT_LENGTH, content.len().into());
 					
@@ -117,7 +115,7 @@ impl Response {
 
         Ok(Self {
             method,
-            uri,
+            path,
             version,
             status,
             headers,
@@ -131,10 +129,10 @@ impl Response {
         &self.method
     }
 
-    /// Returns the target URI.
+    /// Returns the URI path to the target resource.
     #[must_use]
-    pub fn uri(&self) -> &str {
-        &self.uri
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     /// Returns the protocol version.

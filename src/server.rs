@@ -37,61 +37,61 @@ impl<A: ToSocketAddrs> ServerConfig<A> {
     }
 
     /// Configures handling of a GET request.
-    pub fn get<P: Into<PathBuf>>(&mut self, uri: &str, path: P) {
-        let route = Route::new(Method::Get, uri);
-        self.router.mount_with_path(route, path);
+    pub fn get<P: Into<PathBuf>>(&mut self, path: &str, filepath: P) {
+        let route = Route::new(Method::Get, path);
+        self.router.mount_with_filepath(route, filepath);
     }
 
     /// Configures handling of a POST request.
-    pub fn post(&mut self, uri: &str) {
-        let route = Route::new(Method::Post, uri);
+    pub fn post(&mut self, path: &str) {
+        let route = Route::new(Method::Post, path);
         self.router.mount(route);
     }
 
     /// Configures handling of a PUT request.
-    pub fn put(&mut self, uri: &str) {
-        let route = Route::new(Method::Put, uri);
+    pub fn put(&mut self, path: &str) {
+        let route = Route::new(Method::Put, path);
         self.router.mount(route);
     }
 
     /// Configures handling of a PATCH request.
-    pub fn patch(&mut self, uri: &str) {
-        let route = Route::new(Method::Patch, uri);
+    pub fn patch(&mut self, path: &str) {
+        let route = Route::new(Method::Patch, path);
         self.router.mount(route);
     }
 
     /// Configures handling of a DELETE request.
-    pub fn delete(&mut self, uri: &str) {
-        let route = Route::new(Method::Delete, uri);
+    pub fn delete(&mut self, path: &str) {
+        let route = Route::new(Method::Delete, path);
         self.router.mount(route);
     }
 
     /// Configures handling of a TRACE request.
-    pub fn trace(&mut self, uri: &str) {
-        let route = Route::new(Method::Trace, uri);
+    pub fn trace(&mut self, path: &str) {
+        let route = Route::new(Method::Trace, path);
         self.router.mount(route);
     }
 
     /// Configures handling of a CONNECT request.
-    pub fn connect(&mut self, uri: &str) {
-        let route = Route::new(Method::Connect, uri);
+    pub fn connect(&mut self, path: &str) {
+        let route = Route::new(Method::Connect, path);
         self.router.mount(route);
     }
 
     /// Configures handling of an OPTIONS request.
-    pub fn options(&mut self, uri: &str) {
-        let route = Route::new(Method::Options, uri);
+    pub fn options(&mut self, path: &str) {
+        let route = Route::new(Method::Options, path);
         self.router.mount(route);
     }
 
-    /// Sets the static path to a favicon icon.
-    pub fn set_favicon<P: Into<PathBuf>>(&mut self, path: P) {
-        self.get("/favicon.ico", path);
+    /// Sets the static file path to a favicon icon.
+    pub fn set_favicon<P: Into<PathBuf>>(&mut self, filepath: P) {
+        self.get("/favicon.ico", filepath);
     }
 
-    /// Sets the static path to an HTML page returned by 404 responses.
-    pub fn set_error_page<P: Into<PathBuf>>(&mut self, path: P) {
-        self.get("__error", path);
+    /// Sets the static file path to an HTML page returned by 404 responses.
+    pub fn set_error_page<P: Into<PathBuf>>(&mut self, filepath: P) {
+        self.get("__error", filepath);
     }
 }
 

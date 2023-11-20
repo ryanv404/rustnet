@@ -11,8 +11,8 @@ TOTAL_CLIENT_TESTS=0
 TOTAL_SERVER_TESTS=0
 CLIENT_BIN="${CRATE_DIR}/target/debug/client"
 SERVER_BIN="${CRATE_DIR}/target/debug/server"
-CLIENT_TESTS_DIR="${CRATE_DIR}/scripts/client_tests"
-SERVER_TESTS_DIR="${CRATE_DIR}/scripts/server_tests"
+CL_TESTS_DIR="${CRATE_DIR}/scripts/client_tests"
+SRV_TESTS_DIR="${CRATE_DIR}/scripts/server_tests"
 
 # Terminal colors.
 CLR=$'\e[0m'
@@ -27,9 +27,7 @@ CYAN=$'\e[96m'
 build_server() {
     echo -n "Building server..."
 
-    cargo build --bin server &> /dev/null
-
-    if (( $? != 0 )); then
+    if ! ( cargo build --bin server &> /dev/null ); then
         echo -e "${RED}✗ Unable to build the server.${CLR}"
         clean_up
     elif [[ ! -x "$SERVER_BIN" ]]; then
@@ -44,9 +42,7 @@ build_server() {
 build_client() {
     echo -e -n "Building client..."
 
-    cargo build --bin client &> /dev/null
-
-    if (( $? != 0 )); then
+    if ! ( cargo build --bin client &> /dev/null ); then
         echo -e "${RED}✗ Unable to build the client.${CLR}"
         clean_up
     elif [[ ! -x "$CLIENT_BIN" ]]; then
@@ -76,12 +72,10 @@ confirm_server_is_live() {
 
 	sleep 1
 
-    while (( ($ATTEMPT_NUM < $MAX_ATTEMPTS) && ($STILL_NOT_LIVE == 1) )); do
+    while (( (ATTEMPT_NUM < MAX_ATTEMPTS) && (STILL_NOT_LIVE == 1) )); do
         echo -n "Connecting..."
 
-        curl --silent -X GET '127.0.0.1:7878' &> /dev/null
-
-        if (( $? == 0 )); then
+        if ( curl --silent -X GET '127.0.0.1:7878' &> /dev/null ); then
             echo -e "${GRN}✔${CLR}\n"
             STILL_NOT_LIVE=0
             break
@@ -92,7 +86,7 @@ confirm_server_is_live() {
         fi
     done
 
-    if (( $STILL_NOT_LIVE == 1 )); then
+    if (( STILL_NOT_LIVE == 1 )); then
         echo -e "\n${RED}✗ The server is unreachable.${CLR}"
         clean_up
     fi
@@ -117,10 +111,8 @@ get_test_result() {
         return
     fi
 
-    diff --text --ignore-blank-lines --ignore-trailing-space \
-        <( echo "$OUTPUT" ) <( cat "$EXP_FILE" ) &> /dev/null
-
-    if (( $? == 0 )); then
+    if ( diff --text --ignore-blank-lines --ignore-trailing-space \
+        <( echo "$OUTPUT" ) <( cat "$EXP_FILE" ) &> /dev/null ); then
         # The test passed.
         echo -e "[${GRN}✔${CLR}] ${BLU}${LABEL}${CLR}"
 
@@ -202,17 +194,15 @@ run_one_client_test() {
 
 # Builds, starts, and tests the server.
 run_server_tests() {
-    local TESTS=""
-
     cargo clean &> /dev/null
 
     build_server
     start_server
 
     # Parse test parameters from the file names.
-    TESTS=($( find "$SERVER_TESTS_DIR" -type f -name "*.txt" -print0 | \
-              xargs -0 -I {} basename --suffix ".txt" "{}" | \
-              tr '\n' ' ' ))
+    local TESTS=()
+    mapfile -t TESTS < <( find "$SRV_TESTS_DIR" -type f -name "*.txt" -print0 | \
+                          xargs -0 -I {} basename --suffix ".txt" "{}" )
 
     echo "SERVER TESTS:"
 
@@ -224,7 +214,7 @@ run_server_tests() {
         local LABEL=""
 
         local FILE="${test}.txt"
-        local EXP_FILE="${SERVER_TESTS_DIR}/${FILE}"
+        local EXP_FILE="${SRV_TESTS_DIR}/${FILE}"
 
         METHOD="${test%_*}"
         METHOD="${METHOD^^}"
@@ -247,16 +237,14 @@ run_server_tests() {
 
 # Builds and tests the client.
 run_client_tests() {
-    local TESTS=""
-
     cargo clean &> /dev/null
 
     build_client
 
     # Parse test parameters from the file names.
-    TESTS=($( find "$CLIENT_TESTS_DIR" -type f -name "*.txt" -print0 | \
-              xargs -0 -I {} basename --suffix ".txt" "{}" | \
-              tr '\n' ' ' ))
+    local TESTS=()
+    mapfile -t TESTS < <( find "$CL_TESTS_DIR" -type f -name "*.txt" -print0 | \
+                          xargs -0 -I {} basename --suffix ".txt" "{}" )
 
     echo "CLIENT TESTS:"
 
@@ -268,7 +256,7 @@ run_client_tests() {
         local LABEL=""
 
         local FILE="${test}.txt"
-        local EXP_FILE="${CLIENT_TESTS_DIR}/${FILE}"
+        local EXP_FILE="${CL_TESTS_DIR}/${FILE}"
 
         METHOD="${test%_*}"
         METHOD="${METHOD^^}"
@@ -300,35 +288,35 @@ run_client_tests() {
 
 # Prints the overall results to the terminal.
 print_overall_results() {
-    local C_TOTAL="$TOTAL_CLIENT_TESTS"
-    local C_PASSED="$CLIENT_NUM_PASSED"
+    local CL_TOTAL="$TOTAL_CLIENT_TESTS"
+    local CL_PASSED="$CLIENT_NUM_PASSED"
 
-    local S_TOTAL="$TOTAL_SERVER_TESTS"
-    local S_PASSED="$SERVER_NUM_PASSED"
+    local SRV_TOTAL="$TOTAL_SERVER_TESTS"
+    local SRV_PASSED="$SERVER_NUM_PASSED"
 
-    if (( ($S_TOTAL == 0) && ($C_TOTAL == 0) )); then
+    if (( (SRV_TOTAL == 0) && (CL_TOTAL == 0) )); then
         return
     fi
 
     echo -e "\n${BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+${CLR}"
 
-    if (( $C_TOTAL > 0 )); then
+    if (( CL_TOTAL > 0 )); then
         echo -n "CLIENT: "
 
-        if (( $C_TOTAL == $C_PASSED )); then
-            echo -e "${GRN}${C_PASSED} of ${C_TOTAL} tests passed.${CLR}"
+        if (( CL_TOTAL == CL_PASSED )); then
+            echo -e "${GRN}${CL_PASSED} of ${CL_TOTAL} tests passed.${CLR}"
         else
-            echo -e "${RED}${C_PASSED} of ${C_TOTAL} tests passed.${CLR}"
+            echo -e "${RED}${CL_PASSED} of ${CL_TOTAL} tests passed.${CLR}"
         fi
     fi
 
-    if (( $S_TOTAL > 0 )); then
+    if (( SRV_TOTAL > 0 )); then
         echo -n "SERVER: "
 
-        if (( $S_TOTAL == $S_PASSED )); then
-            echo -e "${GRN}${S_PASSED} of ${S_TOTAL} tests passed.${CLR}"
+        if (( SRV_TOTAL == SRV_PASSED )); then
+            echo -e "${GRN}${SRV_PASSED} of ${SRV_TOTAL} tests passed.${CLR}"
         else
-            echo -e "${RED}${S_PASSED} of ${S_TOTAL} tests passed.${CLR}"
+            echo -e "${RED}${SRV_PASSED} of ${SRV_TOTAL} tests passed.${CLR}"
         fi
     fi
 
@@ -337,15 +325,13 @@ print_overall_results() {
 
 # Clean up build artifacts and testing debris.
 clean_up() {
-    if [[ ! -z "$SERVER_PID" ]]; then
-        ps -p "$SERVER_PID" &> /dev/null
-
-        if (( $? == 0 )); then
+    if (( SERVER_PID > 0 )); then
+        if ( ps -p "$SERVER_PID" &> /dev/null ); then
             kill -SIGTERM "$SERVER_PID" &> /dev/null
             wait -f "$SERVER_PID" &> /dev/null
         fi
 
-        SERVER_PID=""
+        SERVER_PID=0
     fi
 
     cargo clean &> /dev/null
@@ -389,8 +375,8 @@ else
     esac
 fi
 
-unset CRATE_DIR RED GRN BLU CYAN YLW PURP CLR TOTAL_SERVER_TESTS SERVER_TESTS_DIR
-unset SERVER_NUM_PASSED SERVER_PID SERVER_BIN CLIENT_BIN CLIENT_TESTS_DIR
+unset CRATE_DIR RED GRN BLU CYAN YLW PURP CLR TOTAL_SERVER_TESTS SRV_TESTS_DIR
+unset SERVER_NUM_PASSED SERVER_PID SERVER_BIN CLIENT_BIN CL_TESTS_DIR
 unset TOTAL_CLIENT_TESTS CLIENT_NUM_PASSED
 
 exit

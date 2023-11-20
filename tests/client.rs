@@ -8,7 +8,7 @@ macro_rules! test_by_status_code {
             $(
                 let mut client = Client::http()
                     .addr("httpbin.org:80")
-                    .uri(concat!("/status/", $code))
+                    .path(concat!("/status/", $code))
                     .send()
                     .unwrap();
 
