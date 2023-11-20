@@ -74,20 +74,29 @@ fn main() -> io::Result<()> {
     let mut res = client.recv()?;
 
     if is_testing {
-        // Remove the Date header to enable output vs expected testing.
+		// Ignore Date headers in tests.
+        client.req.headers.remove(&DATE);
         res.headers.remove(&DATE);
     }
 
-    let request = client.to_string();
-    let request = request.trim_end();
-
-    let response = res.to_string();
-    let response = response.trim_end();
-
     if is_testing {
-        println!("{request}\n\n{response}");
+		let req_line = client.request_line();
+		let status_line = res.status_line();
+
+		let req_headers = client.headers_to_string();
+		let res_headers = res.headers_to_string();
+
+		let request = format!("{req_line}\n{}", req_headers.trim_end());
+		let response = format!("{status_line}\n{}", res_headers.trim_end());
+		println!("{request}\n\n{response}");
     } else {
-        println!("{YLW}--[Request]-->\n{request}{CLR}\n");
+		let request = client.to_string();
+		let request = request.trim_end();
+
+		let response = res.to_string();
+		let response = response.trim_end();
+
+		println!("{YLW}--[Request]-->\n{request}{CLR}\n");
         println!("{CYAN}<--[Response]--\n{response}{CLR}");
     }
 

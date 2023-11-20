@@ -10,6 +10,3 @@ Connection: keep-alive
 Content-Length: 30
 Content-Type: text/plain
 Server: gunicorn/19.9.0
-
-User-agent: *
-Disallow: /deny

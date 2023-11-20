@@ -498,22 +498,22 @@ function Test-OneClientRoute {
         $file
     )
 
-	$joinParams = @{
+	$expJoinParams = @{
 		Path = $PSScriptRoot
 		ChildPath = 'client_tests'
 		AdditionalChildPath = $file
 	}
 
-	$expOutputFile = Join-Path @joinParams
+	$expOutputFile = Join-Path @expJoinParams
 
 	if (!(Test-Path -Path $expOutputFile)) {
         Write-TestFailed $label "No expected output file found."
 		return
 	}
 
-	$expOutput = Get-Content -Path $expOutputFile -Encoding 'utf8' -Raw
+	$expFileOutput = Get-Content -Path $expOutputFile -Encoding 'utf8'
 
-    if ($null -eq $expOutput) {
+    if ($null -eq $expFileOutput) {
         Write-TestFailed $label "The expected output file was empty."
         return
     }
@@ -533,14 +533,13 @@ function Test-OneClientRoute {
         Remove-BuildArtifacts
     }
 
-	$clientParams = @('--testing', 'httpbin.org', $uri)
+	$clientParams = @('--testing', '54.86.118.241:80', $uri)
 	
 	$clientJob = Start-Job -ScriptBlock {
 		& $using:clientExe @using:clientParams *>&1
 	}
 
-	# Using Force ensures we wait until the job is in either the Completed,
-	# Stopped, or Failed states.
+	# Wait until the job is Completed, Stopped, or Failed.
 	$res = (Receive-Job -Job $clientJob -Wait -Force)
 
 	if ($null -eq $res) {
@@ -548,60 +547,29 @@ function Test-OneClientRoute {
         return
     }
 
-    $expOutput = $expOutput -split "`n" |
-        ForEach-Object { $_.Trim() } |
+	$testOutput = $res |
+		ForEach-Object { "$($_.Trim())" } |
 		Where-Object { $_.Length -gt 0 } |
-		Join-String -Separator "`n"
+		Join-String -Separator "`r`n"
 
-	$testOutput = $res -split "`n" |
-	ForEach-Object { $_.Trim() } |
-	Where-Object { (($_.Length -gt 0) -and ($_ -notlike "*Host:*")) } |
-		Join-String -Separator "`n"
+	$expOutput = $expFileOutput |
+		ForEach-Object { "$($_.Trim())" } |
+		Where-Object { $_.Length -gt 0 } |
+		Join-String -Separator "`r`n"
 
-	if ($expOutput -ceq $testOutput) {
+	if (($expOutput.Length -gt 0) `
+		-and ($testOutput.Length -gt 0) `
+		-and ($expOutput -ceq $testOutput))
+	{
 		Write-TestPassed $label
 		$script:numClientPassed++
 	}
 	else {
-		$charIdx = Compare-String $expOutput $testOutput
-
 		Write-TestFailed $label "Did not match the expected output."
-		Write-Host -NoNewline "Got ""$($testOutput[$charIdx])"" instead of "
-		Write-Host """$($expOutput[$charIdx])"" at character number ${charIdx}."
+		Write-Host "OUTPUT:`n$testOutput"
 		Write-Host "EXPECTED:`n$expOutput"
-		Write-Host "TEST:`n$testOutput"
 		exit
 	}
-}
-
-# Compares two strings, returning the index of the first non-equal character
-# or -1 if the two strings are identical.
-#
-# https://stackoverflow.com/questions/25169424/using-powershell-to-find-the-differences-in-strings
-function Compare-String {
-	param(
-		[string]
-		$s1,
-
-		[string]
-		$s2
-	)
-
-	if ( $s1 -ceq $s2 ) {
-		return -1
-	}
-
-	$maxLength = ( $s1, $s2 |
-		ForEach-Object {$_.Length} |
-		Measure-Object -Maximum ).Maximum
-
-	for ( $i = 0; $i -lt $maxLength; $i++ ) {
-		if ( $s1[$i] -cne $s2[$i] ) {
-			return $i
-		}
-	}
-
-	return $maxLength
 }
 
 # Runs all server tests and reports the results.

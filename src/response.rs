@@ -202,6 +202,22 @@ impl Response {
         })
 	}
 
+	/// Returns a formatted string of all of the response headers.
+	#[must_use]
+    pub fn headers_to_string(&self) -> String {
+        if self.headers.is_empty() {
+            String::new()
+        } else {
+            self.headers
+                .iter()
+                .fold(String::new(), |mut acc, (name, value)| {
+                    let header = format!("{name}: {value}\n");
+                    acc.push_str(&header);
+                    acc
+                })
+        }
+    }
+
     /// Returns true if a response body is allowed.
     ///
     /// Presence of a response body depends upon the request method and the

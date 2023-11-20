@@ -250,9 +250,77 @@ impl BufRead for Client {
 }
 
 impl Client {
-    /// Sends a GET request to the provided URL, returning a `Response`.
-   pub fn get(_url: &str) -> IoResult<Response> {
-		todo!();
+    /// Sends a GET request to the provided URI, returning the `Client` and
+	/// the `Response`.
+    pub fn get(uri: &str) -> IoResult<(Self, Response)> {
+		let Some((addr, path)) = Self::parse_uri(uri) else {
+			return Err(IoError::from(IoErrorKind::InvalidInput));
+		};
+
+		let mut client = Self::http().addr(&addr).path(&path).send()?;
+		let res = client.recv()?;
+
+		Ok((client, res))
+	}
+
+	pub fn parse_uri(uri: &str) -> Option<(String, String)> {
+		let uri = uri.trim();
+
+		if let Some((scheme, rest)) = uri.split_once("://") {
+			if scheme.is_empty() || rest.is_empty() {
+				return None;
+			}
+
+			match scheme {
+				"https" => return None,
+				"http" => match rest.split_once('/') {
+					Some((addr, path)) if path.is_empty() => {
+						if addr.contains(':') {
+							Some((addr.to_string(), String::from("/")))
+						} else {
+							Some((format!("{addr}:80"), String::from("/")))
+						}
+					},
+					Some((addr, path)) => {
+						if addr.contains(':') {
+							Some((addr.to_string(), path.to_string()))
+						} else {
+							Some((format!("{addr}:80"), path.to_string()))
+						}
+					},
+					None => {
+						if rest.contains(':') {
+							Some((rest.to_string(), String::from("/")))
+						} else {
+							Some((format!("{rest}:80"), String::from("/")))
+						}
+					},
+				},
+				_ => return None,
+			}
+		} else if let Some((addr, path)) = uri.split_once('/') {
+			if addr.is_empty() {
+				return None;
+			}
+
+			let addr = if addr.contains(':') {
+				addr.to_string()
+			} else {
+				format!("{addr}:80")
+			};
+
+			let path = if path.is_empty() {
+				String::from("/")
+			} else {
+				String::from(path)
+			};
+
+			Some((addr, path))
+		} else if uri.contains(':') {
+			Some((uri.to_string(), String::from("/")))
+		} else {
+			Some((format!("{uri}:80"), String::from("/")))
+		}
 	}
 
     /// Returns a new `ClientBuilder` instance.
@@ -307,7 +375,7 @@ impl Client {
 				.headers
                 .iter()
                 .fold(String::new(), |mut acc, (name, value)| {
-                    let header = format!("{name}: {value}\r\n");
+                    let header = format!("{name}: {value}\n");
                     acc.push_str(&header);
                     acc
                 })

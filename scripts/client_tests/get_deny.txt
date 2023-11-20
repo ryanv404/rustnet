@@ -10,15 +10,3 @@ Connection: keep-alive
 Content-Length: 239
 Content-Type: text/plain
 Server: gunicorn/19.9.0
-
-          .-''''''-.
-        .' _      _ '.
-       /   O      O   \
-      :                :
-      |                |
-      :       __       :
-       \  .-"`  `"-.  /
-        '.          .'
-          '-......-'
-     YOU SHOULDN'T BE HERE
-
