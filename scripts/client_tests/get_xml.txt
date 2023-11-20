@@ -1,5 +1,6 @@
 GET /xml HTTP/1.1
 Accept: */*
+Host: 54.86.118.241:80
 User-Agent: rustnet/0.1.0
 
 HTTP/1.1 200 OK

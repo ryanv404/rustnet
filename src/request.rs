@@ -41,23 +41,22 @@ impl Default for Request {
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		// The request line.
-		write!(f, "{}\r\n", self.request_line())?;
+		writeln!(f, "{}", self.request_line())?;
 
 		// The request headers.
 		if !self.headers.is_empty() {
 			for (name, value) in &self.headers {
-				write!(f, "{name}: {value}\r\n")?;
+				writeln!(f, "{name}: {value}")?;
 			}
 		}
 
-		// End of the headers section.
-		write!(f, "\r\n")?;
+        writeln!(f)?;
 
 		// The request message body, if present.
 		if let Some(body) = self.body.as_ref() {
 			if !body.is_empty() && self.body_is_printable() {
-				let body = String::from_utf8_lossy(&body);
-				write!(f, "{}", &body)?;
+				let body = String::from_utf8_lossy(body);
+				write!(f, "{body}")?;
 			}
 		}
 
@@ -275,7 +274,7 @@ impl Request {
     }
 
     /// Logs the response status and request line.
-    pub fn log(&self, status_code: u16) {
+    pub fn log_status(&self, status_code: u16) {
         println!("[{}|{status_code}] {}", self.remote_ip(), self.request_line());
     }
 
@@ -289,24 +288,15 @@ impl Request {
             return false;
         }
 
-        if let Some(contype) = self.header(&CONTENT_TYPE) {
-            let contype = contype.to_string();
-
-			if contype.contains("text") {
-				true
-			} else if contype.contains("application") {
-				true
-			} else {
-				false
-			}
-        } else {
-            false
-        }
+        self.header(&CONTENT_TYPE).map_or(false, |ct| {
+            let ct = ct.to_string();
+            ct.contains("text") || ct.contains("application")
+        })
     }
 
 	/// Returns a referense to the request body, if present.
 	#[must_use]
-	pub fn body(&self) -> Option<&Vec<u8>> {
+	pub const fn body(&self) -> Option<&Vec<u8>> {
 		self.body.as_ref()
 	}
 }

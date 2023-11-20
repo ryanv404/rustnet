@@ -2,40 +2,29 @@
 
 trap "clean_up" INT TERM ERR
 
-# Common global variables.
-CRATE_DIR="$(pwd)"
-TEMP_FILE="${CRATE_DIR}/scripts/temp.txt"
-
-# Server global variables.
+# Global variables.
 SERVER_PID=0
-TOTAL_SERVER_TESTS=0
+CRATE_DIR="$(pwd)"
+CLIENT_NUM_PASSED=0
 SERVER_NUM_PASSED=0
+TOTAL_CLIENT_TESTS=0
+TOTAL_SERVER_TESTS=0
+CLIENT_BIN="${CRATE_DIR}/target/debug/client"
 SERVER_BIN="${CRATE_DIR}/target/debug/server"
+CLIENT_TESTS_DIR="${CRATE_DIR}/scripts/client_tests"
 SERVER_TESTS_DIR="${CRATE_DIR}/scripts/server_tests"
 
-# Client global variables.
-TOTAL_CLIENT_TESTS=0
-CLIENT_NUM_PASSED=0
-CLIENT_BIN="${CRATE_DIR}/target/debug/client"
-CLIENT_TESTS_DIR="${CRATE_DIR}/scripts/client_tests"
-
 # Terminal colors.
+CLR=$'\e[0m'
 RED=$'\e[91m'
 GRN=$'\e[92m'
 YLW=$'\e[93m'
 BLU=$'\e[94m'
 PURP=$'\e[95m'
 CYAN=$'\e[96m'
-CLR=$'\e[0m'
 
 # Builds the test server.
 build_server() {
-    cargo clean &> /dev/null
-
-    if (( $? != 0 )); then
-        echo -e "${YLW}Unable to remove prior build artifacts.${CLR}"
-    fi
-
     echo -n "Building server..."
 
     cargo build --bin server &> /dev/null
@@ -53,12 +42,6 @@ build_server() {
 
 # Builds the client.
 build_client() {
-    cargo clean &> /dev/null
-
-    if (( $? != 0 )); then
-        echo -e "${YLW}Unable to remove build artifacts.${CLR}"
-    fi
-
     echo -e -n "Building client..."
 
     cargo build --bin client &> /dev/null
@@ -79,14 +62,9 @@ start_server() {
     echo -n "Starting server..."
 
 	"$SERVER_BIN" &> /dev/null &
-
     SERVER_PID="$!"
 
-	# Give the server a little time to boot.
-	sleep 1
-
     echo -e "${GRN}✔${CLR}"
-
     confirm_server_is_live
 }
 
@@ -95,6 +73,8 @@ confirm_server_is_live() {
     local ATTEMPT_NUM=0
     local MAX_ATTEMPTS=5
     local STILL_NOT_LIVE=1
+
+	sleep 1
 
     while (( ($ATTEMPT_NUM < $MAX_ATTEMPTS) && ($STILL_NOT_LIVE == 1) )); do
         echo -n "Connecting..."
@@ -118,12 +98,18 @@ confirm_server_is_live() {
     fi
 }
 
-# Compares the server test's output to the expected output.
-get_server_test_result() {
-    local RES="$1"
+# Compares the test's output to the expected output.
+get_test_result() {
+    local OUTPUT="$1"
     local LABEL="$2"
-    local FILE="$3"
-    local EXP_FILE="${SERVER_TESTS_DIR}/$FILE"
+    local EXP_FILE="$3"
+    local KIND="$4"
+
+    if [[ -z "$OUTPUT" ]]; then
+        echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
+        echo -e "${RED}No response received.${CLR}"
+        return
+    fi
 
     if [[ ! -f "$EXP_FILE" ]]; then
         echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
@@ -131,103 +117,30 @@ get_server_test_result() {
         return
     fi
 
-    if [[ -z "$RES" ]]; then
-        echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
-        echo -e "${RED}No response received.${CLR}"
-        return
-    fi
-
-    echo -n "$RES" > "$TEMP_FILE"
-
-    # Test if the test output and expected output are identical, ignoring differences
-    # that only involve blank lines or trailing whitespace.
-    diff --text \
-        --ignore-blank-lines \
-        --ignore-trailing-space \
-        "$TEMP_FILE" \
-        "$EXP_FILE" \
-        &> /dev/null
+    diff --text --ignore-blank-lines --ignore-trailing-space \
+        <( echo "$OUTPUT" ) <( cat "$EXP_FILE" ) &> /dev/null
 
     if (( $? == 0 )); then
         # The test passed.
         echo -e "[${GRN}✔${CLR}] ${BLU}${LABEL}${CLR}"
-        (( SERVER_NUM_PASSED++ ))
-    elif (( $? == 1 )); then
-        # If not identical, get a side-by-side diff that ignores various whitespace
-        # false positives and only shows the lines with differences.
-        local DIFFS=$(diff --text \
-            --ignore-blank-lines \
-            --ignore-trailing-space \
-            --color=always \
-            --side-by-side \
-            --suppress-common-lines \
-            --width=80 \
-            "$TEMP_FILE" \
-            "$EXP_FILE")
 
+        if [[ "$KIND" == "CLIENT" ]]; then
+            (( CLIENT_NUM_PASSED++ ))
+        else
+            (( SERVER_NUM_PASSED++ ))
+        fi
+    elif (( $? == 1 )); then
+        # The test failed.
         echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
         echo -e "${RED}Did not match the expected output.${CLR}"
 
-        echo -e "[${PURP}<--OUTPUT--${CLR} | ${PURP}--EXPECTED-->${CLR}]"
-        echo -e "${DIFFS}\n"
-    else
-        # There was an unexpected error with the diff command.
-        echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
-        echo -e "${RED}Error comparing the test and expected outputs.${CLR}"
-    fi
-}
-
-# Compares the client test's output to the expected output.
-get_client_test_result() {
-    local RES="$1"
-    local LABEL="$2"
-    local FILE="$3"
-    local EXP_FILE="${CLIENT_TESTS_DIR}/$FILE"
-
-    if [[ ! -f "$EXP_FILE" ]]; then
-        echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
-        echo -e "${RED}No expected output file found.${CLR}"
-        return
-    fi
-
-    if [[ -z "$RES" ]]; then
-        echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
-        echo -e "${RED}No response received.${CLR}"
-        return
-    fi
-
-    echo -n "$RES" > "$TEMP_FILE"
-
-    # Compare the output to the expected output, ignoring differences that are
-    # only blank lines or trailing whitespace.
-    diff --text \
-        --ignore-blank-lines \
-        --ignore-trailing-space \
-        "$TEMP_FILE" \
-        "$EXP_FILE" \
-        &> /dev/null
-
-    if (( $? == 0 )); then
-        # The test passed.
-        echo -e "[${GRN}✔${CLR}] ${BLU}${LABEL}${CLR}"
-        (( CLIENT_NUM_PASSED++ ))
-    elif (( $? == 1 )); then
         # No match so display only the lines that are different.
-        local DIFFS=$(diff --text \
-            --ignore-blank-lines \
-            --ignore-trailing-space \
-            --color=always \
-            --side-by-side \
-            --suppress-common-lines \
-            --width=80 \
-            "$TEMP_FILE" \
-            "$EXP_FILE")
+        echo -e -n "[${YLW}DIFFERENCES${CLR}] ${CYAN}OUTPUT${CLR} VS "
+        echo -e "${PURP}EXPECTED${CLR}"
 
-        echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
-        echo -e "${RED}Did not match the expected output.${CLR}"
-
-        echo -e "[${PURP}<--OUTPUT--${CLR} | ${PURP}--EXPECTED-->${CLR}]"
-        echo -e "${DIFFS}\n"
+        diff --text --ignore-blank-lines --ignore-trailing-space \
+            --suppress-common-lines --side-by-side --color='always' \
+            <( echo "$OUTPUT" ) <( cat "$EXP_FILE" )
     else
         # There was an unexpected error with diff.
         echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
@@ -239,146 +152,159 @@ get_client_test_result() {
 run_one_server_test() {
     local RES=""
     local METHOD="$1"
-    local URI="$2"
+    local TARGET="$2"
     local LABEL="$3"
-    local FILE="$4"
-    local URL="127.0.0.1:7878${URI}"
+    local EXP_FILE="$4"
+    local ADDR="127.0.0.1:7878${TARGET}"
 
     case "$METHOD" in
     "GET")
-        RES=$( curl --silent --include -X GET "$URL" );;
+        RES=$( curl --silent --include -X GET "$ADDR" );;
     "HEAD")
-        RES=$( curl --silent --head "$URL" );;
+        RES=$( curl --silent --head "$ADDR" );;
     "POST")
-        RES=$( curl --silent --include -X POST "$URL" );;
+        RES=$( curl --silent --include -X POST "$ADDR" );;
     "PUT")
-        RES=$( curl --silent --include -X PUT "$URL" );;
+        RES=$( curl --silent --include -X PUT "$ADDR" );;
     "PATCH")
-        RES=$( curl --silent --include -X PATCH "$URL" );;
+        RES=$( curl --silent --include -X PATCH "$ADDR" );;
     "DELETE")
-        RES=$( curl --silent --include -X DELETE "$URL" );;
+        RES=$( curl --silent --include -X DELETE "$ADDR" );;
     "TRACE")
-        RES=$( curl --silent --include -X TRACE "$URL" );;
+        RES=$( curl --silent --include -X TRACE "$ADDR" );;
     "OPTIONS")
-        RES=$( curl --silent --include -X OPTIONS "$URL" );;
+        RES=$( curl --silent --include -X OPTIONS "$ADDR" );;
     "CONNECT")
-        RES=$( curl --silent --include -H "Host: 127.0.0.1" \
-            --request-target "$URI" -X CONNECT "$URI" );;
+        RES=$( curl --silent --include -H 'Host: 127.0.0.1' \
+            --request-target '127.0.0.1:7878' -X CONNECT "$ADDR" );;
     *)
         echo -e -n "[${RED}✗${CLR}] ${BLU}${LABEL}${CLR}: "
         echo -e "${RED}Invalid HTTP method.${CLR}"
         return;;
     esac
 
-    get_server_test_result "$RES" "$LABEL" "$FILE"
+    get_test_result "$RES" "$LABEL" "$EXP_FILE" "SERVER"
 }
 
 # Runs one client test.
 run_one_client_test() {
+    local RES=""
     local METHOD="$1"
-    local URI="$2"
+    local TARGET="$2"
     local LABEL="$3"
-    local FILE="$4"
+    local EXP_FILE="$4"
 
-	local RES=$("$CLIENT_BIN" --testing 'httpbin.org' "$URI" 2> /dev/null)
+    local ADDR='54.86.118.241:80'
+	RES="$( "$CLIENT_BIN" --testing "$ADDR" "$TARGET" 2> /dev/null )"
 
-    get_client_test_result "$RES" "$LABEL" "$FILE"
+    get_test_result "$RES" "$LABEL" "$EXP_FILE" "CLIENT"
 }
 
 # Builds, starts, and tests the server.
 run_server_tests() {
+    local TESTS=""
+
+    cargo clean &> /dev/null
+
     build_server
     start_server
 
-    echo "SERVER TESTS:"
-
     # Parse test parameters from the file names.
-    TESTS=($(find "$SERVER_TESTS_DIR" -type f -name "*.txt" -print0 | \
-        xargs -0 -I {} basename --suffix ".txt" "{}" | \
-        tr '\n' ' '))
+    TESTS=($( find "$SERVER_TESTS_DIR" -type f -name "*.txt" -print0 | \
+              xargs -0 -I {} basename --suffix ".txt" "{}" | \
+              tr '\n' ' ' ))
+
+    echo "SERVER TESTS:"
 
     for test in "${TESTS[@]}"; do
         (( TOTAL_SERVER_TESTS++ ))
 
         local METHOD=""
-        local URI=""
+        local TARGET=""
         local LABEL=""
-        local FILE=""
+
+        local FILE="${test}.txt"
+        local EXP_FILE="${SERVER_TESTS_DIR}/${FILE}"
 
         METHOD="${test%_*}"
         METHOD="${METHOD^^}"
 
-        URI="${test#*_}"
-        URI="${URI,,}"
+        TARGET="${test#*_}"
+        TARGET="${TARGET,,}"
 
-        if [[ "$URI" == "index" ]]; then
-            URI="/"
-        elif [[ "$URI" == "favicon" ]]; then
-            URI="/favicon.ico"
+        if [[ "$TARGET" == "index" ]]; then
+            TARGET="/"
+        elif [[ "$TARGET" == "favicon" ]]; then
+            TARGET="/favicon.ico"
         else
-            URI="/$URI"
+            TARGET="/$TARGET"
         fi
 
-        LABEL="$METHOD $URI"
-        FILE="${test}.txt"
-
-        run_one_server_test "$METHOD" "$URI" "$LABEL" "$FILE"
+        LABEL="$METHOD $TARGET"
+        run_one_server_test "$METHOD" "$TARGET" "$LABEL" "$EXP_FILE"
     done
 }
 
 # Builds and tests the client.
 run_client_tests() {
+    local TESTS=""
+
+    cargo clean &> /dev/null
+
     build_client
 
-    echo "CLIENT TESTS:"
-
     # Parse test parameters from the file names.
-    TESTS=($(find "$CLIENT_TESTS_DIR" -type f -name "*.txt" -print0 | \
-        xargs -0 -I {} basename --suffix ".txt" "{}" | \
-        tr '\n' ' '))
+    TESTS=($( find "$CLIENT_TESTS_DIR" -type f -name "*.txt" -print0 | \
+              xargs -0 -I {} basename --suffix ".txt" "{}" | \
+              tr '\n' ' ' ))
+
+    echo "CLIENT TESTS:"
 
     for test in "${TESTS[@]}"; do
         (( TOTAL_CLIENT_TESTS++ ))
 
         local METHOD=""
-        local URI=""
+        local TARGET=""
         local LABEL=""
-        local FILE=""
+
+        local FILE="${test}.txt"
+        local EXP_FILE="${CLIENT_TESTS_DIR}/${FILE}"
 
         METHOD="${test%_*}"
         METHOD="${METHOD^^}"
 
-        URI="${test#*_}"
-        URI="${URI,,}"
+        TARGET="${test#*_}"
+        TARGET="${TARGET,,}"
 
-        case "$URI" in
+        case "$TARGET" in
         "jpeg")
-            URI="/image/jpeg";;
+            TARGET="/image/jpeg";;
         "png")
-            URI="/image/png";;
+            TARGET="/image/png";;
         "svg")
-            URI="/image/svg";;
+            TARGET="/image/svg";;
         "text")
-            URI="/robots.txt";;
+            TARGET="/robots.txt";;
         "utf8")
-            URI="/encoding/utf8";;
+            TARGET="/encoding/utf8";;
         "webp")
-            URI="/image/webp";;
+            TARGET="/image/webp";;
         *)
-            URI="/$URI";;
+            TARGET="/$TARGET";;
         esac
 
-        LABEL="$METHOD $URI"
-        FILE="${test}.txt"
-
-        run_one_client_test "$METHOD" "$URI" "$LABEL" "$FILE"
+        LABEL="$METHOD $TARGET"
+        run_one_client_test "$METHOD" "$TARGET" "$LABEL" "$EXP_FILE"
     done
 }
 
 # Prints the overall results to the terminal.
 print_overall_results() {
     local C_TOTAL="$TOTAL_CLIENT_TESTS"
+    local C_PASSED="$CLIENT_NUM_PASSED"
+
     local S_TOTAL="$TOTAL_SERVER_TESTS"
+    local S_PASSED="$SERVER_NUM_PASSED"
 
     if (( ($S_TOTAL == 0) && ($C_TOTAL == 0) )); then
         return
@@ -387,8 +313,6 @@ print_overall_results() {
     echo -e "\n${BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+${CLR}"
 
     if (( $C_TOTAL > 0 )); then
-        local C_PASSED="$CLIENT_NUM_PASSED"
-
         echo -n "CLIENT: "
 
         if (( $C_TOTAL == $C_PASSED )); then
@@ -399,8 +323,6 @@ print_overall_results() {
     fi
 
     if (( $S_TOTAL > 0 )); then
-        local S_PASSED="$SERVER_NUM_PASSED"
-
         echo -n "SERVER: "
 
         if (( $S_TOTAL == $S_PASSED )); then
@@ -415,8 +337,6 @@ print_overall_results() {
 
 # Clean up build artifacts and testing debris.
 clean_up() {
-    rm -f "$TEMP_FILE" &> /dev/null
-
     if [[ ! -z "$SERVER_PID" ]]; then
         ps -p "$SERVER_PID" &> /dev/null
 
@@ -424,19 +344,17 @@ clean_up() {
             kill -SIGTERM "$SERVER_PID" &> /dev/null
             wait -f "$SERVER_PID" &> /dev/null
         fi
+
+        SERVER_PID=""
     fi
 
     cargo clean &> /dev/null
-
-    if (( $? != 0 )); then
-         echo -e "${YLW}Unable to remove build artifacts.${CLR}"
-    fi
 }
 
 # Prints a help message to the terminal.
 print_help() {
     echo -e "${GRN}USAGE${CLR}"
-    echo -e "    $(basename $0) <ARGUMENT>\n"
+    echo -e "    $(basename "$0") <ARGUMENT>\n"
     echo -e "${GRN}ARGUMENTS${CLR}"
     echo -e "    client   Run all client tests only."
     echo -e "    server   Run all server tests only."
@@ -471,8 +389,8 @@ else
     esac
 fi
 
-unset TOTAL_SERVER_TESTS SERVER_NUM_PASSED SERVER_PID SERVER_BIN CLIENT_BIN
-unset CRATE_DIR TESTS_DIR TEMP_FILE RED GRN BLU CYAN YLW PURP CLR
-unset SERVER_TESTS_DIR CLIENT_TESTS_DIR
+unset CRATE_DIR RED GRN BLU CYAN YLW PURP CLR TOTAL_SERVER_TESTS SERVER_TESTS_DIR
+unset SERVER_NUM_PASSED SERVER_PID SERVER_BIN CLIENT_BIN CLIENT_TESTS_DIR
+unset TOTAL_CLIENT_TESTS CLIENT_NUM_PASSED
 
 exit

@@ -62,7 +62,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Implement the HEAD method for all GET routes.
@@ -71,21 +71,25 @@ impl Router {
                 let mut req_route = req_route;
                 req_route.method = Method::Get;
 
-                if let Some(path) = self.routes.get(&req_route) {
-                    // Handle a HEAD request for a GET route that exists.
-                    let maybe_path = if path.as_os_str().is_empty() {
-                        None
-                    } else {
-                        Some(path.clone())
-                    };
+                self.routes.get(&req_route).map_or_else(
+                    || {
+                        // Handle HEAD request for GET routes that do not exist.
+                        req.log_status(404);
+                        let maybe_path = self.get_error_page();
+                        Resolved::new(Status(404), Method::Head, maybe_path)
+                    },
+                    |path| {
+                        // Handle a HEAD request for a GET route that exists.
+                        req.log_status(200);
 
-                    req.log(200);
-                    Resolved::new(Status(200), Method::Head, maybe_path)
-                } else {
-                    // Handle HEAD request for GET routes that do not exist.
-                    req.log(404);
-                    Resolved::new(Status(404), Method::Head, self.get_error_page())
-                }
+                        let maybe_path = if path.as_os_str().is_empty() {
+                            None
+                        } else {
+                            Some(path.clone())
+                        };
+
+                        Resolved::new(Status(200), Method::Head, maybe_path)
+                    })
             },
             // Handle a POST route that exists.
             Method::Post if route_exists => {
@@ -96,7 +100,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(201);
+                req.log_status(201);
                 Resolved::new(Status(201), req_method, maybe_path)
             },
             // Handle a PUT route that exists.
@@ -108,7 +112,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle a PATCH route that exists.
@@ -120,7 +124,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle a DELETE route that exists.
@@ -132,7 +136,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle a TRACE route that exists.
@@ -144,7 +148,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle an OPTIONS route that exists.
@@ -156,7 +160,7 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle a CONNECT route that exists.
@@ -168,12 +172,12 @@ impl Router {
                     Some(maybe_path.clone())
                 };
 
-                req.log(200);
+                req.log_status(200);
                 Resolved::new(Status(200), req_method, maybe_path)
             },
             // Handle routes that do not exist.
             _ => {
-                req.log(404);
+                req.log_status(404);
                 Resolved::new(Status(404), req_method, self.get_error_page())
             },
         }

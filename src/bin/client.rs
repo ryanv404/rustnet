@@ -11,7 +11,7 @@ const CLR: &str = "\x1b[0m";
 #[rustfmt::skip]
 fn main() -> io::Result<()> {
     let mut use_color_output = false;
-    let mut use_testing_output = false;
+    let mut is_testing = false;
 
     let mut args = env::args().skip(1);
 
@@ -20,9 +20,9 @@ fn main() -> io::Result<()> {
         match args.next() {
             // End of options.
             Some(opt) if opt == "--" => {
-                if let Some(arg) = args.next() {
+                if let Some(addr) = args.next() {
                     // First non-option argument is the addr argument.
-                    break format!("{arg}:80");
+                    break addr;
                 } else {
                     // Unexpected end of arguments.
                     eprintln!("{RED}Must provide a URL or IP address.{CLR}\n");
@@ -31,13 +31,13 @@ fn main() -> io::Result<()> {
                 }
             },
             // Handle an option.
-            Some(opt) if opt.starts_with("-") => match &*opt {
+            Some(opt) if opt.starts_with('-') => match &*opt {
                 "-h" | "--help" => {
                     show_help();
                     return Ok(());
                 },
                 "--colorize" => use_color_output = true,
-                "--testing" => use_testing_output = true,
+                "--testing" => is_testing = true,
                 _ => {
                     // Unknown option.
                     eprintln!("{RED}Unknown option: {opt}{CLR}\n");
@@ -46,7 +46,7 @@ fn main() -> io::Result<()> {
                 },
             },
             // First non-option argument is the addr argument.
-            Some(addr) => break format!("{addr}:80"),
+            Some(addr) => break addr,
             // Unexpected end of arguments.
             None => {
                 eprintln!("{RED}Must provide a URL or IP address.{CLR}\n");
@@ -57,8 +57,9 @@ fn main() -> io::Result<()> {
     };
 
     // Process the remainder of the arguments or use default values.
+    let addr = if is_testing { addr } else { format!("{addr}:80") };
     let uri = args.next().unwrap_or_else(|| String::from("/"));
-    let body = args.next().unwrap_or_else(|| String::new());
+    let body = args.next().unwrap_or_default();
 
     // Create an HTTP client and send a request.
     let mut client = Client::http()
@@ -70,15 +71,14 @@ fn main() -> io::Result<()> {
     // Receive the response from the server.
     let mut res = client.recv()?;
 
-    if use_testing_output {
+    if is_testing {
         let _ = res.headers.remove(&DATE);
-    }
-
-    if use_color_output {
+        println!("{client}{res}");
+    } else if use_color_output {
         println!("{PURP}--[Request]-->\n{client}{CLR}\n");
         println!("{CYAN}<--[Response]--\n{res}{CLR}");
     } else {
-        println!("{client}\n\n{res}");
+        println!("{client}{res}");
     }
 
     Ok(())

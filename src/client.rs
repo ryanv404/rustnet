@@ -101,15 +101,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 	/// Returns true if the header is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
-        if let Some(hdrs) = self.headers.as_ref() {
-			if hdrs.contains_key(name) {
-				true
-			} else {
-				false
-			}
-		} else {
-			false
-		}
+        self.headers.as_ref().map_or(false, |h| h.contains_key(name))
     }
 
 	/// Updates the Content-Length and Content-Type headers based on
@@ -125,31 +117,20 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 					headers.remove(&CONTENT_LENGTH);
 					headers.remove(&CONTENT_TYPE);
 				}
-			} else {
+			} else if let Some(headers) = self.headers.as_mut() {
+				// Body is not empty and headers are present.
 				let len = body.len();
-				
-				if let Some(headers) = self.headers.as_mut() {
-					// Body is not empty and headers are present.
-					if !headers.contains_key(&CONTENT_LENGTH) {
-						headers.insert(CONTENT_LENGTH, len.into());
-					}
-					
-					if !headers.contains_key(&CONTENT_TYPE) {
-						// Default to plain text if not previously set.
-						headers.insert(CONTENT_TYPE, "text/plain".into());
-					}
-				}
+                headers.entry(CONTENT_LENGTH).or_insert_with(|| len.into());
+                headers.entry(CONTENT_TYPE).or_insert_with(|| "text/plain".into());
 			}
-		} else {
-			if let Some(headers) = self.headers.as_mut() {
-				// Body is None and headers are present.
-				if headers.contains_key(&CONTENT_LENGTH) {
-					headers.remove(&CONTENT_LENGTH);
-				}
-				
-				if headers.contains_key(&CONTENT_TYPE) {
-					headers.remove(&CONTENT_TYPE);
-				}
+		} else if let Some(headers) = self.headers.as_mut() {
+			// Body is None and headers are present.
+			if headers.contains_key(&CONTENT_LENGTH) {
+				headers.remove(&CONTENT_LENGTH);
+			}
+			
+			if headers.contains_key(&CONTENT_TYPE) {
+				headers.remove(&CONTENT_TYPE);
 			}
 		}
 	}
@@ -172,7 +153,8 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 				let ip = self.ip.take().unwrap();
 				let port = self.port.take().unwrap();
 				let addr = format!("{ip}:{port}");
-				TcpStream::connect(&addr)?
+
+				TcpStream::connect(addr)?
             } else {
                 return Err(IoError::from(IoErrorKind::InvalidInput));
             }
@@ -233,7 +215,7 @@ pub struct Client {
 
 impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		self.req.fmt(f)
+		write!(f, "{}", self.req)
 	}
 }
 
@@ -296,7 +278,7 @@ impl Client {
 
     /// Returns a reference to the request headers map.
     pub const fn headers(&self) -> &HeadersMap {
-        &self.req.headers()
+        self.req.headers()
     }
 
 	/// Returns true if the header is present.
@@ -313,7 +295,7 @@ impl Client {
 
 	/// Adds or modifies the header field represented by `HeaderName`.
     pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
-        self.req.set_header(name, val)
+        self.req.set_header(name, val);
     }
 
     /// Returns a formatted string of all of the request headers.
@@ -333,7 +315,7 @@ impl Client {
     }
 
     /// Returns a reference to the request body, if present.
-    pub fn body(&self) -> Option<&Vec<u8>> {
+    pub const fn body(&self) -> Option<&Vec<u8>> {
         self.req.body()
     }
 
@@ -397,17 +379,10 @@ impl Client {
 
 		let body = {
 			// Only parse the body if a valid Content-Length is present.
-			if let Some(len_val) = headers.get(&CONTENT_LENGTH) {
-				let str_len = len_val.to_string();
-				
-				if let Ok(len) = usize::from_str_radix(&str_len, 10) {
-					self.parse_body(len)
-				} else {
-					None
-				}
-			} else {
-				None
-			}
+            headers.get(&CONTENT_LENGTH).and_then(|val| {
+				let s_len = val.to_string();
+                s_len.parse::<usize>().map_or(None, |len| self.parse_body(len))
+			})
 		};
 
 		Ok(Response {
@@ -487,10 +462,7 @@ impl Client {
             }
         }
 
-        return Err(IoError::new(
-            IoErrorKind::Other,
-            String::from("too many headers")
-        ));
+        Err(IoError::new(IoErrorKind::Other, String::from("too many headers")))
     }
 
     pub fn parse_body(&mut self, len: usize) -> Option<Vec<u8>> {

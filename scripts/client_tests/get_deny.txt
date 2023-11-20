@@ -1,5 +1,6 @@
 GET /deny HTTP/1.1
 Accept: */*
+Host: 54.86.118.241:80
 User-Agent: rustnet/0.1.0
 
 HTTP/1.1 200 OK
@@ -10,7 +11,7 @@ Content-Length: 239
 Content-Type: text/plain
 Server: gunicorn/19.9.0
 
-.-''''''-.
+          .-''''''-.
         .' _      _ '.
        /   O      O   \
       :                :
@@ -20,3 +21,4 @@ Server: gunicorn/19.9.0
         '.          .'
           '-......-'
      YOU SHOULDN'T BE HERE
+

@@ -38,26 +38,22 @@ impl Default for Response {
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         // The response status line.
-        write!(f, "{}\r\n", self.status_line())?;
+        writeln!(f, "{}", self.status_line())?;
 
         // The response headers.
         if !self.headers.is_empty() {
             for (name, value) in &self.headers {
-                write!(f, "{name}: {value}\r\n")?;
+                writeln!(f, "{name}: {value}")?;
             }
         }
 
-        // End of the headers section.
-        write!(f, "\r\n")?;
+        writeln!(f)?;
 
-        // Print the body if the current context allows for a message body.
+        // The response body.
 		if let Some(body) = self.body.as_ref() {
-			if !body.is_empty()
-				&& self.body_is_printable()
-				&& self.body_is_permitted()
-			{
-				let body = String::from_utf8_lossy(&body);
-				write!(f, "{}", &body)?;
+			if !body.is_empty() && self.body_is_printable() {
+				let body = String::from_utf8_lossy(body);
+				write!(f, "{body}")?;
 			}
 		}
 
@@ -75,9 +71,9 @@ impl Debug for Response {
 			.field("status", &self.status)
 			.field("headers", &self.headers);
 
-		if self.body.is_none() || !self.body_is_printable() {
+		if self.body.is_none() {
 			dbg.field("body", &self.body).finish()
-		} else if !self.body_is_permitted() {
+		} else if !self.body_is_permitted() || !self.body_is_printable() {
 			dbg.field("body", &"...").finish()
 		} else {
 			let body = self.body.as_ref().map(|b| String::from_utf8_lossy(b));
@@ -89,31 +85,30 @@ impl Debug for Response {
 impl Response {
     /// Parses a `Response` object from a `Request`.
     pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
-        let resolved = router.resolve(req);
-        let method = resolved.method;
-        let status = resolved.status;
         let uri = req.uri.clone();
         let version = req.version;
 
-        let mut headers = BTreeMap::new();
+        let resolved = router.resolve(req);
+        let method = resolved.method;
+        let status = resolved.status;
 
+        let mut headers = BTreeMap::new();
         let body = {
             if let Some(path) = resolved.path.as_ref() {
                 let content = fs::read(path)?;
 
-				if !content.is_empty() {
-					headers.insert(CONTENT_LENGTH, content.len().into());
-
+				if content.is_empty() {
+					None
+				} else {
 					let contype = HeaderValue::infer_content_type(path);
 					headers.insert(CONTENT_TYPE, contype);
+					headers.insert(CONTENT_LENGTH, content.len().into());
 					
 					if method == Method::Head {
 						None
 					} else {
 						Some(content)
 					}
-				} else {
-					None
 				}
 			} else {
                 None
@@ -203,19 +198,10 @@ impl Response {
             return false;
         }
 
-        if let Some(contype) = self.header(&CONTENT_TYPE) {
-            let contype = contype.to_string();
-
-			if contype.contains("text") {
-				true
-			} else if contype.contains("application") {
-				true
-			} else {
-				false
-			}
-        } else {
-            false
-        }
+        self.header(&CONTENT_TYPE).map_or(false, |ct| {
+            let ct = ct.to_string();
+			ct.contains("text") || ct.contains("application")
+        })
 	}
 
     /// Returns true if a response body is allowed.
