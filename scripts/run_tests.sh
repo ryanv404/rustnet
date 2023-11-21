@@ -9,8 +9,8 @@ CLIENT_NUM_PASSED=0
 SERVER_NUM_PASSED=0
 TOTAL_CLIENT_TESTS=0
 TOTAL_SERVER_TESTS=0
-CLIENT_BIN="${CRATE_DIR}/target/debug/client"
-SERVER_BIN="${CRATE_DIR}/target/debug/server"
+CLIENT_BIN="${CRATE_DIR}/target/debug/examples/client"
+SERVER_BIN="${CRATE_DIR}/target/debug/examples/server"
 CL_TESTS_DIR="${CRATE_DIR}/scripts/client_tests"
 SRV_TESTS_DIR="${CRATE_DIR}/scripts/server_tests"
 
@@ -27,7 +27,7 @@ CYAN=$'\e[96m'
 build_server() {
     echo -n "Building server..."
 
-    if ! ( cargo build --bin server &> /dev/null ); then
+    if ! ( cargo build --example server &> /dev/null ); then
         echo -e "${RED}✗ Unable to build the server.${CLR}"
         clean_up
     elif [[ ! -x "$SERVER_BIN" ]]; then
@@ -42,7 +42,7 @@ build_server() {
 build_client() {
     echo -e -n "Building client..."
 
-    if ! ( cargo build --bin client &> /dev/null ); then
+    if ! ( cargo build --example client &> /dev/null ); then
         echo -e "${RED}✗ Unable to build the client.${CLR}"
         clean_up
     elif [[ ! -x "$CLIENT_BIN" ]]; then

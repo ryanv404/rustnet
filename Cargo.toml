@@ -9,16 +9,3 @@ license = "MIT"
 repository = "https://github.com/ryanv404/rustnet.git"
 keywords = ["http", "server", "client", "networking"]
 categories = ["network-programming"]
-autobins = false
-
-[lib]
-name = "rustnet"
-path = "src/lib.rs"
-
-[[bin]]
-name = "server"
-path = "src/bin/server.rs"
-
-[[bin]]
-name = "client"
-path = "src/bin/client.rs"

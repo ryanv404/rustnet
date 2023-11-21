@@ -253,6 +253,22 @@ impl Request {
         }
     }
 
+    /// Returns all of the request headers as a String.
+    #[must_use]
+    pub fn headers_to_string(&self) -> String {
+        if self.headers.is_empty() {
+            String::new()
+        } else {
+            self.headers
+                .iter()
+                .fold(String::new(), |mut acc, (name, value)| {
+                    let header = format!("{name}: {value}\n");
+                    acc.push_str(&header);
+                    acc
+                })
+        }
+    }
+
     /// The `SocketAddr` of the remote connection.
     #[must_use]
     pub const fn remote_addr(&self) -> SocketAddr {

@@ -5,7 +5,7 @@ use std::io::{Result as IoResult, Write};
 use std::sync::Arc;
 
 use crate::consts::{
-    CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE,
+    CONNECTION, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE,
 };
 use crate::{
     HeaderName, HeaderValue, HeadersMap, Method, NetResult, RemoteConnect,
@@ -202,7 +202,7 @@ impl Response {
         })
 	}
 
-	/// Returns a formatted string of all of the response headers.
+    /// Returns all of the response headers as a String.
 	#[must_use]
     pub fn headers_to_string(&self) -> String {
         if self.headers.is_empty() {
@@ -287,5 +287,15 @@ impl Response {
         self.write_body(writer)?;
         writer.flush()?;
         Ok(())
+    }
+
+    /// Returns true if the Connection header is present with the value "close".
+    pub fn has_close_connection_header(&self) -> bool {
+        if let Some(val) = self.header(&CONNECTION) {
+            let val = String::from_utf8_lossy(val.as_bytes());
+            "close".eq_ignore_ascii_case(val.trim())
+        } else {
+            false
+        }
     }
 }

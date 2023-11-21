@@ -252,17 +252,18 @@ impl BufRead for Client {
 impl Client {
     /// Sends a GET request to the provided URI, returning the `Client` and
 	/// the `Response`.
-    pub fn get(uri: &str) -> IoResult<(Self, Response)> {
+    pub fn get(uri: &str) -> IoResult<(Self, Response, String)> {
 		let Some((addr, path)) = Self::parse_uri(uri) else {
 			return Err(IoError::from(IoErrorKind::InvalidInput));
 		};
 
 		let mut client = Self::http().addr(&addr).path(&path).send()?;
 		let res = client.recv()?;
-
-		Ok((client, res))
+		Ok((client, res, addr))
 	}
 
+    /// Attempts to parse a string slice into a host address and a path.
+    #[must_use]
 	pub fn parse_uri(uri: &str) -> Option<(String, String)> {
 		let uri = uri.trim();
 
@@ -272,7 +273,6 @@ impl Client {
 			}
 
 			match scheme {
-				"https" => return None,
 				"http" => match rest.split_once('/') {
 					Some((addr, path)) if path.is_empty() => {
 						if addr.contains(':') {
@@ -283,9 +283,9 @@ impl Client {
 					},
 					Some((addr, path)) => {
 						if addr.contains(':') {
-							Some((addr.to_string(), path.to_string()))
+							Some((addr.to_string(), format!("/{path}")))
 						} else {
-							Some((format!("{addr}:80"), path.to_string()))
+							Some((format!("{addr}:80"), format!("/{path}")))
 						}
 					},
 					None => {
@@ -296,7 +296,7 @@ impl Client {
 						}
 					},
 				},
-				_ => return None,
+				_ => None,
 			}
 		} else if let Some((addr, path)) = uri.split_once('/') {
 			if addr.is_empty() {
@@ -312,7 +312,7 @@ impl Client {
 			let path = if path.is_empty() {
 				String::from("/")
 			} else {
-				String::from(path)
+				format!("/{path}")
 			};
 
 			Some((addr, path))

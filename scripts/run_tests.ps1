@@ -18,7 +18,7 @@ function Build-MyClient {
 
 	Write-Host -NoNewline "Building client..."
 
-	cargo build --bin client *> $null
+	cargo build --example client *> $null
 
 	if ($LASTEXITCODE -ne 0) {
 		Write-Host @red "✗ Unable to build the client."
@@ -45,7 +45,7 @@ function Build-MyServer {
 
 	Write-Host -NoNewline "Building server..."
 
-	cargo build --bin server *> $null
+	cargo build --example server *> $null
 
 	if ($LASTEXITCODE -ne 0) {
 		Write-Host @red "✗ Unable to build the server."
@@ -67,11 +67,10 @@ function Start-MyServer {
     $joinParams = @{
         Path = $crateDir
         ChildPath = 'target'
-        AdditionalChildPath = 'debug', 'server.exe'
+        AdditionalChildPath = 'debug', 'examples', 'server.exe'
     }
 
     $serverExe = Join-Path @joinParams
-
 	if (!(Test-Path -Path $serverExe)) {
 		Write-Host @red "`n✗ Cannot locate the server executable file."
         Remove-BuildArtifacts
@@ -230,7 +229,6 @@ function Test-OneServerRoute {
 	}
 
     $expOutputFile = Join-Path @joinParams
-
 	if (!(Test-Path -Path $expOutputFile)) {
         Write-TestFailed $label "No expected output file found."
 		return
@@ -523,7 +521,7 @@ function Test-OneClientRoute {
     $joinParams = @{
         Path = $crateDir
         ChildPath = 'target'
-        AdditionalChildPath = 'debug', 'client.exe'
+        AdditionalChildPath = 'debug', 'examples', 'client.exe'
     }
 
     $clientExe = Join-Path @joinParams
@@ -534,7 +532,7 @@ function Test-OneClientRoute {
     }
 
 	$clientParams = @('--testing', '54.86.118.241:80', $uri)
-	
+
 	$clientJob = Start-Job -ScriptBlock {
 		& $using:clientExe @using:clientParams *>&1
 	}
