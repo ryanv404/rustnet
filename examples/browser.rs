@@ -26,13 +26,27 @@ fn main() {
 
         match line.trim() {
             "" => continue,
+            "body" => browser.set_output_style(OutputStyle::ResBody),
             "close" | "quit" => break 'outer,
             "clear" => browser.clear_screen(),
             "help" => browser.show_help(),
             "home" => browser.set_home_mode(),
-            "normal" => browser.set_output_style(OutputStyle::Normal),
-            "quiet" => browser.set_output_style(OutputStyle::Quiet),
+            "request" => browser.set_output_style(OutputStyle::Request),
+            "response" => browser.set_output_style(OutputStyle::Response),
+            "status" => browser.set_output_style(OutputStyle::Status),
             "verbose" => browser.set_output_style(OutputStyle::Verbose),
+            uri if browser.output_style == OutputStyle::Request => {
+                if let Some((addr, path)) = Client::parse_uri(uri) {
+                    browser.client = Client::http()
+                        .addr(addr)
+                        .path(&path)
+                        .build()
+                        .ok();
+                }
+
+                browser.print_request();
+                browser.client = None;
+            }
             uri => match Client::get(uri) {
                 Ok((client, res, addr)) => {
                     browser.client = Some(client);
@@ -52,22 +66,28 @@ fn main() {
 
                         match line.trim() {
                             "" => continue,
+                            "body" => browser.set_output_style(OutputStyle::ResBody),
                             "close" | "quit" => break 'outer,
                             "clear" => browser.clear_screen(),
                             "help" => browser.show_help(),
                             "home" => browser.set_home_mode(),
-                            "normal" => browser.set_output_style(OutputStyle::Normal),
-                            "quiet" => browser.set_output_style(OutputStyle::Quiet),
+                            "request" => browser.set_output_style(OutputStyle::Request),
+                            "response" => browser.set_output_style(OutputStyle::Response),
+                            "status" => browser.set_output_style(OutputStyle::Status),
                             "verbose" => browser.set_output_style(OutputStyle::Verbose),
                             path if path.starts_with('/') => {
                                 browser.set_path(path);
-                                browser.send();
-                                browser.recv();
+                                if browser.output_style == OutputStyle::Request {
+                                    browser.print_request();
+                                } else {
+                                    browser.send();
+                                    browser.recv();
 
-                                if browser.response.is_some() {
-                                    browser.print_output();
-                                    browser.in_path_mode = !browser.connection_closed();
-                                    browser.response = None;
+                                    if browser.response.is_some() {
+                                        browser.print_output();
+                                        browser.in_path_mode = !browser.connection_closed();
+                                        browser.response = None;
+                                    }
                                 }
                             },
                             _ => browser.warn_invalid_input(),
@@ -80,23 +100,56 @@ fn main() {
     }
 }
 
+const HELP_MSG: &str = "
+\x1b[95mHELP:\x1b[0m
+    Enter an HTTP URI (\x1b[92mhome\x1b[0m mode) or a URI path (\x1b[93mpath\x1b[0m mode) to send
+    an HTTP request to a remote host.\n
+\x1b[95mMODES:\x1b[0m
+    \x1b[92mHome\x1b[0m      Enter an HTTP URI to send a request.
+              Example:
+              \x1b[92m[HOME]$\x1b[0m httpbin.org/encoding/utf8\n
+    \x1b[93mPath\x1b[0m      Enter a URI path to send a new request to the same host.
+              This mode is entered automatically while the connection
+              to the remote host is kept alive. It can be manually
+              exited by using the `home` command.
+              Example:
+              \x1b[93m[httpbin.org:80]$\x1b[0m /encoding/utf8\n
+\x1b[95mCOMMANDS:\x1b[0m
+    body      Only print the response body (default).
+    clear     Clear the terminal.
+    close     Close the program.
+    help      Print this help message.
+    home      Exit \x1b[93mpath\x1b[0m mode and return to \x1b[92mhome\x1b[0m mode.
+    request   Only print the request (does not send the request).
+    response  Only print the response.
+    status    Only print the response status line.
+    verbose   Print both the request and the response.
+";
+
+#[derive(Debug, PartialEq, Eq)]
 // Output style options.
 enum OutputStyle {
-    Quiet,
-    Normal,
+    Status,
+    Request,
+    ResBody,
+    Response,
     Verbose,
 }
 
 impl fmt::Display for OutputStyle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Quiet => write!(f, "quiet"),
-            Self::Normal => write!(f, "normal"),
+            Self::Status => write!(f, "status"),
+            Self::ResBody => write!(f, "body"),
+            Self::Request => write!(f, "request"),
+            Self::Response => write!(f, "response"),
             Self::Verbose => write!(f, "verbose"),
         }
     }
 }
 
+// An HTTP client.
+#[derive(Debug)]
 struct Browser<'a> {
     output_style: OutputStyle,
     in_path_mode: bool,
@@ -110,7 +163,7 @@ struct Browser<'a> {
 impl<'a> Browser<'a> {
     fn new(stdin: StdinLock<'a>, stdout: StdoutLock<'a>) -> Self {
         Self {
-            output_style: OutputStyle::Normal,
+            output_style: OutputStyle::ResBody,
             in_path_mode: false,
             client: None,
             response: None,
@@ -120,14 +173,19 @@ impl<'a> Browser<'a> {
     }
 
     fn clear_screen(&mut self) {
+		// Clear the screen and move the cursor to the top left.
         self.stdout.write_all(b"\x1b[2J\x1b[1;1H").unwrap();
         self.stdout.flush().unwrap();
     }
 
     fn print_intro_message(&mut self) {
-        writeln!(&mut self.stdout, "{CYAN}rust_browser{CLR} is an HTTP client.").unwrap();
-        write!(&mut self.stdout, "Enter a URI at the prompt or ").unwrap();
-        writeln!(&mut self.stdout, "try `{YLW}help{CLR}` to see all options.\n").unwrap();
+		let name = env!("CARGO_BIN_NAME");
+		let msg = format!("\
+			{CYAN}{name}{CLR} is an HTTP client.\n\
+			Enter `{YLW}help{CLR}` to see all options.\n\
+		");
+
+        writeln!(&mut self.stdout, "{msg}").unwrap();
         self.stdout.flush().unwrap();
     }
 
@@ -141,7 +199,7 @@ impl<'a> Browser<'a> {
         self.output_style = style;
         writeln!(
             &mut self.stdout,
-            "Output style set to {CYAN}{}{CLR}.",
+            "Output style set to `{CYAN}{}{CLR}`.\n",
             self.output_style
         ).unwrap();
         self.stdout.flush().unwrap();
@@ -158,29 +216,7 @@ impl<'a> Browser<'a> {
     }
 
     fn show_help(&mut self) {
-        let help_msg = format!("\n\
-            {PURP}HELP:{CLR} The prompt shows which mode you are in.\n\n\
-            {GRN}[HOME]${CLR}\n    \
-                Enter an HTTP URI to send a request to a remote host.\n\
-            {YLW}[REMOTE ADDRESS]${CLR}\n    \
-                When you connect to a remote server, its address is displayed in \n    \
-                the prompt. Enter relative paths (e.g. \"/my/path\") to request \n    \
-                target resources on that server.\n\n\
-            {PURP}COMMANDS:{CLR}\n    \
-                clear    Clear the terminal.\n    \
-                close    Close the program.\n    \
-                help     Print this help message.\n    \
-                home     Exits {YLW}PATH{CLR} mode and returns to {GRN}HOME{CLR} mode.\n    \
-                normal   Only print responses (default).\n    \
-                quiet    Only print status lines.\n    \
-                verbose  Print full requests and responses.\n\n\
-            {PURP}EXAMPLE URI'S:{CLR}\n    \
-                httpbin.org/deny\n    \
-                http://www.httpbin.org/status/201\n    \
-                127.0.0.1:80/my_file.txt\n\
-        ");
-
-        writeln!(&mut self.stdout, "{help_msg}").unwrap();
+        writeln!(&mut self.stdout, "{HELP_MSG}").unwrap();
     }
 
     fn set_path(&mut self, path: &str) {
@@ -225,6 +261,20 @@ impl<'a> Browser<'a> {
                 )
             });
 
+        self.stdout.write_all(output.as_bytes()).unwrap();
+        self.stdout.flush().unwrap();
+    }
+
+    fn print_response_body(&mut self) {
+        let output = self.response.as_ref().map_or_else(
+            || String::from("No response found.\n"),
+            |res| res.body.as_ref().map_or_else(
+                || String::from("This response does not have a body."),
+                |body| {
+                    let body = String::from_utf8_lossy(&body);
+                    format!("\n{}\n\n", body.trim_end())
+                })
+            );
 
         self.stdout.write_all(output.as_bytes()).unwrap();
         self.stdout.flush().unwrap();
@@ -255,7 +305,7 @@ impl<'a> Browser<'a> {
     fn print_status_line(&mut self) {
         let output = self.response.as_ref().map_or_else(
             || String::from("No status line found.\n"),
-            |res| format!("{PURP}{}{CLR}\n", res.status_line()),
+            |res| format!("{PURP}{}{CLR}\n\n", res.status_line()),
         );
 
         self.stdout.write_all(output.as_bytes()).unwrap();
@@ -264,10 +314,16 @@ impl<'a> Browser<'a> {
 
     fn print_output(&mut self) {
         match self.output_style {
-            OutputStyle::Quiet => {
+            OutputStyle::Status => {
                 self.print_status_line();
             },
-            OutputStyle::Normal => {
+            OutputStyle::Request => {
+                self.print_request();
+            },
+            OutputStyle::ResBody => {
+                self.print_response_body();
+            },
+            OutputStyle::Response => {
                 self.print_response();
             },
             OutputStyle::Verbose => {
