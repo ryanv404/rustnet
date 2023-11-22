@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{self, BufRead, BufWriter, StdinLock, StdoutLock, Write};
 
 use rustnet::{Client, Response};
@@ -11,93 +11,13 @@ const PURP: &str = "\x1b[95m";
 const CLR: &str = "\x1b[0m";
 
 fn main() {
-    let mut line = String::new();
     let stdin = io::stdin().lock();
     let stdout = BufWriter::new(io::stdout().lock());
-
     let mut browser = Browser::new(stdin, stdout);
+
     browser.clear_screen();
     browser.print_intro_message();
-
-    'main_loop: loop {
-        browser.print_home_prompt();
-
-        line.clear();
-        browser.stdin.read_line(&mut line).unwrap();
-
-        match line.trim() {
-            "" => continue,
-            "body" => browser.set_output_style(OutputStyle::ResBody),
-            "clear" => browser.clear_screen(),
-            "close" | "quit" => break 'main_loop,
-            "help" => browser.show_help(),
-            "home" => browser.set_home_mode(),
-            "request" => browser.set_output_style(OutputStyle::Request),
-            "response" => browser.set_output_style(OutputStyle::Response),
-            "status" => browser.set_output_style(OutputStyle::Status),
-            "verbose" => browser.set_output_style(OutputStyle::Verbose),
-            uri if browser.output_style == OutputStyle::Request => {
-                browser.client = Client::parse_uri(uri).and_then(
-                    |(addr, path)| {
-                        Client::http().addr(addr).path(&path).build().ok()
-                    }
-                );
-                browser.print_request();
-                browser.client = None;
-            },
-            uri => match Client::get(uri) {
-                Ok((client, res, addr)) => {
-                    browser.client = Some(client);
-                    browser.response = Some(res);
-
-                    if browser.response.is_some() {
-                        browser.print_output();
-                        browser.in_path_mode = browser.is_connection_open();
-                        browser.response = None;
-                    }
-
-                    // This loop allows for us to keep using the same open connection.
-                    while browser.in_path_mode {
-                        browser.print_path_prompt(&addr);
-
-                        line.clear();
-                        browser.stdin.read_line(&mut line).unwrap();
-
-                        match line.trim() {
-                            "" => continue,
-                            path if path.starts_with('/') => {
-                                browser.set_path(path);
-
-                                if browser.output_style == OutputStyle::Request {
-                                    browser.print_request();
-                                } else {
-                                    browser.send();
-                                    browser.recv();
-
-                                    if browser.response.is_some() {
-                                        browser.print_output();
-                                        browser.in_path_mode = browser.is_connection_open();
-                                        browser.response = None;
-                                    }
-                                }
-                            },
-                            "body" => browser.set_output_style(OutputStyle::ResBody),
-                            "clear" => browser.clear_screen(),
-                            "close" | "quit" => break 'main_loop,
-                            "help" => browser.show_help(),
-                            "home" => browser.set_home_mode(),
-                            "request" => browser.set_output_style(OutputStyle::Request),
-                            "response" => browser.set_output_style(OutputStyle::Response),
-                            "status" => browser.set_output_style(OutputStyle::Status),
-                            "verbose" => browser.set_output_style(OutputStyle::Verbose),
-                            _ => browser.warn_invalid_input(),
-                        }
-                    }
-                },
-                Err(_) => browser.warn_invalid_input(),
-            }
-        }
-    }
+    browser.run();
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -110,8 +30,8 @@ enum OutputStyle {
     Verbose,
 }
 
-impl fmt::Display for OutputStyle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for OutputStyle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Status => write!(f, "status"),
             Self::ResBody => write!(f, "body"),
@@ -125,8 +45,9 @@ impl fmt::Display for OutputStyle {
 // An HTTP client.
 #[derive(Debug)]
 struct Browser<'a> {
-    output_style: OutputStyle,
+    is_running: bool,
     in_path_mode: bool,
+    output_style: OutputStyle,
     client: Option<Client>,
     response: Option<Response>,
     stdin: StdinLock<'a>,
@@ -137,12 +58,121 @@ struct Browser<'a> {
 impl<'a> Browser<'a> {
     fn new(stdin: StdinLock<'a>, stdout: BufWriter<StdoutLock<'a>>) -> Self {
         Self {
-            output_style: OutputStyle::Response,
+            is_running: false,
             in_path_mode: false,
+            output_style: OutputStyle::Response,
             client: None,
             response: None,
             stdin,
             stdout,
+        }
+    }
+
+    fn run(&mut self) {
+        self.is_running = true;
+        let mut line = String::new();
+
+        while self.is_running {
+            line.clear();
+            self.print_home_prompt();
+            self.stdin.read_line(&mut line).unwrap();
+
+            match line.trim() {
+                "" => continue,
+                "body" => self.set_output_style(OutputStyle::ResBody),
+                "clear" => self.clear_screen(),
+                "close" | "quit" => self.is_running = false,
+                "help" => self.show_help(),
+                "home" => self.set_home_mode(),
+                "request" => self.set_output_style(OutputStyle::Request),
+                "response" => self.set_output_style(OutputStyle::Response),
+                "status" => self.set_output_style(OutputStyle::Status),
+                "verbose" => self.set_output_style(OutputStyle::Verbose),
+                uri if self.output_style == OutputStyle::Request => {
+                    self.client = Client::parse_uri(uri).and_then(
+                        |(addr, path)| {
+                            Client::http().addr(addr).path(&path).build().ok()
+                        }
+                    );
+                    self.print_request();
+                    self.client = None;
+                },
+                uri => match Client::get(uri) {
+                    Ok((client, res, addr)) => {
+                        self.client = Some(client);
+                        self.response = Some(res);
+                        self.print_output();
+
+                        if self.is_connection_open() {
+                            self.run_path_mode(&addr);
+                        } else {
+                            self.response = None;
+                        }
+                    },
+                    Err(_) => self.warn_invalid_input(),
+                }
+            }
+        }
+    }
+
+    fn check_for_command(&mut self, input: &str) {
+        match input {
+            "body" => self.set_output_style(OutputStyle::ResBody),
+            "clear" => self.clear_screen(),
+            "close" | "quit" => self.is_running = false,
+            "help" => self.show_help(),
+            "home" => self.set_home_mode(),
+            "request" => self.set_output_style(OutputStyle::Request),
+            "response" => self.set_output_style(OutputStyle::Response),
+            "status" => self.set_output_style(OutputStyle::Status),
+            "verbose" => self.set_output_style(OutputStyle::Verbose),
+            _ => {},
+        }
+    }
+
+    fn run_path_mode(&mut self, addr: &str) {
+        self.response = None;
+        self.in_path_mode = true;
+        let mut line = String::new();
+
+        // This loop allows for us to keep using the same open connection.
+        while self.in_path_mode {
+            line.clear();
+            self.print_path_prompt(addr);
+            self.stdin.read_line(&mut line).unwrap();
+
+            match line.trim() {
+                "" => continue,
+                path if path.starts_with('/') => {
+                    self.set_path(path);
+
+                    if self.output_style == OutputStyle::Request {
+                        self.print_request();
+                    } else {
+                        self.send();
+                        self.recv();
+
+                        if self.response.is_some() {
+                            self.print_output();
+                            self.in_path_mode = self.is_connection_open();
+                            self.response = None;
+                        }
+                    }
+                },
+                "body" => self.set_output_style(OutputStyle::ResBody),
+                "clear" => self.clear_screen(),
+                "close" | "quit" => {
+                    self.in_path_mode = false;
+                    self.is_running = false;
+                },
+                "help" => self.show_help(),
+                "home" => self.set_home_mode(),
+                "request" => self.set_output_style(OutputStyle::Request),
+                "response" => self.set_output_style(OutputStyle::Response),
+                "status" => self.set_output_style(OutputStyle::Status),
+                "verbose" => self.set_output_style(OutputStyle::Verbose),
+                _ => self.warn_invalid_input(),
+            }
         }
     }
 
@@ -191,12 +221,12 @@ impl<'a> Browser<'a> {
     fn show_help(&mut self) {
         writeln!(&mut self.stdout, "\n\
 {PURP}HELP:{CLR}
-    Enter an HTTP URI ({GRN}home{CLR} mode) or a URI path ({YLW}path{CLR} mode) to send
+    Enter an HTTP URI ({GRN}HOME{CLR} mode) or a URI path ({YLW}PATH{CLR} mode) to send
     an HTTP request to a remote host.\n
 {PURP}MODES:{CLR}
-    {GRN}Home{CLR}      Enter an HTTP URI to send a request.
+    {GRN}HOME{CLR}      Enter an HTTP URI to send a request.
               Example: {GRN}[HOME]${CLR} httpbin.org/encoding/utf8\n
-    {YLW}Path{CLR}      Enter a URI path to send a new request to the same host.
+    {YLW}PATH{CLR}      Enter a URI path to send a new request to the same host.
               This mode is entered automatically while the connection
               to the remote host is kept alive. It can be manually
               exited by using the `home` command.
@@ -206,8 +236,8 @@ impl<'a> Browser<'a> {
     clear     Clear the terminal.
     close     Close the program.
     help      Print this help message.
-    home      Exit {YLW}path{CLR} mode and return to {GRN}home{CLR} mode.
-    request   Print requests (does not send the requests).
+    home      Exit {YLW}PATH{CLR} mode and return to {GRN}HOME{CLR} mode.
+    request   Print requests (but do not send them).
     response  Print responses (default).
     status    Print response status lines.
     verbose   Print both the requests and the responses.\n").unwrap();
@@ -238,11 +268,12 @@ impl<'a> Browser<'a> {
 
     fn print_request(&mut self) {
         let output = self.client.as_ref().map_or_else(
-            || String::from("No request found.\n"),
+            || String::from("No request.\n"),
             |client| {
                 let req_line = client.req.request_line();
                 let headers = client.req.headers_to_string();
                 let headers = headers.trim_end();
+
                 client.req.body.as_ref().map_or_else(
                     || format!("\n{YLW}{req_line}{CLR}\n{headers}\n\n"),
                     |body| {
@@ -253,55 +284,57 @@ impl<'a> Browser<'a> {
                         )
                     }
                 )
-            });
-
+            }
+        );
         self.stdout.write_all(output.as_bytes()).unwrap();
         self.stdout.flush().unwrap();
     }
 
     fn print_response_body(&mut self) {
         let output = self.response.as_ref().map_or_else(
-            || String::from("No response found.\n"),
+            || String::from("No response.\n"),
             |res| res.body.as_ref().map_or_else(
-                || String::from("Response body is empty.\n"),
+                || String::from("No response body data.\n"),
                 |body| {
                     let body = String::from_utf8_lossy(&body);
                     format!("\n{}\n\n", body.trim_end())
                 })
-            );
-
+        );
         self.stdout.write_all(output.as_bytes()).unwrap();
         self.stdout.flush().unwrap();
     }
 
     fn print_response(&mut self) {
         let output = self.response.as_ref().map_or_else(
-            || String::from("No response found.\n"),
+            || String::from("No response.\n"),
             |res| {
                 let status_line = res.status_line();
                 let headers = res.headers_to_string();
                 let headers = headers.trim_end();
+                let color = if res.status_code() >= 400 { PURP } else { GRN };
                 res.body.as_ref().map_or_else(
-                    || format!("\n{PURP}{status_line}{CLR}\n{headers}\n\n"),
+                    || format!("\n{color}{status_line}{CLR}\n{headers}\n\n"),
                     |body| {
                         let body = String::from_utf8_lossy(&body);
                         format!(
-                            "\n{PURP}{status_line}{CLR}\n{headers}\n\n{}\n\n",
+                            "\n{color}{status_line}{CLR}\n{headers}\n\n{}\n\n",
                             body.trim_end()
                         )
                     })
-            });
-
+            }
+        );
         self.stdout.write_all(output.as_bytes()).unwrap();
         self.stdout.flush().unwrap();
     }
 
     fn print_status_line(&mut self) {
         let output = self.response.as_ref().map_or_else(
-            || String::from("No status line found.\n"),
-            |res| format!("{PURP}{}{CLR}\n\n", res.status_line()),
+            || String::from("No status line.\n"),
+            |res| {
+                let color = if res.status_code() >= 400 { PURP } else { GRN };
+                format!("{color}{}{CLR}\n\n", res.status_line())
+            }
         );
-
         self.stdout.write_all(output.as_bytes()).unwrap();
         self.stdout.flush().unwrap();
     }

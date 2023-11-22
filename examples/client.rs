@@ -94,11 +94,16 @@ fn main() -> io::Result<()> {
     } else {
         let req_body = client.req.body_to_string();
         let res_body = res.body_to_string();
+        let res_color = if res.status_code() >= 400 {
+            PURP
+        } else {
+            GRN
+        };
 
         match (req_body.len(), res_body.len()) {
             (0, 0) => {
         		println!(
-        		    "{YLW}{}{CLR}\n{}\n\n{PURP}{}{CLR}\n{}\n",
+        		    "{YLW}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n",
         		    client.request_line(),
                     client.headers_to_string().trim_end(),
         		    res.status_line(),
@@ -107,7 +112,7 @@ fn main() -> io::Result<()> {
             },
             (_, 0) => {
         		println!(
-        		    "{YLW}{}{CLR}\n{}\n{}\n\n{PURP}{}{CLR}\n{}\n",
+        		    "{YLW}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n",
         		    client.request_line(),
                     client.headers_to_string().trim_end(),
                     req_body.trim_end(),
@@ -117,7 +122,7 @@ fn main() -> io::Result<()> {
             },
             (0, _) => {
         		println!(
-        		    "{YLW}{}{CLR}\n{}\n\n{PURP}{}{CLR}\n{}\n\n{}\n",
+        		    "{YLW}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
         		    client.request_line(),
                     client.headers_to_string().trim_end(),
         		    res.status_line(),
@@ -127,7 +132,7 @@ fn main() -> io::Result<()> {
             },
             (_, _) => {
         		println!(
-        		    "{YLW}{}{CLR}\n{}\n{}\n\n{PURP}{}{CLR}\n{}\n\n{}\n",
+        		    "{YLW}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
         		    client.request_line(),
                     client.headers_to_string().trim_end(),
                     req_body.trim_end(),
