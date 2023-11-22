@@ -1,8 +1,19 @@
+use std::borrow::Cow;
+use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::Path;
+use std::str::FromStr;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
+
+impl FromStr for HeaderValue {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Vec::from(s)))
+    }
+}
 
 impl Display for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -16,9 +27,9 @@ impl Debug for HeaderValue {
 	}
 }
 
-impl From<&str> for HeaderValue {
-    fn from(s: &str) -> Self {
-        Self(Vec::from(s))
+impl From<String> for HeaderValue {
+    fn from(s: String) -> Self {
+        Self(s.into_bytes())
     }
 }
 
@@ -30,7 +41,8 @@ impl From<&[u8]> for HeaderValue {
 
 impl From<usize> for HeaderValue {
     fn from(num: usize) -> Self {
-        Self(Vec::from(&*num.to_string()))
+        let num = num.to_string();
+        Self(Vec::from(&*num))
     }
 }
 
@@ -45,6 +57,12 @@ impl HeaderValue {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+
+    /// Returns the header field value as a copy-on-write string slice.
+    #[must_use]
+    pub fn as_str(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.0)
     }
 
 	/// Infers the Content-Type value from a resource's file extension.

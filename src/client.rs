@@ -85,7 +85,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 
     /// Adds a header field line to the request.
     pub fn header(&mut self, name: HeaderName, value: &str) -> &mut Self {
-		let value = HeaderValue::from(value);
+		let value: HeaderValue = value.parse().unwrap();
 
 		if let Some(map) = self.headers.as_mut() {
 			map.entry(name)
@@ -121,7 +121,9 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 				// Body is not empty and headers are present.
 				let len = body.len();
                 headers.entry(CONTENT_LENGTH).or_insert_with(|| len.into());
-                headers.entry(CONTENT_TYPE).or_insert_with(|| "text/plain".into());
+                headers.entry(CONTENT_TYPE).or_insert_with(
+                    || "text/plain".parse().unwrap()
+                );
 			}
 		} else if let Some(headers) = self.headers.as_mut() {
 			// Body is None and headers are present.

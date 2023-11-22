@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{self, BufRead, StdinLock, StdoutLock, Write};
+use std::io::{self, BufRead, BufWriter, StdinLock, StdoutLock, Write};
 
 use rustnet::{Client, Response};
 
@@ -13,22 +13,23 @@ const CLR: &str = "\x1b[0m";
 fn main() {
     let mut line = String::new();
     let stdin = io::stdin().lock();
-    let stdout = io::stdout().lock();
+    let stdout = BufWriter::new(io::stdout().lock());
 
     let mut browser = Browser::new(stdin, stdout);
     browser.clear_screen();
     browser.print_intro_message();
 
-    'outer: loop {
-        line.clear();
+    'main_loop: loop {
         browser.print_home_prompt();
+
+        line.clear();
         browser.stdin.read_line(&mut line).unwrap();
 
         match line.trim() {
             "" => continue,
             "body" => browser.set_output_style(OutputStyle::ResBody),
-            "close" | "quit" => break 'outer,
             "clear" => browser.clear_screen(),
+            "close" | "quit" => break 'main_loop,
             "help" => browser.show_help(),
             "home" => browser.set_home_mode(),
             "request" => browser.set_output_style(OutputStyle::Request),
@@ -36,17 +37,14 @@ fn main() {
             "status" => browser.set_output_style(OutputStyle::Status),
             "verbose" => browser.set_output_style(OutputStyle::Verbose),
             uri if browser.output_style == OutputStyle::Request => {
-                if let Some((addr, path)) = Client::parse_uri(uri) {
-                    browser.client = Client::http()
-                        .addr(addr)
-                        .path(&path)
-                        .build()
-                        .ok();
-                }
-
+                browser.client = Client::parse_uri(uri).and_then(
+                    |(addr, path)| {
+                        Client::http().addr(addr).path(&path).build().ok()
+                    }
+                );
                 browser.print_request();
                 browser.client = None;
-            }
+            },
             uri => match Client::get(uri) {
                 Ok((client, res, addr)) => {
                     browser.client = Some(client);
@@ -54,29 +52,22 @@ fn main() {
 
                     if browser.response.is_some() {
                         browser.print_output();
-                        browser.in_path_mode = !browser.connection_closed();
+                        browser.in_path_mode = browser.is_connection_open();
                         browser.response = None;
                     }
 
                     // This loop allows for us to keep using the same open connection.
                     while browser.in_path_mode {
-                        line.clear();
                         browser.print_path_prompt(&addr);
+
+                        line.clear();
                         browser.stdin.read_line(&mut line).unwrap();
 
                         match line.trim() {
                             "" => continue,
-                            "body" => browser.set_output_style(OutputStyle::ResBody),
-                            "close" | "quit" => break 'outer,
-                            "clear" => browser.clear_screen(),
-                            "help" => browser.show_help(),
-                            "home" => browser.set_home_mode(),
-                            "request" => browser.set_output_style(OutputStyle::Request),
-                            "response" => browser.set_output_style(OutputStyle::Response),
-                            "status" => browser.set_output_style(OutputStyle::Status),
-                            "verbose" => browser.set_output_style(OutputStyle::Verbose),
                             path if path.starts_with('/') => {
                                 browser.set_path(path);
+
                                 if browser.output_style == OutputStyle::Request {
                                     browser.print_request();
                                 } else {
@@ -85,11 +76,20 @@ fn main() {
 
                                     if browser.response.is_some() {
                                         browser.print_output();
-                                        browser.in_path_mode = !browser.connection_closed();
+                                        browser.in_path_mode = browser.is_connection_open();
                                         browser.response = None;
                                     }
                                 }
                             },
+                            "body" => browser.set_output_style(OutputStyle::ResBody),
+                            "clear" => browser.clear_screen(),
+                            "close" | "quit" => break 'main_loop,
+                            "help" => browser.show_help(),
+                            "home" => browser.set_home_mode(),
+                            "request" => browser.set_output_style(OutputStyle::Request),
+                            "response" => browser.set_output_style(OutputStyle::Response),
+                            "status" => browser.set_output_style(OutputStyle::Status),
+                            "verbose" => browser.set_output_style(OutputStyle::Verbose),
                             _ => browser.warn_invalid_input(),
                         }
                     }
@@ -99,32 +99,6 @@ fn main() {
         }
     }
 }
-
-const HELP_MSG: &str = "
-\x1b[95mHELP:\x1b[0m
-    Enter an HTTP URI (\x1b[92mhome\x1b[0m mode) or a URI path (\x1b[93mpath\x1b[0m mode) to send
-    an HTTP request to a remote host.\n
-\x1b[95mMODES:\x1b[0m
-    \x1b[92mHome\x1b[0m      Enter an HTTP URI to send a request.
-              Example:
-              \x1b[92m[HOME]$\x1b[0m httpbin.org/encoding/utf8\n
-    \x1b[93mPath\x1b[0m      Enter a URI path to send a new request to the same host.
-              This mode is entered automatically while the connection
-              to the remote host is kept alive. It can be manually
-              exited by using the `home` command.
-              Example:
-              \x1b[93m[httpbin.org:80]$\x1b[0m /encoding/utf8\n
-\x1b[95mCOMMANDS:\x1b[0m
-    body      Only print the response body (default).
-    clear     Clear the terminal.
-    close     Close the program.
-    help      Print this help message.
-    home      Exit \x1b[93mpath\x1b[0m mode and return to \x1b[92mhome\x1b[0m mode.
-    request   Only print the request (does not send the request).
-    response  Only print the response.
-    status    Only print the response status line.
-    verbose   Print both the request and the response.
-";
 
 #[derive(Debug, PartialEq, Eq)]
 // Output style options.
@@ -156,14 +130,14 @@ struct Browser<'a> {
     client: Option<Client>,
     response: Option<Response>,
     stdin: StdinLock<'a>,
-    stdout: StdoutLock<'a>,
+    stdout: BufWriter<StdoutLock<'a>>,
 }
 
 
 impl<'a> Browser<'a> {
-    fn new(stdin: StdinLock<'a>, stdout: StdoutLock<'a>) -> Self {
+    fn new(stdin: StdinLock<'a>, stdout: BufWriter<StdoutLock<'a>>) -> Self {
         Self {
-            output_style: OutputStyle::ResBody,
+            output_style: OutputStyle::Response,
             in_path_mode: false,
             client: None,
             response: None,
@@ -179,13 +153,12 @@ impl<'a> Browser<'a> {
     }
 
     fn print_intro_message(&mut self) {
-		let name = env!("CARGO_BIN_NAME");
-		let msg = format!("\
-			{CYAN}{name}{CLR} is an HTTP client.\n\
-			Enter `{YLW}help{CLR}` to see all options.\n\
-		");
-
-        writeln!(&mut self.stdout, "{msg}").unwrap();
+		writeln!(
+		    &mut self.stdout,
+		    "{CYAN}{}{CLR} is an HTTP client.\n\
+			Enter `{YLW}help{CLR}` to see all options.\n", 
+			env!("CARGO_BIN_NAME")
+		).unwrap();
         self.stdout.flush().unwrap();
     }
 
@@ -199,7 +172,7 @@ impl<'a> Browser<'a> {
         self.output_style = style;
         writeln!(
             &mut self.stdout,
-            "Output style set to `{CYAN}{}{CLR}`.\n",
+            "Output style: `{CYAN}{}{CLR}`.\n",
             self.output_style
         ).unwrap();
         self.stdout.flush().unwrap();
@@ -216,7 +189,28 @@ impl<'a> Browser<'a> {
     }
 
     fn show_help(&mut self) {
-        writeln!(&mut self.stdout, "{HELP_MSG}").unwrap();
+        writeln!(&mut self.stdout, "\n\
+{PURP}HELP:{CLR}
+    Enter an HTTP URI ({GRN}home{CLR} mode) or a URI path ({YLW}path{CLR} mode) to send
+    an HTTP request to a remote host.\n
+{PURP}MODES:{CLR}
+    {GRN}Home{CLR}      Enter an HTTP URI to send a request.
+              Example: {GRN}[HOME]${CLR} httpbin.org/encoding/utf8\n
+    {YLW}Path{CLR}      Enter a URI path to send a new request to the same host.
+              This mode is entered automatically while the connection
+              to the remote host is kept alive. It can be manually
+              exited by using the `home` command.
+              Example: {YLW}[httpbin.org:80]${CLR} /encoding/utf8\n
+{PURP}COMMANDS:{CLR}
+    body      Print data from response bodies.
+    clear     Clear the terminal.
+    close     Close the program.
+    help      Print this help message.
+    home      Exit {YLW}path{CLR} mode and return to {GRN}home{CLR} mode.
+    request   Print requests (does not send the requests).
+    response  Print responses (default).
+    status    Print response status lines.
+    verbose   Print both the requests and the responses.\n").unwrap();
     }
 
     fn set_path(&mut self, path: &str) {
@@ -269,7 +263,7 @@ impl<'a> Browser<'a> {
         let output = self.response.as_ref().map_or_else(
             || String::from("No response found.\n"),
             |res| res.body.as_ref().map_or_else(
-                || String::from("This response does not have a body."),
+                || String::from("Response body is empty.\n"),
                 |body| {
                     let body = String::from_utf8_lossy(&body);
                     format!("\n{}\n\n", body.trim_end())
@@ -333,9 +327,9 @@ impl<'a> Browser<'a> {
         }
     }
 
-    fn connection_closed(&self) -> bool {
-        self.response.as_ref().map_or(false,
-            |res| res.has_close_connection_header()
-        )
+    fn is_connection_open(&self) -> bool {
+        self.response.as_ref().map_or(false, |res| {
+            !res.has_close_connection_header()
+        })
     }
 }

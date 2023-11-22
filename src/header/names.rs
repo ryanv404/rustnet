@@ -74,7 +74,6 @@ impl HeaderName {
         }
 
         let bytes = self.inner.as_bytes();
-
 		let mut title = String::with_capacity(bytes.len());
 
         bytes.split(|&b| b == b'-')

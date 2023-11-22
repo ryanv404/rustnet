@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
@@ -186,22 +187,6 @@ impl Response {
         self.headers.get(name)
     }
 
-	/// Returns true if the body is unencoded and has a text or application
-	/// Content-Type header.
-	#[must_use]
-    pub fn body_is_printable(&self) -> bool {
-        if self.has_header(&CONTENT_ENCODING)
-			|| !self.has_header(&CONTENT_TYPE)
-        {
-            return false;
-        }
-
-        self.header(&CONTENT_TYPE).map_or(false, |ct| {
-            let ct = ct.to_string();
-			ct.contains("text") || ct.contains("application")
-        })
-	}
-
     /// Returns all of the response headers as a String.
 	#[must_use]
     pub fn headers_to_string(&self) -> String {
@@ -239,6 +224,34 @@ impl Response {
     #[must_use]
     pub const fn body(&self) -> Option<&Vec<u8>> {
         self.body.as_ref()
+    }
+
+	/// Returns true if the body is unencoded and has a text or application
+	/// Content-Type header.
+	#[must_use]
+    pub fn body_is_printable(&self) -> bool {
+        if self.has_header(&CONTENT_ENCODING)
+			|| !self.has_header(&CONTENT_TYPE)
+        {
+            return false;
+        }
+
+        self.header(&CONTENT_TYPE).map_or(false, |ct| {
+            let ct = ct.to_string();
+			ct.contains("text") || ct.contains("application")
+        })
+	}
+
+    /// Returns the response body as a copy-on-write string.
+    #[must_use]
+    pub fn body_to_string(&self) -> Cow<'_, str> {
+        if let Some(body) = self.body.as_ref() {
+            if !body.is_empty() && self.body_is_printable() {
+                return String::from_utf8_lossy(body);
+            }
+        }
+
+        String::new().into()
     }
 
     /// Returns a String representation of the response's status line.

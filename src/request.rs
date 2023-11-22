@@ -1,7 +1,10 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufRead, ErrorKind::UnexpectedEof};
-use std::net::{IpAddr, SocketAddr};
+use std::io::{
+    BufRead, Error as IoError, ErrorKind as IoErrorKind, Result as IoResult,
+};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::str;
 
 use crate::consts::{
@@ -11,6 +14,128 @@ use crate::{
     HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult,
     RemoteConnect, Route, Version,
 };
+
+/// An HTTP request builder object.
+pub struct RequestBuilder<A: ToSocketAddrs> {
+    pub addr: Option<A>,
+    pub ip: Option<String>,
+    pub port: Option<u16>,
+    pub method: Option<Method>,
+    pub path: Option<String>,
+    pub version: Option<Version>,
+    pub headers: Option<HeadersMap>,
+    pub body: Option<Vec<u8>>,
+}
+
+impl<A: ToSocketAddrs> Default for RequestBuilder<A> {
+    fn default() -> Self {
+        Self {
+            addr: None,
+            ip: None,
+            port: None,
+            method: None,
+            path: None,
+            version: None,
+            headers: None,
+            body: None,
+        }
+    }
+}
+
+impl<A: ToSocketAddrs> RequestBuilder<A> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn method(&mut self, method: Method) -> &mut Self {
+        self.method = Some(method);
+        self
+    }
+
+    pub fn path(&mut self, path: &str) -> &mut Self {
+        self.path = Some(path.to_string());
+        self
+    }
+
+    pub fn version(&mut self, version: Version) -> &mut Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Sets the remote host's IP address.
+    pub fn ip(&mut self, ip: &str) -> &mut Self {
+        self.ip = Some(ip.to_string());
+        self
+    }
+
+    /// Sets the remote host's port.
+    pub fn port(&mut self, port: u16) -> &mut Self {
+        self.port = Some(port);
+        self
+    }
+
+    /// Sets the socket address of the remote server.
+    pub fn addr(&mut self, addr: A) -> &mut Self {
+        self.addr = Some(addr);
+        self
+    }
+
+    pub fn add_header(&mut self, name: &str, value: &str) -> &mut Self {
+        let name: HeaderName = name.parse().unwrap();
+        let value: HeaderValue = value.parse().unwrap();
+
+        if let Some(map) = self.headers.as_mut() {
+            map.entry(name)
+                .and_modify(|val| *val = value.clone())
+                .or_insert(value);
+        } else {
+            self.headers = Some(BTreeMap::from([(name, value)]));
+        }
+
+        self
+    }
+
+    pub fn body(&mut self, data: &[u8]) -> &mut Self {
+        if !data.is_empty() {
+            self.body = Some(data.to_vec());
+        }
+
+        self
+    }
+
+    pub fn build(&mut self) -> IoResult<Request> {
+        let stream = {
+			if let Some(addr) = self.addr.take() {
+				TcpStream::connect(addr)?
+            } else if self.ip.is_some() && self.port.is_some() {
+				let ip = self.ip.take().unwrap();
+				let port = self.port.take().unwrap();
+				TcpStream::connect(format!("{ip}:{port}"))?
+            } else {
+                return Err(IoError::from(IoErrorKind::InvalidInput));
+            }
+        };
+
+		let remote_addr = stream.peer_addr()?;
+        let method = self.method.take().unwrap_or_default();
+        let version = self.version.take().unwrap_or_default();
+        let path = self.path.take().unwrap_or_else(|| String::from("/"));
+		let headers = self
+            .headers
+            .take()
+            .unwrap_or_else(|| Request::default_headers(&remote_addr));
+		let body = self.body.take();
+
+		Ok(Request {
+            remote_addr,
+            method,
+            path,
+            version,
+            headers,
+            body,
+        })
+    }
+}
 
 /// Represents the components of an HTTP request.
 #[derive(Clone, Eq, PartialEq)]
@@ -112,7 +237,7 @@ impl Request {
         let tokens = (tok.next(), tok.next());
 
         if let (Some(name), Some(value)) = tokens {
-            Ok((name.parse()?, value.into()))
+            Ok((name.parse()?, value.parse().unwrap()))
         } else {
             Err(NetError::ParseError("header"))
         }
@@ -128,7 +253,7 @@ impl Request {
         let (method, path, version) = {
             match remote.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
-                Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
+                Ok(0) => return Err(NetError::from_kind(IoErrorKind::UnexpectedEof)),
                 Ok(_) => Self::parse_request_line(&buf)?,
             }
         };
@@ -142,7 +267,7 @@ impl Request {
 
             match remote.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
-                Ok(0) => return Err(NetError::from_kind(UnexpectedEof)),
+                Ok(0) => return Err(NetError::from_kind(IoErrorKind::UnexpectedEof)),
                 Ok(_) => {
                     let trimmed = buf.trim();
 
@@ -219,16 +344,17 @@ impl Request {
     /// Default set of request headers.
     #[must_use]
     pub fn default_headers(host: &SocketAddr) -> HeadersMap {
+		let host = format!("{}:{}", host.ip(), host.port());
         let uagent = format!(
-            "{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")
+            "{}/{}",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
         );
 
-		let host = format!("{}:{}", host.ip(), host.port());
-
 		BTreeMap::from([
-			(ACCEPT, "*/*".into()),
-			(HOST, host.as_str().into()),
-            (USER_AGENT, uagent.as_str().into()),
+			(ACCEPT, "*/*".parse().unwrap()),
+			(HOST, host.into()),
+            (USER_AGENT, uagent.into()),
         ])
     }
 
@@ -313,4 +439,16 @@ impl Request {
 	pub const fn body(&self) -> Option<&Vec<u8>> {
 		self.body.as_ref()
 	}
+
+	/// Returns the request body as a copy-on-write string.
+    #[must_use]
+    pub fn body_to_string(&self) -> Cow<'_, str> {
+        if let Some(body) = self.body.as_ref() {
+            if !body.is_empty() && self.body_is_printable() {
+                return String::from_utf8_lossy(body);
+            }
+        }
+
+        String::new().into()
+    }
 }

@@ -5,7 +5,7 @@ use rustnet::{Client, consts::DATE};
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
 const YLW: &str = "\x1b[93m";
-const CYAN: &str = "\x1b[96m";
+const PURP: &str = "\x1b[95m";
 const CLR: &str = "\x1b[0m";
 
 #[rustfmt::skip]
@@ -14,13 +14,19 @@ fn main() -> io::Result<()> {
     let mut args = env::args().skip(1);
 
     // Process CLI arguments until first non-option argument.
-    let addr = loop {
+    let (addr, path, body) = loop {
         match args.next() {
             // End of options.
             Some(opt) if opt == "--" => {
-                if let Some(addr) = args.next() {
-                    // First non-option argument is the addr argument.
-                    break addr;
+                if let Some(uri) = args.next() {
+                    // First non-option argument is the URI argument.
+                    if let Some((addr, path)) = Client::parse_uri(&uri) {
+                        let body = args.next().unwrap_or_default();
+                        break (addr, path, body);
+                    } else {
+                        eprintln!("{RED}Unable to parse the URI argument.{CLR}\n");
+                        return Ok(());
+                    }
                 } else {
                     // Unexpected end of arguments.
                     eprintln!("{RED}Missing a hostname or IP:port address.{CLR}\n");
@@ -42,26 +48,24 @@ fn main() -> io::Result<()> {
                     return Ok(());
                 },
             },
-            // First non-option argument is the addr argument.
-            Some(addr) => break addr,
+            // First non-option argument is the URI argument.
+            Some(uri) => {
+                if let Some((addr, path)) = Client::parse_uri(&uri) {
+                    let body = args.next().unwrap_or_default();
+                    break (addr, path, body);
+                } else {
+                    eprintln!("{RED}Unable to parse the URI argument.{CLR}\n");
+                    return Ok(());
+                }
+            },
             // Unexpected end of arguments.
             None => {
-                eprintln!("{RED}Missing a hostname or IP:port address.{CLR}\n");
+                eprintln!("{RED}Missing URI argument.{CLR}\n");
                 show_help();
                 return Ok(());
             },
         }
     };
-
-    // Process the remainder of the arguments or use default values.
-    let addr = if is_testing {
-        addr
-    } else {
-        format!("{addr}:80")
-    };
-
-    let path = args.next().unwrap_or_else(|| String::from("/"));
-    let body = args.next().unwrap_or_default();
 
     // Create an HTTP client and send a request.
     let mut client = Client::http()
@@ -80,41 +84,73 @@ fn main() -> io::Result<()> {
     }
 
     if is_testing {
-		let req_line = client.request_line();
-		let status_line = res.status_line();
-
-		let req_headers = client.headers_to_string();
-		let res_headers = res.headers_to_string();
-
-		let request = format!("{req_line}\n{}", req_headers.trim_end());
-		let response = format!("{status_line}\n{}", res_headers.trim_end());
-		println!("{request}\n\n{response}");
+		println!(
+		    "{}\n{}\n\n{}\n{}",
+		    client.request_line(),
+            client.headers_to_string().trim_end(),
+		    res.status_line(),
+            res.headers_to_string().trim_end()
+	    );
     } else {
-		let request = client.to_string();
-		let request = request.trim_end();
+        let req_body = client.req.body_to_string();
+        let res_body = res.body_to_string();
 
-		let response = res.to_string();
-		let response = response.trim_end();
-
-		println!("{YLW}--[Request]-->\n{request}{CLR}\n");
-        println!("{CYAN}<--[Response]--\n{response}{CLR}");
+        match (req_body.len(), res_body.len()) {
+            (0, 0) => {
+        		println!(
+        		    "{YLW}{}{CLR}\n{}\n\n{PURP}{}{CLR}\n{}\n",
+        		    client.request_line(),
+                    client.headers_to_string().trim_end(),
+        		    res.status_line(),
+                    res.headers_to_string().trim_end()
+        	    );
+            },
+            (_, 0) => {
+        		println!(
+        		    "{YLW}{}{CLR}\n{}\n{}\n\n{PURP}{}{CLR}\n{}\n",
+        		    client.request_line(),
+                    client.headers_to_string().trim_end(),
+                    req_body.trim_end(),
+        		    res.status_line(),
+                    res.headers_to_string().trim_end()
+        	    );
+            },
+            (0, _) => {
+        		println!(
+        		    "{YLW}{}{CLR}\n{}\n\n{PURP}{}{CLR}\n{}\n\n{}\n",
+        		    client.request_line(),
+                    client.headers_to_string().trim_end(),
+        		    res.status_line(),
+                    res.headers_to_string().trim_end(),
+                    res_body.trim_end()
+        	    );
+            },
+            (_, _) => {
+        		println!(
+        		    "{YLW}{}{CLR}\n{}\n{}\n\n{PURP}{}{CLR}\n{}\n\n{}\n",
+        		    client.request_line(),
+                    client.headers_to_string().trim_end(),
+                    req_body.trim_end(),
+        		    res.status_line(),
+                    res.headers_to_string().trim_end(),
+                    res_body.trim_end()
+        	    );
+            },
+        }
     }
 
     Ok(())
 }
 
 fn show_help() {
-    let help_msg = format!("\
+    eprintln!("\
         {GRN}USAGE{CLR}\n    \
-            client <addr> [path] [body]\n\n\
+            client <uri> [body]\n\n\
         {GRN}ARGUMENTS{CLR}\n    \
-            addr    A hostname or IP:port address (e.g. \"httpbin.org\").\n    \
-            path    URI path component on the target resource (default: \"/\").\n    \
-            body    Data to be sent in the request body (optional).\n\n\
+            uri    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").\n    \
+            body   Data to be sent in the request body (optional).\n\n\
         {GRN}OPTIONS{CLR}\n    \
             -h, --help    Displays this help message.\n    \
             --testing     The Date header is stripped and output is not colorized.\
     ");
-
-    eprintln!("{help_msg}");
 }

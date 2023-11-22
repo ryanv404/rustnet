@@ -136,21 +136,20 @@ mod request {
             Pineapple: pizza\r\n\r\n";
 
         let expected: HeadersMap = BTreeMap::from([
-            (ACCEPT, "*/*".into()),
-            (ACCEPT_ENCODING, "gzip, deflate, br".into()),
-            (CONNECTION, "keep-alive".into()),
-            (HOST, "example.com".into()),
-            (USER_AGENT, "xh/0.19.3".into()),
+            (ACCEPT, "*/*".parse().unwrap()),
+            (ACCEPT_ENCODING, "gzip, deflate, br".parse().unwrap()),
+            (CONNECTION, "keep-alive".parse().unwrap()),
+            (HOST, "example.com".parse().unwrap()),
+            (USER_AGENT, "xh/0.19.3".parse().unwrap()),
             (
                 HeaderName {
                     inner: HdrRepr::Custom(Vec::from("pineapple")),
                 },
-                "pizza".into(),
+                "pizza".parse().unwrap(),
             ),
         ]);
 
         let mut output: HeadersMap = BTreeMap::new();
-
         for line in test.split('\n') {
             let trim = line.trim();
 
@@ -166,7 +165,10 @@ mod request {
         assert!(output
             .iter()
             .zip(expected)
-            .all(|((k_out, v_out), (k_exp, v_exp))| { *k_out == k_exp && *v_out == v_exp }));
+            .all(|((k_out, v_out), (k_exp, v_exp))| {
+                *k_out == k_exp && *v_out == v_exp 
+            })
+        );
     }
 }
 

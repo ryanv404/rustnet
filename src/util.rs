@@ -174,7 +174,7 @@ pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
     if date_out.is_ok() {
         let date_out = date_out.unwrap().stdout;
         let date_str = String::from_utf8_lossy(&date_out);
-        let hdr_value = HeaderValue::from(date_str.trim());
+        let hdr_value: HeaderValue = date_str.trim().parse().unwrap();
         Some((DATE, hdr_value))
     } else {
         None
