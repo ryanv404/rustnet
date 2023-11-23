@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetResult, RemoteConnect, Request, Response, Route, Router,
+    Method, NetResult, Connection, Request, Response, Route, Router,
     Target, ThreadPool,
 };
 
@@ -124,9 +124,9 @@ impl Listener {
         self.inner.local_addr()
     }
 
-    /// Returns a `RemoteConnect` instance for each incoming connection.
-    pub fn accept(&self) -> IoResult<RemoteConnect> {
-        self.inner.accept().and_then(RemoteConnect::try_from)
+    /// Returns a `Connection` instance for each incoming connection.
+    pub fn accept(&self) -> IoResult<Connection> {
+        self.inner.accept().and_then(Connection::try_from)
     }
 }
 
@@ -186,10 +186,11 @@ impl Server {
     }
 
     /// Handles a request from a remote connection.
-    pub fn respond(mut conn: RemoteConnect, router: &Arc<Router>) -> NetResult<()> {
-        let req = Request::from_remote(&mut conn)?;
-        let mut res = Response::from_request(&req, router)?;
-        res.send(&mut conn)?;
+    pub fn respond(conn: Connection, router: &Arc<Router>) -> NetResult<()> {
+        let req = Request::try_from(conn)?;
+        let resolved = router.resolve(&req);
+        let mut res = Response::from_request(req, &resolved)?;
+        res.send()?;
         Ok(())
     }
 

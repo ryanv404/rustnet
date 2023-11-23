@@ -136,16 +136,16 @@ mod request {
             Pineapple: pizza\r\n\r\n";
 
         let expected: HeadersMap = BTreeMap::from([
-            (ACCEPT, "*/*".parse().unwrap()),
-            (ACCEPT_ENCODING, "gzip, deflate, br".parse().unwrap()),
-            (CONNECTION, "keep-alive".parse().unwrap()),
-            (HOST, "example.com".parse().unwrap()),
-            (USER_AGENT, "xh/0.19.3".parse().unwrap()),
+            (ACCEPT, "*/*".into()),
+            (ACCEPT_ENCODING, "gzip, deflate, br".into()),
+            (CONNECTION, "keep-alive".into()),
+            (HOST, "example.com".into()),
+            (USER_AGENT, "xh/0.19.3".into()),
             (
                 HeaderName {
                     inner: HdrRepr::Custom(Vec::from("pineapple")),
                 },
-                "pizza".parse().unwrap(),
+                "pizza".into(),
             ),
         ]);
 

@@ -33,8 +33,8 @@ pub mod threadpool;
 pub mod util;
 
 pub use client::Client;
-pub use connection::{NetReader, NetWriter, RemoteConnect};
-pub use errors::NetError;
+pub use connection::{Connection, NetReader, NetWriter};
+pub use errors::{NetError, ParseErrorKind};
 pub use header::{HeaderName, HeaderValue};
 pub use http::{Method, Status, Version};
 pub use request::Request;

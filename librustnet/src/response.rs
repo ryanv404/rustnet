@@ -2,20 +2,22 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
-use std::io::{Result as IoResult, Write};
-use std::sync::Arc;
+use std::io::{
+    ErrorKind as IoErrorKind, Result as IoResult, Write,
+};
 
 use crate::consts::{
     CONNECTION, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, DEFAULT_NAME,
     SERVER,
 };
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetResult, RemoteConnect,
-    Request, Router, Status, Target, Version,
+    HeaderName, HeaderValue, HeadersMap, Method, NetResult,
+    Connection, NetError, Request, Status, Target, Version, Resolved,
 };
 
 /// Represents the components of an HTTP response.
 pub struct Response {
+    pub conn: Option<Connection>,
     pub method: Method,
     pub path: String,
     pub version: Version,
@@ -27,6 +29,7 @@ pub struct Response {
 impl Default for Response {
     fn default() -> Self {
         Self {
+            conn: None,
             method: Method::default(),
             path: String::from("/"),
             version: Version::default(),
@@ -84,15 +87,15 @@ impl Debug for Response {
 
 impl Response {
     /// Parses a `Response` object from a `Request`.
-    pub fn from_request(req: &Request, router: &Arc<Router>) -> NetResult<Self> {
+    pub fn from_request(mut req: Request, resolved: &Resolved) -> NetResult<Self> {
         let path = req.path.clone();
         let version = req.version;
 
-        let resolved = router.resolve(req);
         let method = resolved.method;
         let status = resolved.status;
 
         let mut headers = BTreeMap::new();
+
         let body = match resolved.target() {
             Target::File(ref f) => {
                 let content = fs::read(f)?;
@@ -116,7 +119,10 @@ impl Response {
             Target::Empty => None,
         };
 
+        let conn = req.conn.take();
+
         Ok(Self {
+            conn,
             method,
             path,
             version,
@@ -263,16 +269,27 @@ impl Response {
     }
 
     /// Writes the response's status line to a stream.
-    pub fn write_status_line(&self, writer: &mut RemoteConnect) -> IoResult<()> {
+    pub fn write_status_line(&mut self) -> IoResult<()> {
+        let writer = self
+            .conn
+            .as_mut()
+            .map(|conn| conn.writer.by_ref())
+            .ok_or(NetError::WriteError(IoErrorKind::NotConnected))?;
+
         write!(writer, "{} {}\r\n", &self.version, &self.status)?;
+        writer.flush()?;
         Ok(())
     }
 
     /// Writes the response's headers to a stream.
-    pub fn write_headers(&mut self, writer: &mut RemoteConnect) -> IoResult<()> {
-        if !self.has_header(&SERVER) {
-            self.set_header(SERVER, DEFAULT_NAME.parse().unwrap());
-        }
+    pub fn write_headers(&mut self) -> IoResult<()> {
+        self.set_header(SERVER, HeaderValue::from(DEFAULT_NAME));
+
+        let writer = self
+            .conn
+            .as_mut()
+            .map(|conn| conn.writer.by_ref())
+            .ok_or(NetError::WriteError(IoErrorKind::NotConnected))?;
 
         if !self.headers.is_empty() {
             self.headers.iter().for_each(|(name, value)| {
@@ -284,28 +301,37 @@ impl Response {
 
         // Mark the end of the headers section.
         writer.write_all(b"\r\n")?;
+        writer.flush()?;
         Ok(())
     }
 
     /// Writes the response's body to a stream, if applicable.
-    pub fn write_body(&self, writer: &mut RemoteConnect) -> IoResult<()> {
-		if let Some(body) = self.body.as_ref() {
-			if !body.is_empty() && self.body_is_permitted() {
+    pub fn write_body(&mut self) -> IoResult<()> {
+        let body_is_permitted = self.body_is_permitted();
+
+        let writer = self
+            .conn
+            .as_mut()
+            .map(|conn| conn.writer.by_ref())
+            .ok_or(NetError::WriteError(IoErrorKind::NotConnected))?;
+
+        if let Some(body) = self.body.as_ref() {
+			if !body.is_empty() && body_is_permitted {
 				writer.write_all(body)?;
 			}
 		}
 
+        writer.flush()?;
         Ok(())
     }
 
     /// Writes the `Response` to the underlying TCP connection that is
     /// established with the remote client.
-    pub fn send(&mut self, writer: &mut RemoteConnect) -> IoResult<()> {
-        self.write_status_line(writer)?;
-        self.write_headers(writer)?;
-        self.write_body(writer)?;
-        writer.flush()?;
-        Ok(())
+    pub fn send(&mut self) -> IoResult<()> {
+        self.write_status_line()?;
+        self.write_headers()?;
+        self.write_body()?;
+        Ok(())    
     }
 
     /// Returns true if the Connection header is present with the value "close".

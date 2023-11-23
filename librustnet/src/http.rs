@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 
-use crate::{NetError, NetResult};
+use crate::{NetError, NetResult, ParseErrorKind};
 
 /// HTTP methods.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -44,21 +44,19 @@ impl FromStr for Method {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        // Request methods are case-sensitive.
-        let method = match s {
-            "GET" => Self::Get,
-            "PUT" => Self::Put,
-            "POST" => Self::Post,
-            "HEAD" => Self::Head,
-            "PATCH" => Self::Patch,
-            "TRACE" => Self::Trace,
-            "DELETE" => Self::Delete,
-            "CONNECT" => Self::Connect,
-            "OPTIONS" => Self::Options,
-            _ => return Err(NetError::ParseError("method")),
-        };
-
-        Ok(method)
+        match s {
+            // HTTP methods are case-sensitive.
+            "GET" => Ok(Self::Get),
+            "PUT" => Ok(Self::Put),
+            "POST" => Ok(Self::Post),
+            "HEAD" => Ok(Self::Head),
+            "PATCH" => Ok(Self::Patch),
+            "TRACE" => Ok(Self::Trace),
+            "DELETE" => Ok(Self::Delete),
+            "CONNECT" => Ok(Self::Connect),
+            "OPTIONS" => Ok(Self::Options),
+            _ => Err(ParseErrorKind::Method.into()),
+        }
     }
 }
 
@@ -101,7 +99,7 @@ impl FromStr for Status {
 
     fn from_str(code: &str) -> NetResult<Self> {
         u16::from_str(code).map_or_else(
-            |_| Err(NetError::BadStatusCode),
+            |_| Err(ParseErrorKind::Status.into()),
             Self::try_from
         )
     }
@@ -114,7 +112,7 @@ impl TryFrom<u16> for Status {
         if (100..=600).contains(&code) {
             Ok(Self(code))
         } else {
-            Err(NetError::BadStatusCode)
+            Err(ParseErrorKind::Status.into())
         }
     }
 }
@@ -273,16 +271,14 @@ impl FromStr for Version {
     fn from_str(s: &str) -> NetResult<Self> {
         // HTTP versions are case-sensitive.
         // Zero is implied by a missing minor version number.
-        let version = match s {
-            "HTTP/0.9" => Self::ZeroDotNine,
-            "HTTP/1.0" => Self::OneDotZero,
-            "HTTP/1.1" => Self::OneDotOne,
-            "HTTP/2" | "HTTP/2.0" => Self::TwoDotZero,
-            "HTTP/3" | "HTTP/3.0" => Self::ThreeDotZero,
-            _ => return Err(NetError::ParseError("version")),
-        };
-
-        Ok(version)
+        match s {
+            "HTTP/0.9" => Ok(Self::ZeroDotNine),
+            "HTTP/1.0" => Ok(Self::OneDotZero),
+            "HTTP/1.1" => Ok(Self::OneDotOne),
+            "HTTP/2" | "HTTP/2.0" => Ok(Self::TwoDotZero),
+            "HTTP/3" | "HTTP/3.0" => Ok(Self::ThreeDotZero),
+            _ => Err(ParseErrorKind::Version.into()),
+        }
     }
 }
 

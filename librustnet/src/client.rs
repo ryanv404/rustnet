@@ -8,8 +8,9 @@ use crate::consts::{
     CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS,
 };
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetReader,
-    NetWriter, Request, Response, Status, Version,
+    HeaderName, HeaderValue, HeadersMap, Method, ParseErrorKind,
+    NetError, NetResult, Request, Response, Status, Version,
+    Connection,
 };
 
 /// Builder for the `Client` object.
@@ -84,8 +85,9 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
     }
 
     /// Adds a header field line to the request.
-    pub fn header(&mut self, name: HeaderName, value: &str) -> &mut Self {
-		let value: HeaderValue = value.parse().unwrap();
+    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
+        let name = HeaderName::from(name);
+        let value = HeaderValue::from(value);
 
 		if let Some(map) = self.headers.as_mut() {
 			map.entry(name)
@@ -119,10 +121,11 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 				}
 			} else if let Some(headers) = self.headers.as_mut() {
 				// Body is not empty and headers are present.
-				let len = body.len();
-                headers.entry(CONTENT_LENGTH).or_insert_with(|| len.into());
+                headers.entry(CONTENT_LENGTH).or_insert_with(
+                    || HeaderValue::from(body.len())
+                );
                 headers.entry(CONTENT_TYPE).or_insert_with(
-                    || "text/plain".parse().unwrap()
+                    || HeaderValue::from("text/plain")
                 );
 			}
 		} else if let Some(headers) = self.headers.as_mut() {
@@ -142,48 +145,38 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 		if !data.is_empty() {
 			self.body = Some(data.to_vec());
 		}
-		
-		self
+
+        self
 	}
 	
     /// Builds and returns a new `Client` instance.
     pub fn build(&mut self) -> IoResult<Client> {
-        let stream = {
+        let conn = {
 			if let Some(addr) = self.addr.take() {
-				TcpStream::connect(addr)?
+				let stream = TcpStream::connect(addr)?;
+                Connection::try_from(stream).ok()
             } else if self.ip.is_some() && self.port.is_some() {
 				let ip = self.ip.take().unwrap();
 				let port = self.port.take().unwrap();
 				let addr = format!("{ip}:{port}");
-
-				TcpStream::connect(addr)?
+				let stream = TcpStream::connect(addr)?;
+                Connection::try_from(stream).ok()
             } else {
                 return Err(IoError::from(IoErrorKind::InvalidInput));
             }
         };
 
-        let local_addr = stream.local_addr()?;
-		let remote_addr = stream.peer_addr()?;
-
-        let reader = NetReader::from(stream.try_clone()?);
-        let writer = NetWriter::from(stream);
-
         let method = self.method.take().unwrap_or_default();
         let version = self.version.take().unwrap_or_default();
         let path = self.path.take().unwrap_or_else(|| String::from("/"));
 
+        let headers = self.headers.take();
 		self.update_content_headers();
 
-		let headers = self
-            .headers
-            .take()
-            .unwrap_or_else(|| Request::default_headers(&remote_addr));
-
-
-		let body = self.body.take();
+        let body = self.body.take();
 
 		let req = Request {
-            remote_addr,
+            conn,
             method,
             path,
             version,
@@ -191,12 +184,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
             body,
         };
 
-        Ok(Client {
-            req,
-            local_addr,
-            reader,
-            writer,
-        })
+        Ok(Client { req })
     }
 
     pub fn send(&mut self) -> IoResult<Client> {
@@ -210,9 +198,6 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 #[derive(Debug)]
 pub struct Client {
 	pub req: Request,
-	pub local_addr: SocketAddr,
-    pub reader: NetReader,
-    pub writer: NetWriter,
 }
 
 impl Display for Client {
@@ -223,86 +208,112 @@ impl Display for Client {
 
 impl Write for Client {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        self.writer.write(buf)
+        let Some(conn) = self.req.conn.as_mut() else {
+            return Err(NetError::WriteError(IoErrorKind::NotConnected))?;
+        };
+
+        conn.writer.write(buf)
     }
 
     fn flush(&mut self) -> IoResult<()> {
-        self.writer.flush()
+        let Some(conn) = self.req.conn.as_mut() else {
+            return Err(NetError::WriteError(IoErrorKind::NotConnected))?;
+        };
+
+        conn.writer.flush()
     }
 
     fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.writer.write_all(buf)
+        let Some(conn) = self.req.conn.as_mut() else {
+            return Err(NetError::WriteError(IoErrorKind::NotConnected))?;
+        };
+
+        conn.writer.write_all(buf)
     }
 }
 
 impl Read for Client {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        self.reader.read(buf)
+        let Some(conn) = self.req.conn.as_mut() else {
+            return Err(NetError::ReadError(IoErrorKind::NotConnected))?;
+        };
+
+        conn.reader.read(buf)
     }
 }
 
 impl BufRead for Client {
     fn fill_buf(&mut self) -> IoResult<&[u8]> {
-        self.reader.fill_buf()
+        let Some(conn) = self.req.conn.as_mut() else {
+            return Err(NetError::ReadError(IoErrorKind::NotConnected))?;
+        };
+
+        conn.reader.fill_buf()
     }
 
     fn consume(&mut self, amt: usize) {
-        self.reader.consume(amt);
+        if let Some(conn) = self.req.conn.as_mut() {
+            conn.reader.consume(amt);
+        }
     }
 }
 
 impl Client {
     /// Sends a GET request to the provided URI, returning the `Client` and
 	/// the `Response`.
-    pub fn get(uri: &str) -> IoResult<(Self, Response, String)> {
-		let Some((addr, path)) = Self::parse_uri(uri) else {
-			return Err(IoError::from(IoErrorKind::InvalidInput));
-		};
-
-		let mut client = Self::http().addr(&addr).path(&path).send()?;
-		let res = client.recv()?;
-		Ok((client, res, addr))
+    pub fn get(uri: &str) -> NetResult<(Self, Response, String)> {
+		let (addr, path) = Self::parse_uri(uri)?;
+        let mut client = Self::http().addr(&addr).path(&path).send()?;
+        let res = client.recv()?;
+        Ok((client, res, addr))
 	}
 
     /// Attempts to parse a string slice into a host address and a path.
     #[must_use]
-	pub fn parse_uri(uri: &str) -> Option<(String, String)> {
+	pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
 		let uri = uri.trim();
 
 		if let Some((scheme, rest)) = uri.split_once("://") {
-			if scheme.is_empty() || rest.is_empty() {
-				return None;
+            // If "://" is present, we expect a URI like "http://httpbin.org".
+            if scheme.is_empty() || rest.is_empty() {
+				return Err(ParseErrorKind::Uri)?;
 			}
 
 			match scheme {
-				"http" => match rest.split_once('/') {
-					Some((addr, path)) if path.is_empty() => {
-						if addr.contains(':') {
-							Some((addr.to_string(), String::from("/")))
-						} else {
-							Some((format!("{addr}:80"), String::from("/")))
-						}
+                "http" => match rest.split_once('/') {
+                    // Next "/" after the scheme, if present, starts the
+                    // path segment.
+					Some((addr, path)) if path.is_empty() && addr.contains(':') => {
+                        // Example: http://httpbin.org:80/
+                        Ok((addr.to_string(), String::from("/")))
+                    },
+                    Some((addr, path)) if path.is_empty() => {
+                        // Example: http://httpbin.org/
+                        Ok((format!("{addr}:80"), String::from("/")))
 					},
-					Some((addr, path)) => {
-						if addr.contains(':') {
-							Some((addr.to_string(), format!("/{path}")))
-						} else {
-							Some((format!("{addr}:80"), format!("/{path}")))
-						}
+					Some((addr, path)) if addr.contains(':') => {
+                        // Example: http://httpbin.org:80/json
+                        Ok((addr.to_string(), format!("/{path}")))
 					},
-					None => {
-						if rest.contains(':') {
-							Some((rest.to_string(), String::from("/")))
-						} else {
-							Some((format!("{rest}:80"), String::from("/")))
-						}
+                    Some((addr, path)) => {
+                        // Example: http://httpbin.org/json
+                        Ok((format!("{addr}:80"), format!("/{path}")))
+                    },
+					None if rest.contains(':') => {
+                        // Example: http://httpbin.org:80
+                        Ok((rest.to_string(), String::from("/")))
+					},
+                    None => {
+                        // Example: http://httpbin.org
+                        Ok((format!("{rest}:80"), String::from("/")))
 					},
 				},
-				_ => None,
+                "https" => Err(NetError::HttpsNotImplemented),
+                _ => Err(ParseErrorKind::Uri)?,
 			}
 		} else if let Some((addr, path)) = uri.split_once('/') {
 			if addr.is_empty() {
-				return None;
+				return Err(ParseErrorKind::Uri)?;
 			}
 
 			let addr = if addr.contains(':') {
@@ -317,11 +328,11 @@ impl Client {
 				format!("/{path}")
 			};
 
-			Some((addr, path))
+			Ok((addr, path))
 		} else if uri.contains(':') {
-			Some((uri.to_string(), String::from("/")))
+			Ok((uri.to_string(), String::from("/")))
 		} else {
-			Some((format!("{uri}:80"), String::from("/")))
+			Ok((format!("{uri}:80"), String::from("/")))
 		}
 	}
 
@@ -347,7 +358,7 @@ impl Client {
     }
 
     /// Returns a reference to the request headers map.
-    pub const fn headers(&self) -> &HeadersMap {
+    pub const fn headers(&self) -> Option<&HeadersMap> {
         self.req.headers()
     }
 
@@ -370,18 +381,7 @@ impl Client {
 
     /// Returns a formatted string of all of the request headers.
     pub fn headers_to_string(&self) -> String {
-        if self.req.headers.is_empty() {
-            String::new()
-        } else {
-            self.req
-				.headers
-                .iter()
-                .fold(String::new(), |mut acc, (name, value)| {
-                    let header = format!("{name}: {value}\n");
-                    acc.push_str(&header);
-                    acc
-                })
-        }
+        self.req.headers_to_string()
     }
 
     /// Returns a reference to the request body, if present.
@@ -390,13 +390,13 @@ impl Client {
     }
 
     /// Returns the local socket address.
-    pub const fn local_addr(&self) -> SocketAddr {
-        self.local_addr
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.req.local_addr()
     }
 
     /// Returns the remote server's socket address.
-    pub const fn remote_addr(&self) -> SocketAddr {
-        self.req.remote_addr
+    pub fn remote_addr(&self) -> Option<SocketAddr> {
+        self.req.remote_addr()
     }
 
     /// Returns the request line as a String.
@@ -406,31 +406,7 @@ impl Client {
 
     /// Sends an HTTP request to the remote host.
     pub fn send(&mut self) -> IoResult<()> {
-		let writer = self.writer.by_ref();
-
-		// The request line.
-		let request_line = self.req.request_line();
-		writer.write_all(request_line.as_bytes())?;
-		writer.write_all(b"\r\n")?;
-
-		// The request headers.
-		for (name, value) in &self.req.headers {
-			writer.write_all(format!("{name}: ").as_bytes())?;
-			writer.write_all(value.as_bytes())?;
-			writer.write_all(b"\r\n")?;
-		}
-
-		// End of the headers section.
-		writer.write_all(b"\r\n")?;
-
-		// The request message body, if present.
-		if let Some(body) = self.req.body.as_ref() {
-			if !body.is_empty() {
-				writer.write_all(body)?;
-			}
-		}
-
-		writer.flush()?;
+        self.req.send()?;
         Ok(())
 	}
 
@@ -449,8 +425,10 @@ impl Client {
 
         let path = self.req.path.clone();
         let method = self.req.method;
+        let conn = self.req.conn.take();
 
 		Ok(Response {
+            conn,
             method,
             path,
             version,
@@ -540,13 +518,18 @@ impl Client {
 		};
 
 		let mut body = Vec::with_capacity(len);
-		let mut handle = self.reader.by_ref().take(num_bytes);
-	
-		// TODO: handle chunked data and partial reads.
-		if handle.read_to_end(&mut body).is_ok() {
-            Some(body)
-		} else {
-		    None
-		}
+
+		if let Some(conn) = self.req.conn.as_mut() {
+            let mut handle = conn.reader.by_ref().take(num_bytes);
+
+            // TODO: handle chunked data and partial reads.
+            if handle.read_to_end(&mut body).is_ok() {
+                Some(body)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
 	}
 }

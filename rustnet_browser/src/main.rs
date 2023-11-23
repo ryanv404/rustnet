@@ -89,11 +89,10 @@ impl<'a> Browser<'a> {
                 "status" => self.set_output_style(OutputStyle::Status),
                 "verbose" => self.set_output_style(OutputStyle::Verbose),
                 uri if self.output_style == OutputStyle::Request => {
-                    self.client = Client::parse_uri(uri).and_then(
-                        |(addr, path)| {
-                            Client::http().addr(addr).path(&path).build().ok()
-                        }
-                    );
+                    if let Ok((addr, path)) = Client::parse_uri(uri) {
+                        self.client = Client::http().addr(addr).path(&path).build().ok();
+                    }
+
                     self.print_request();
                     self.client = None;
                 },

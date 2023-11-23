@@ -29,10 +29,10 @@ fn main() -> io::Result<()> {
                     return Ok(());
                 }
             },
-            // Options start with a "-".
-            Some(opt) if opt.starts_with('-') => match &*opt {
+            // Options start with a "--".
+            Some(opt) if opt.starts_with("--") => match &*opt {
                 // Print help message.
-                "-h" | "--help" => {
+                "--help" => {
                     show_help();
                     return Ok(());
                 },
@@ -41,13 +41,16 @@ fn main() -> io::Result<()> {
                     let maybe_method = args
                         .next()
                         .as_ref()
-                        .and_then(|m| m.parse::<Method>().ok());
+                        .and_then(|m| {
+                            let upper = m.to_ascii_uppercase();
+                            upper.parse::<Method>().ok()
+                        });
 
                     if let Some(new_method) = maybe_method {
                         method = new_method;
                     } else {
                         // Missing custom method argument.
-                        eprintln!("{RED}Missing custom method argument.{CLR}\n");
+                        eprintln!("{RED}Missing required argument to `--missing` option.{CLR}\n");
                         return Ok(());
                     }
                 },
@@ -74,12 +77,12 @@ fn main() -> io::Result<()> {
     };
 
     // Parse the URI argument.
-    let (addr, path, body) = match Client::parse_uri(&uri) {
-        Some((addr, path)) => {
+    let (addr, ref path, body) = match Client::parse_uri(&uri) {
+        Ok((addr, path)) => {
             let body = args.next().unwrap_or_default();
             (addr, path, body)
         },
-        None => {
+        Err(_) => {
             eprintln!("{RED}Unable to parse the URI argument.{CLR}\n");
             return Ok(());
         },
@@ -96,10 +99,12 @@ fn main() -> io::Result<()> {
     // Receive the response from the server.
     let mut res = client.recv()?;
 
+    // Ignore Date headers in tests.
     if testing_client || testing_server {
-		// Ignore Date headers in tests.
-        client.req.headers.remove(&DATE);
-        res.headers.remove(&DATE);
+        if let Some(headers) = client.req.headers.as_mut() {
+            headers.remove(&DATE);
+            res.headers.remove(&DATE);
+        }
     }
 
     if testing_client {
@@ -113,7 +118,6 @@ fn main() -> io::Result<()> {
     } else if testing_server {
         let res_body = res.body_to_string();
         let res_body = res_body.trim_end();
-
         if res_body.is_empty() {
             println!(
                 "{}\n{}",
@@ -186,16 +190,15 @@ fn main() -> io::Result<()> {
 
 fn show_help() {
     let name = env!("CARGO_BIN_NAME");
-
     eprintln!("\
-        {GRN}Usage:{CLR} {name} <uri> [body]\n\n\
+        {GRN}Usage:{CLR} {name} <URI> [DATA]\n\n\
         {GRN}Arguments:{CLR}\n    \
-            uri    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").\n    \
-            body   Data to be sent in the request body (optional).\n\n\
+            URI    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").\n    \
+            DATA   Data to be sent in the request body (optional).\n\n\
         {GRN}Options:{CLR}\n    \
             -h, --help       Displays this help message.\n    \
-            --client-tests   Non-colorized requests and responses (no Date headers).\n    \
-            --method METHOD  Set the request method to METHOD (default: GET).\n    \
-            --server-tests   Non-colorized responses (no Date headers).\n\
+            --client-tests   Use output style expected by client tests.\n    \
+            --method METHOD  Use METHOD as the request method (default: GET).\n    \
+            --server-tests   Use output style expected by server tests.\n\
     ");
 }

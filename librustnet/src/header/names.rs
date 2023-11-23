@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::str::{self, FromStr};
+use std::str;
 
-use crate::{trim_whitespace_bytes, NetError, NetResult};
+use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
 #[derive(Clone, Eq, Hash, PartialEq, Ord, PartialOrd)]
@@ -23,21 +23,14 @@ impl Debug for HeaderName {
 
 impl From<StdHeader> for HeaderName {
     fn from(std: StdHeader) -> Self {
-        Self {
-            inner: HdrRepr::Std(std),
-        }
+        let inner = HdrRepr::Std(std);
+        Self { inner }
     }
 }
 
-impl FromStr for HeaderName {
-    type Err = NetError;
-
-    fn from_str(s: &str) -> NetResult<Self> {
-        let name = Self {
-            inner: HdrRepr::try_from(s.as_bytes())?,
-        };
-
-        Ok(name)
+impl From<&str> for HeaderName {
+    fn from(s: &str) -> Self {
+        Self { inner: s.into() }
     }
 }
 
@@ -45,11 +38,8 @@ impl TryFrom<&[u8]> for HeaderName {
     type Error = NetError;
 
     fn try_from(b: &[u8]) -> NetResult<Self> {
-        let name = Self {
-            inner: HdrRepr::try_from(b)?,
-        };
-
-        Ok(name)
+        let inner = HdrRepr::try_from(b)?;
+        Ok(Self { inner })
     }
 }
 
@@ -104,14 +94,25 @@ pub enum HdrRepr {
     Custom(Vec<u8>),
 }
 
+impl From<&str> for HdrRepr {
+    fn from(s: &str) -> Self {
+        StdHeader::from_bytes(s.as_bytes()).map_or_else(
+            || Self::Custom(Vec::from(s)),
+            |header| Self::Std(header)
+        )
+    }
+}
+
 impl TryFrom<&[u8]> for HdrRepr {
     type Error = NetError;
 
     fn try_from(b: &[u8]) -> NetResult<Self> {
         match StdHeader::from_bytes(b) {
             Some(std) => Ok(Self::Std(std)),
-            None if str::from_utf8(b).is_ok() => Ok(Self::Custom(b.to_ascii_lowercase())),
-            None => Err(NetError::NonUtf8Header),
+            None if str::from_utf8(b).is_ok() => {
+                Ok(Self::Custom(b.to_ascii_lowercase()))
+            },
+            None => Err(ParseErrorKind::Header.into()),
         }
     }
 }
@@ -122,7 +123,7 @@ impl HdrRepr {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Std(std) => std.as_bytes(),
-            Self::Custom(ref hdr_vec) => hdr_vec.as_slice(),
+            Self::Custom(ref buf) => buf.as_slice(),
         }
     }
 
@@ -132,7 +133,7 @@ impl HdrRepr {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Std(std) => std.as_bytes().is_empty(),
-            Self::Custom(ref hdr_vec) => hdr_vec.is_empty(),
+            Self::Custom(ref buf) => buf.is_empty(),
         }
     }
 }

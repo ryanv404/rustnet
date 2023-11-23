@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{
     BufRead, Error as IoError, ErrorKind as IoErrorKind, Result as IoResult,
+    Write,
 };
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::str;
@@ -12,8 +13,8 @@ use crate::consts::{
     USER_AGENT,
 };
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, NetError, NetResult,
-    RemoteConnect, Route, Version,
+    Connection, HeaderName, HeaderValue, HeadersMap, Method, NetError,
+    NetResult, ParseErrorKind, Route, Version,
 };
 
 /// An HTTP request builder object.
@@ -83,8 +84,8 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
     }
 
     pub fn add_header(&mut self, name: &str, value: &str) -> &mut Self {
-        let name: HeaderName = name.parse().unwrap();
-        let value: HeaderValue = value.parse().unwrap();
+        let name = HeaderName::from(name);
+        let value = HeaderValue::from(value);
 
         if let Some(map) = self.headers.as_mut() {
             map.entry(name)
@@ -106,30 +107,29 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
     }
 
     pub fn build(&mut self) -> IoResult<Request> {
-        let stream = {
+        let conn = {
 			if let Some(addr) = self.addr.take() {
-				TcpStream::connect(addr)?
+                let stream = TcpStream::connect(addr)?;
+                Connection::try_from(stream).ok()
             } else if self.ip.is_some() && self.port.is_some() {
 				let ip = self.ip.take().unwrap();
 				let port = self.port.take().unwrap();
-				TcpStream::connect(format!("{ip}:{port}"))?
+				let addr = format!("{ip}:{port}");
+                let stream = TcpStream::connect(addr)?;
+                Connection::try_from(stream).ok()
             } else {
                 return Err(IoError::from(IoErrorKind::InvalidInput));
             }
         };
 
-		let remote_addr = stream.peer_addr()?;
         let method = self.method.take().unwrap_or_default();
         let version = self.version.take().unwrap_or_default();
         let path = self.path.take().unwrap_or_else(|| String::from("/"));
-		let headers = self
-            .headers
-            .take()
-            .unwrap_or_else(|| Request::default_headers(&remote_addr));
+		let headers = self.headers.take();
 		let body = self.body.take();
 
 		Ok(Request {
-            remote_addr,
+            conn,
             method,
             path,
             version,
@@ -137,29 +137,32 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
             body,
         })
     }
+
+    pub fn send(&mut self) -> IoResult<Request> {
+        let mut req = self.build()?;
+        req.send()?;
+        Ok(req)
+    }
 }
 
 /// Represents the components of an HTTP request.
-#[derive(Clone, Eq, PartialEq)]
 pub struct Request {
-    pub remote_addr: SocketAddr,
+    pub conn: Option<Connection>,
     pub method: Method,
     pub path: String,
     pub version: Version,
-    pub headers: HeadersMap,
+    pub headers: Option<HeadersMap>,
     pub body: Option<Vec<u8>>,
 }
 
 impl Default for Request {
     fn default() -> Self {
-		let remote_addr = SocketAddr::new([127, 0, 0, 1].into(), 8787);
-
 		Self {
-            remote_addr,
+            conn: None,
             method: Method::default(),
             path: "/".to_string(),
             version: Version::default(),
-            headers: Self::default_headers(&remote_addr),
+            headers: None,
             body: None,
         }
     }
@@ -171,8 +174,8 @@ impl Display for Request {
 		writeln!(f, "{}", self.request_line())?;
 
 		// The request headers.
-		if !self.headers.is_empty() {
-			for (name, value) in &self.headers {
+		if let Some(headers) = self.headers.as_ref() {
+			for (name, value) in headers {
 				writeln!(f, "{name}: {value}")?;
 			}
 		}
@@ -191,71 +194,36 @@ impl Display for Request {
 
 impl Debug for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let mut dbg = f.debug_struct("Request");
-
-		let dbg = dbg.field("remote_addr", &self.remote_addr)
+		f.debug_struct("Request")
+            .field("remote", &"Connection { ... }")
 			.field("method", &self.method)
 			.field("path", &self.path)
 			.field("version", &self.version)
-			.field("headers", &self.headers);
-
-		if self.body.is_none() || !self.body_is_printable() {
-			dbg.field("body", &self.body).finish()
-		} else {
-			let body = self.body.as_ref().map(|b| String::from_utf8_lossy(b));
-			dbg.field("body", &body).finish()
-		}
-	}
+			.field("headers", &self.headers)
+            .field("body", &self.body.as_ref().map_or_else(
+                || None,
+                |body| if self.body_is_printable() {
+                    Some(body)
+                } else {
+                    None
+                })
+            )
+            .finish()
+    }
 }
 
-impl Request {
-    /// Parses the first line of an HTTP request.
-    ///
-    /// request-line = method SP request-target SP HTTP-version
-    pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
-        let trimmed = line.trim();
+impl TryFrom<Connection> for Request {
+    type Error = NetError;
 
-        if trimmed.is_empty() {
-            return Err(NetError::ParseError("request line"));
-        }
-
-        let mut tok = trimmed.splitn(3, ' ').map(str::trim);
-
-        let tokens = (tok.next(), tok.next(), tok.next());
-
-        if let (Some(meth), Some(path), Some(ver)) = tokens {
-            Ok((meth.parse()?, path.to_string(), ver.parse()?))
-        } else {
-            Err(NetError::ParseError("request line"))
-        }
-    }
-
-    /// Parses a line into a header field name and value.
-    ///
-    /// field-line = field-name ":" OWS field-value OWS
-    pub fn parse_header(line: &str) -> NetResult<(HeaderName, HeaderValue)> {
-        let mut tok = line.splitn(2, ':').map(str::trim);
-
-        let tokens = (tok.next(), tok.next());
-
-        if let (Some(name), Some(value)) = tokens {
-            Ok((name.parse()?, value.parse().unwrap()))
-        } else {
-            Err(NetError::ParseError("header"))
-        }
-    }
-
-    /// Parse a `Request` from a `RemoteConnect`.
-    pub fn from_remote(remote: &mut RemoteConnect) -> NetResult<Self> {
-        let remote_addr = remote.remote_addr;
-
+    /// Parse a `Request` from a `Connection`.
+    fn try_from(mut conn: Connection) -> NetResult<Self> {
         let mut buf = String::new();
 
         // Parse the request line.
         let (method, path, version) = {
-            match remote.read_line(&mut buf) {
+            match conn.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
-                Ok(0) => return Err(NetError::from_kind(IoErrorKind::UnexpectedEof)),
+                Ok(0) => return Err(NetError::UnexpectedEof),
                 Ok(_) => Self::parse_request_line(&buf)?,
             }
         };
@@ -267,9 +235,9 @@ impl Request {
         while num <= MAX_HEADERS {
             buf.clear();
 
-            match remote.read_line(&mut buf) {
+            match conn.read_line(&mut buf) {
                 Err(e) => return Err(NetError::from(e)),
-                Ok(0) => return Err(NetError::from_kind(IoErrorKind::UnexpectedEof)),
+                Ok(0) => return Err(NetError::UnexpectedEof),
                 Ok(_) => {
                     let trimmed = buf.trim();
 
@@ -287,14 +255,53 @@ impl Request {
         // Parse the request body.
         let body = Self::parse_body(b"");
 
+        let conn = Some(conn);
+        let headers = Some(headers);
+
         Ok(Self {
-            remote_addr,
+            conn,
             method,
             path,
             version,
             headers,
             body,
         })
+    }
+}
+
+impl Request {
+    /// Parses the first line of an HTTP request.
+    ///
+    /// request-line = method SP request-target SP HTTP-version
+    pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() {
+            return Err(ParseErrorKind::ReqLine)?;
+        }
+
+        let mut tokens = trimmed.splitn(3, ' ').map(str::trim);
+
+        let (Some(method), Some(path), Some(version)) = (
+            tokens.next(), tokens.next(), tokens.next()
+        ) else {
+            return Err(ParseErrorKind::ReqLine)?;
+        };
+
+        Ok((method.parse()?, path.to_string(), version.parse()?))
+    }
+
+    /// Parses a line into a header field name and value.
+    ///
+    /// field-line = field-name ":" OWS field-value OWS
+    pub fn parse_header(line: &str) -> NetResult<(HeaderName, HeaderValue)> {
+        let mut tokens = line.splitn(2, ':').map(str::trim);
+
+        let (Some(name), Some(value)) = (tokens.next(), tokens.next()) else {
+            return Err(ParseErrorKind::Header)?;
+        };
+
+        Ok((HeaderName::from(name), HeaderValue::from(value)))
     }
 
     /// Parses the request body.
@@ -339,82 +346,122 @@ impl Request {
 
     /// Returns a reference to the `Request` object's headers.
     #[must_use]
-    pub const fn headers(&self) -> &HeadersMap {
-        &self.headers
+    pub const fn headers(&self) -> Option<&HeadersMap> {
+        self.headers.as_ref()
     }
 
     /// Default set of request headers.
-    #[must_use]
-    pub fn default_headers(host: &SocketAddr) -> HeadersMap {
-		let host = format!("{}:{}", host.ip(), host.port());
+    pub fn default_headers(&mut self) {
+        if let Some(remote) = self.remote_addr() {
+            let host = format!("{}:{}", remote.ip(), remote.port());
+            self.set_header(HOST, host.into());
+        }
 
-		BTreeMap::from([
-			(ACCEPT, "*/*".parse().unwrap()),
-			(HOST, host.into()),
-            (USER_AGENT, DEFAULT_NAME.parse().unwrap()),
-        ])
+        self.set_header(ACCEPT, "*/*".into());
+        self.set_header(USER_AGENT, DEFAULT_NAME.into());
     }
 
     /// Returns true if the header is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
-        self.headers.contains_key(name)
+        self.headers.as_ref().map_or(false, |headers| {
+            headers.contains_key(name)
+        })
     }
 
     /// Returns the header value for the given `HeaderName`, if present.
     #[must_use]
     pub fn header(&self, name: &HeaderName) -> Option<&HeaderValue> {
-        self.headers.get(name)
+        self.headers.as_ref().map_or(None, 
+            |headers| headers.get(name)
+        )
     }
 
 	/// Adds or modifies the header field represented by `HeaderName`.
     pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
-        if self.has_header(&name) {
-            self.headers.entry(name).and_modify(|v| *v = val);
+        if let Some(headers) = self.headers.as_mut() {
+            headers.entry(name)
+                .and_modify(|v| *v = val.clone())
+                .or_insert(val);
         } else {
-            self.headers.insert(name, val);
+            self.headers = Some(BTreeMap::from([(name, val)]));
         }
     }
 
     /// Returns all of the request headers as a String.
     #[must_use]
     pub fn headers_to_string(&self) -> String {
-        if self.headers.is_empty() {
-            String::new()
-        } else {
-            self.headers
-                .iter()
-                .fold(String::new(), |mut acc, (name, value)| {
+        self.headers.as_ref().map_or(String::new(),
+            |headers| headers.iter().fold(
+                String::new(),
+                |mut acc, (name, value)| {
                     let header = format!("{name}: {value}\n");
                     acc.push_str(&header);
                     acc
                 })
-        }
+        )
     }
 
     /// The `SocketAddr` of the remote connection.
     #[must_use]
-    pub const fn remote_addr(&self) -> SocketAddr {
-        self.remote_addr
+    pub fn remote_addr(&self) -> Option<SocketAddr> {
+        self.conn
+            .as_ref()
+            .map(|conn| conn.remote_addr)
     }
 
     /// The `IpAddr` of the remote connection.
     #[must_use]
-    pub const fn remote_ip(&self) -> IpAddr {
-        self.remote_addr.ip()
+    pub fn remote_ip(&self) -> Option<IpAddr> {
+        self.remote_addr()
+            .as_ref()
+            .map(|remote| remote.ip())
     }
 
     /// The port being used by the remote connection.
     #[must_use]
-    pub const fn remote_port(&self) -> u16 {
-        self.remote_addr.port()
+    pub fn remote_port(&self) -> Option<u16> {
+        self.remote_addr()
+            .as_ref()
+            .map(|remote| remote.port())
+    }
+
+    /// The `SocketAddr` of the local connection.
+    #[must_use]
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.conn
+            .as_ref()
+            .map(|conn| conn.local_addr)
+    }
+
+    /// The `IpAddr` of the local connection.
+    #[must_use]
+    pub fn local_ip(&self) -> Option<IpAddr> {
+        self.local_addr()
+            .as_ref()
+            .map(|local| local.ip())
+    }
+
+    /// The port being used by the local connection.
+    #[must_use]
+    pub fn local_port(&self) -> Option<u16> {
+        self.local_addr()
+            .as_ref()
+            .map(|local| local.port())
     }
 
     /// Logs the response status and request line.
     pub fn log_status(&self, status_code: u16) {
+        let remote = self
+            .remote_addr()
+            .as_ref()
+            .map_or(
+                String::from("?"),
+                |remote| remote.to_string()
+            );
+
         println!(
-            "[{}|{status_code}] {} {}",
-            self.remote_ip(),
+            "[{remote}|{status_code}] {} {}",
             self.method(),
             self.path()
         );
@@ -452,5 +499,44 @@ impl Request {
         }
 
         String::new().into()
+    }
+
+	/// Write this `Request` as an HTTP request to a remote host.
+    #[must_use]
+    pub fn send(&mut self) -> NetResult<()> {
+		let request_line = self.request_line();
+        self.default_headers();
+
+        let writer = self
+            .conn
+            .as_mut()
+            .map(|conn| conn.writer.by_ref())
+            .ok_or(NetError::WriteError(IoErrorKind::NotConnected))?;
+
+        // The request line.
+		writer.write_all(request_line.as_bytes())?;
+		writer.write_all(b"\r\n")?;
+
+		// The request headers.
+		if let Some(headers) = self.headers.as_ref() {
+            for (name, value) in headers {
+                writer.write_all(format!("{name}: ").as_bytes())?;
+                writer.write_all(value.as_bytes())?;
+                writer.write_all(b"\r\n")?;
+            }
+		}
+
+		// End of the headers section.
+		writer.write_all(b"\r\n")?;
+
+		// The request message body, if present.
+		if let Some(body) = self.body.as_ref() {
+			if !body.is_empty() {
+				writer.write_all(body)?;
+			}
+		}
+
+		writer.flush()?;
+        Ok(())
     }
 }
