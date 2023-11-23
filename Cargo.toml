@@ -1,8 +1,17 @@
-[package]
-name = "rustnet"
+[workspace]
+members = [
+    "librustnet",
+    "rustnet_client",
+    "rustnet_server",
+    "rustnet_browser",
+    "tester"
+]
+
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 authors = ["ryanv404"]
-description = "An HTTP networking library."
 edition = "2021"
 readme = "README.md"
 license = "MIT"

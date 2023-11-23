@@ -1,0 +1,14 @@
+[package]
+name = "rustnet_client"
+description = "An HTTP client."
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+librustnet = { path = "../librustnet" }
