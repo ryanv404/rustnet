@@ -1,4 +1,8 @@
-use librustnet::{Client, Status, Version};
+use librustnet::{Client, Status, Version, HeaderValue};
+use librustnet::consts::{
+    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION,
+    CONTENT_LENGTH, CONTENT_TYPE, SERVER,
+};
 
 // Remote server responds with the status code corresponding to `code`.
 macro_rules! test_by_status_code {
@@ -13,8 +17,13 @@ macro_rules! test_by_status_code {
                     .unwrap();
 
                 let res = client.recv().unwrap();
+
                 assert_eq!(res.version, Version::OneDotOne);
                 assert_eq!(res.status, Status(502));
+                assert_eq!(res.header(&CONNECTION), Some(&HeaderValue::from("keep-alive")));
+                assert_eq!(res.header(&CONTENT_LENGTH), Some(&HeaderValue::from("122")));
+                assert_eq!(res.header(&CONTENT_TYPE), Some(&HeaderValue::from("text/html")));
+                assert!(res.body().is_some());
             )+
         }
     };
@@ -29,16 +38,26 @@ macro_rules! test_by_status_code {
                     .unwrap();
 
                 let res = client.recv().unwrap();
+
                 assert_eq!(res.version, Version::OneDotOne);
                 assert_eq!(res.status, Status($code));
+                assert_eq!(res.header(&ACCESS_CONTROL_ALLOW_CREDENTIALS), Some(&HeaderValue::from("true")));
+                assert_eq!(res.header(&ACCESS_CONTROL_ALLOW_ORIGIN), Some(&HeaderValue::from("*")));
+                assert_eq!(res.header(&SERVER), Some(&HeaderValue::from("gunicorn/19.9.0")));
+                assert_eq!(res.header(&CONNECTION), Some(&HeaderValue::from("keep-alive")));
+                if !matches!($code, 100..=200) {
+                    assert_eq!(res.header(&CONTENT_LENGTH), Some(&HeaderValue::from("0")));
+                }
+                assert_eq!(res.header(&CONTENT_TYPE), Some(&HeaderValue::from("text/html; charset=utf-8")));
+                assert!(res.body().is_none());
             )+
         }
     };
 }
 
-test_by_status_code!(parse_1xx_status: 101, 102, 103);
-test_by_status_code!(parse_2xx_status: 200, 201, 202);
-test_by_status_code!(parse_3xx_status: 300, 301, 302);
-test_by_status_code!(parse_4xx_status: 400, 403, 404);
-test_by_status_code!(parse_5xx_status: 500, 501, 502);
-test_by_status_code!(parse_bad_status: 999, 601, 701);
+test_by_status_code!(parse_1xx_status_response: 100, 102, 103);
+test_by_status_code!(parse_2xx_status_response: 200, 201, 202);
+test_by_status_code!(parse_3xx_status_response: 300, 306, 308);
+test_by_status_code!(parse_4xx_status_response: 400, 404, 419);
+test_by_status_code!(parse_5xx_status_response: 500, 501, 503);
+test_by_status_code!(parse_invalid_status_response: bad 001, bad 1001);

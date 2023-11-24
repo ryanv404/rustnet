@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
-use std::sync::Mutex;
 
+use crate::NetResult;
 use crate::consts::{READER_BUFSIZE, WRITER_BUFSIZE};
 
 #[derive(Debug)]
@@ -29,27 +29,40 @@ impl BufRead for NetReader {
     }
 }
 
+impl NetReader {
+    pub fn try_clone(&self) -> NetResult<Self> {
+        let stream = self.0.get_ref().try_clone()?;
+        Ok(Self::from(stream))
+    }
+}
+
 #[derive(Debug)]
-pub struct NetWriter(pub Mutex<BufWriter<TcpStream>>);
+pub struct NetWriter(pub BufWriter<TcpStream>);
 
 impl From<TcpStream> for NetWriter {
     fn from(stream: TcpStream) -> Self {
-        let writer = BufWriter::with_capacity(WRITER_BUFSIZE, stream);
-        Self(Mutex::new(writer))
+        Self(BufWriter::with_capacity(WRITER_BUFSIZE, stream))
     }
 }
 
 impl Write for NetWriter {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        self.0.lock().unwrap().write(buf)
+        self.0.write(buf)
     }
 
     fn flush(&mut self) -> IoResult<()> {
-        self.0.lock().unwrap().flush()
+        self.0.flush()
     }
 
     fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.0.lock().unwrap().write_all(buf)
+        self.0.write_all(buf)
+    }
+}
+
+impl NetWriter {
+    pub fn try_clone(&self) -> NetResult<Self> {
+        let stream = self.0.get_ref().try_clone()?;
+        Ok(Self::from(stream))
     }
 }
 
@@ -119,12 +132,7 @@ impl Connection {
         let local_addr = stream.local_addr()?;
         let (r, w) = (stream.try_clone()?, stream);
         let (reader, writer) = (NetReader::from(r), NetWriter::from(w));
-        Ok(Self {
-            local_addr,
-            remote_addr,
-            reader,
-            writer,
-        })
+        Ok(Self { local_addr, remote_addr, reader, writer })
     }
 
     /// Returns the local client's IP address.
@@ -145,5 +153,11 @@ impl Connection {
     /// Returns the remote host's port.
     pub const fn remote_port(&self) -> u16 {
         self.remote_addr.port()
+    }
+
+    /// Attempts to clones this `Connection` object.
+    pub fn try_clone(&self) -> NetResult<Self> {
+        let stream = self.reader.0.get_ref().try_clone()?;
+        Ok(Self::try_from(stream)?)
     }
 }

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{self, BufRead, BufWriter, StdinLock, StdoutLock, Write};
 
-use librustnet::{Client, Response};
+use librustnet::{Client, Parser, Response};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -89,7 +89,7 @@ impl<'a> Browser<'a> {
                 "status" => self.set_output_style(OutputStyle::Status),
                 "verbose" => self.set_output_style(OutputStyle::Verbose),
                 uri if self.output_style == OutputStyle::Request => {
-                    if let Ok((addr, path)) = Client::parse_uri(uri) {
+                    if let Ok((addr, path)) = Parser::parse_uri(uri) {
                         self.client = Client::http().addr(addr).path(&path).build().ok();
                     }
 

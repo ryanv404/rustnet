@@ -1,6 +1,6 @@
 use std::{env, io};
 
-use librustnet::{Client, consts::DATE, Method};
+use librustnet::{Client, Method, Parser, Response, consts::DATE};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -88,7 +88,7 @@ fn main() -> io::Result<()> {
     };
 
     // Parse the URI argument.
-    let (ref addr, ref path, ref body) = match Client::parse_uri(&uri) {
+    let (ref addr, ref path, ref body) = match Parser::parse_uri(&uri) {
         Ok((addr, path)) => {
             let body = args.next().unwrap_or_default();
             (addr, path_arg.unwrap_or(path), body)
@@ -111,11 +111,16 @@ fn main() -> io::Result<()> {
     let mut res = client.recv()?;
 
     // Ignore Date headers in tests.
-    if testing_client || testing_server {
-        if let Some(headers) = client.req.headers.as_mut() {
-            headers.remove(&DATE);
-            res.headers.remove(&DATE);
-        }
+    if testing_client {
+        client.req.headers.as_mut().map(
+            |headers| headers.remove(&DATE)
+        );
+    }
+
+    if testing_server {
+        res.headers.as_mut().map(
+            |headers| headers.remove(&DATE)
+        );
     }
 
     if testing_client {
@@ -129,6 +134,7 @@ fn main() -> io::Result<()> {
     } else if testing_server {
         let res_body = res.body_to_string();
         let res_body = res_body.trim_end();
+
         if res_body.is_empty() {
             println!(
                 "{}\n{}",
@@ -144,63 +150,68 @@ fn main() -> io::Result<()> {
             );
         }
     } else {
-        let req_body = client.req.body_to_string();
-        let res_body = res.body_to_string();
-        let res_color = if res.status_code() >= 400 {
-            RED
-        } else {
-            GRN
-        };
-
-        match (req_body.len(), res_body.len()) {
-            (0, 0) => {
-                println!(
-                    "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n",
-                    client.request_line(),
-                    client.headers_to_string().trim_end(),
-                    res.status_line(),
-                    res.headers_to_string().trim_end()
-                );
-            },
-            (_, 0) => {
-                println!(
-                    "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n",
-                    client.request_line(),
-                    client.headers_to_string().trim_end(),
-                    req_body.trim_end(),
-                    res.status_line(),
-                    res.headers_to_string().trim_end()
-                );
-            },
-            (0, _) => {
-                println!(
-                    "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
-                    client.request_line(),
-                    client.headers_to_string().trim_end(),
-                    res.status_line(),
-                    res.headers_to_string().trim_end(),
-                    res_body.trim_end()
-                );
-            },
-            (_, _) => {
-                println!(
-                    "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
-                    client.request_line(),
-                    client.headers_to_string().trim_end(),
-                    req_body.trim_end(),
-                    res.status_line(),
-                    res.headers_to_string().trim_end(),
-                    res_body.trim_end()
-                );
-            },
-        }
+        print_output(&client, &res);
     }
 
     Ok(())
 }
 
+fn print_output(client: &Client, res: &Response) {
+    let req_body = client.req.body_to_string();
+    let res_body = res.body_to_string();
+    let res_color = if res.status_code() >= 400 {
+        RED
+    } else {
+        GRN
+    };
+
+    match (req_body.len(), res_body.len()) {
+        (0, 0) => {
+            println!(
+                "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n",
+                client.request_line(),
+                client.headers_to_string().trim_end(),
+                res.status_line(),
+                res.headers_to_string().trim_end()
+            );
+        },
+        (_, 0) => {
+            println!(
+                "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n",
+                client.request_line(),
+                client.headers_to_string().trim_end(),
+                req_body.trim_end(),
+                res.status_line(),
+                res.headers_to_string().trim_end()
+            );
+        },
+        (0, _) => {
+            println!(
+                "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
+                client.request_line(),
+                client.headers_to_string().trim_end(),
+                res.status_line(),
+                res.headers_to_string().trim_end(),
+                res_body.trim_end()
+            );
+        },
+        (_, _) => {
+            println!(
+                "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
+                client.request_line(),
+                client.headers_to_string().trim_end(),
+                req_body.trim_end(),
+                res.status_line(),
+                res.headers_to_string().trim_end(),
+                res_body.trim_end()
+            );
+        },
+    }
+}
+
 fn show_help() {
     let name = env!("CARGO_BIN_NAME");
+
     eprintln!("\
         {GRN}Usage:{CLR} {name} <URI> [DATA]\n\n\
         {GRN}Arguments:{CLR}\n    \

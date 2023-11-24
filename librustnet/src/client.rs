@@ -4,13 +4,10 @@ use std::io::{BufRead, Read, Write};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 
-use crate::consts::{
-    CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS,
-};
+use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE};
 use crate::{
-    HeaderName, HeaderValue, HeadersMap, Method, ParseErrorKind,
-    NetError, NetResult, Request, Response, Status, Version,
-    Connection,
+    Connection, HeaderName, HeaderValue, HeadersSet, Method, NetError,
+    NetResult, Request, RequestLine, Response, Version,
 };
 
 /// Builder for the `Client` object.
@@ -167,22 +164,16 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         };
 
         let method = self.method.take().unwrap_or_default();
-        let version = self.version.take().unwrap_or_default();
         let path = self.path.take().unwrap_or_else(|| String::from("/"));
+        let version = self.version.take().unwrap_or_default();
+        let request_line = RequestLine::new(method, path, version);
 
         let headers = self.headers.take();
 		self.update_content_headers();
 
         let body = self.body.take();
 
-		let req = Request {
-            conn,
-            method,
-            path,
-            version,
-            headers,
-            body,
-        };
+		let req = Request { conn, request_line, headers, body };
 
         Ok(Client { req })
     }
@@ -262,78 +253,10 @@ impl Client {
     /// Sends a GET request to the provided URI, returning the `Client` and
 	/// the `Response`.
     pub fn get(uri: &str) -> NetResult<(Self, Response, String)> {
-		let (addr, path) = Self::parse_uri(uri)?;
+		let (addr, path) = Request::parse_uri(uri)?;
         let mut client = Self::http().addr(&addr).path(&path).send()?;
         let res = client.recv()?;
         Ok((client, res, addr))
-	}
-
-    /// Attempts to parse a string slice into a host address and a path.
-    #[must_use]
-	pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
-		let uri = uri.trim();
-
-		if let Some((scheme, rest)) = uri.split_once("://") {
-            // If "://" is present, we expect a URI like "http://httpbin.org".
-            if scheme.is_empty() || rest.is_empty() {
-				return Err(ParseErrorKind::Uri)?;
-			}
-
-			match scheme {
-                "http" => match rest.split_once('/') {
-                    // Next "/" after the scheme, if present, starts the
-                    // path segment.
-					Some((addr, path)) if path.is_empty() && addr.contains(':') => {
-                        // Example: http://httpbin.org:80/
-                        Ok((addr.to_string(), String::from("/")))
-                    },
-                    Some((addr, path)) if path.is_empty() => {
-                        // Example: http://httpbin.org/
-                        Ok((format!("{addr}:80"), String::from("/")))
-					},
-					Some((addr, path)) if addr.contains(':') => {
-                        // Example: http://httpbin.org:80/json
-                        Ok((addr.to_string(), format!("/{path}")))
-					},
-                    Some((addr, path)) => {
-                        // Example: http://httpbin.org/json
-                        Ok((format!("{addr}:80"), format!("/{path}")))
-                    },
-					None if rest.contains(':') => {
-                        // Example: http://httpbin.org:80
-                        Ok((rest.to_string(), String::from("/")))
-					},
-                    None => {
-                        // Example: http://httpbin.org
-                        Ok((format!("{rest}:80"), String::from("/")))
-					},
-				},
-                "https" => Err(NetError::HttpsNotImplemented),
-                _ => Err(ParseErrorKind::Uri)?,
-			}
-		} else if let Some((addr, path)) = uri.split_once('/') {
-			if addr.is_empty() {
-				return Err(ParseErrorKind::Uri)?;
-			}
-
-			let addr = if addr.contains(':') {
-				addr.to_string()
-			} else {
-				format!("{addr}:80")
-			};
-
-			let path = if path.is_empty() {
-				String::from("/")
-			} else {
-				format!("/{path}")
-			};
-
-			Ok((addr, path))
-		} else if uri.contains(':') {
-			Ok((uri.to_string(), String::from("/")))
-		} else {
-			Ok((format!("{uri}:80"), String::from("/")))
-		}
 	}
 
     /// Returns a new `ClientBuilder` instance.
@@ -344,17 +267,17 @@ impl Client {
 
     /// Returns the method.
     pub const fn method(&self) -> Method {
-        self.req.method
+        self.req.method()
     }
 
 	/// Returns the URI path to the target resource.
     pub fn path(&self) -> &str {
-        &self.req.path
+        self.req.path()
     }
 
     /// Returns the protocol version.
     pub const fn version(&self) -> Version {
-        self.req.version
+        self.req.version()
     }
 
     /// Returns a reference to the request headers map.
@@ -411,125 +334,12 @@ impl Client {
 	}
 
     /// Receives an HTTP response from the remote host.
-    pub fn recv(&mut self) -> IoResult<Response> {
-        let (version, status) = self.parse_status_line()?;
-        let headers = self.parse_headers()?;
+    pub fn recv(&mut self) -> NetResult<Response> {
+        let conn = self.req.conn
+            .as_ref()
+            .ok_or(NetError::WriteError(IoErrorKind::NotConnected))
+            .and_then(|c| c.try_clone())?;
 
-		let body = {
-			// Only parse the body if a valid Content-Length is present.
-            headers.get(&CONTENT_LENGTH).and_then(|val| {
-				let s_len = val.to_string();
-                s_len.parse::<usize>().map_or(None, |len| self.parse_body(len))
-			})
-		};
-
-        let path = self.req.path.clone();
-        let method = self.req.method;
-        let conn = self.req.conn.take();
-
-		Ok(Response {
-            conn,
-            method,
-            path,
-            version,
-            status,
-            headers,
-            body,
-        })
+        Response::recv(conn, self.req.method())
     }
-
-    /// Parses the first line of a response into a `Version` and `Status`.
-    pub fn parse_status_line(&mut self) -> IoResult<(Version, Status)> {
-        let mut buf = String::new();
-
-        match self.read_line(&mut buf) {
-            Err(e) => Err(e),
-            Ok(0) => Err(IoError::from(IoErrorKind::UnexpectedEof)),
-            Ok(_) => {
-                let line = buf.trim();
-
-                if line.is_empty() {
-                    let payload = "response status line is empty".to_string();
-                    return Err(IoError::new(IoErrorKind::Other, payload));
-                }
-
-                let mut tok = line.splitn(3, ' ').map(str::trim);
-
-                let tokens = (tok.next(), tok.next(), tok.next());
-
-                let (Some(ver), Some(code), Some(msg)) = tokens else {
-                    let payload = "cannot parse the response status line".to_string();
-                    return Err(IoError::new(IoErrorKind::Other, payload));
-                };
-
-                let Ok(version) = ver.parse::<Version>() else {
-                    let payload = format!("cannot parse the HTTP version: {ver}");
-                    return Err(IoError::new(IoErrorKind::Other, payload));
-                };
-
-                if code.eq_ignore_ascii_case("200") {
-                    Ok((version, Status(200)))
-                } else if let Ok(status) = code.parse::<Status>() {
-                    Ok((version, status))
-                } else {
-                    let payload = format!("cannot parse status code: {code} ({msg})");
-                    Err(IoError::new(IoErrorKind::Other, payload))
-                }
-            }
-        }
-    }
-
-    // Reads and parses the headers section into a BTreeMap.
-    pub fn parse_headers(&mut self) -> IoResult<HeadersMap> {
-        let mut num = 0;
-        let mut line = String::new();
-        let mut headers: HeadersMap = BTreeMap::new();
-
-        while num <= MAX_HEADERS {
-            line.clear();
-
-            match self.read_line(&mut line) {
-                Err(e) => return Err(e),
-                Ok(0) => return Err(IoError::from(IoErrorKind::UnexpectedEof)),
-                Ok(_) => {
-                    let trimmed = line.trim();
-
-                    if trimmed.is_empty() {
-                        return Ok(headers);
-                    }
-
-                    let (name, value) = Request::parse_header(trimmed)?;
-                    headers.insert(name, value);
-                    num += 1;
-                }
-            }
-        }
-
-        Err(IoError::new(IoErrorKind::Other, String::from("too many headers")))
-    }
-
-    pub fn parse_body(&mut self, len: usize) -> Option<Vec<u8>> {
-        if len == 0 {
-			return None;
-		}
-
-		let Ok(num_bytes) = u64::try_from(len) else {
-			return None;
-		};
-
-		let mut body = Vec::with_capacity(len);
-
-		if let Some(conn) = self.req.conn.as_mut() {
-            let mut handle = conn.reader.by_ref().take(num_bytes);
-
-            // TODO: handle chunked data and partial reads.
-            if handle.read_to_end(&mut body).is_ok() {
-                Some(body)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-	}
 }

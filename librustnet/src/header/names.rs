@@ -1,12 +1,39 @@
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str;
 
-use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
+use crate::{trim_whitespace_bytes, Header, NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
-#[derive(Clone, Eq, Hash, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Hash)]
 pub struct HeaderName {
     pub inner: HeaderKind,
+}
+
+impl PartialEq<HeaderName> for HeaderName {
+    fn eq(&self, other: &HeaderName) -> bool {
+        *self == other
+    }
+}
+
+impl Eq for HeaderName {}
+
+impl PartialEq<Header> for HeaderName {
+    fn eq(&self, other: &Header) -> bool {
+        *self == other.name
+    }
+}
+
+impl PartialOrd<Header> for HeaderName {
+    fn partial_cmp(&self, other: &Header) -> Option<Ordering> {
+        Some(self.partial_cmp(&other.name))
+    }
+}
+
+impl Ord for HeaderNames {
+    fn cmp(&self, other: &HeaderNames) -> Ordering {
+        self.partial_cmp(&other)
+    }
 }
 
 impl Display for HeaderName {

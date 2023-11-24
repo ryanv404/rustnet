@@ -1,19 +1,17 @@
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{
-    BufRead, ErrorKind as IoErrorKind, Result as IoResult, Write,
-};
+use std::io::{BufRead, ErrorKind as IoErrorKind, Read, Result as IoResult, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::str;
 
 use crate::consts::{
-	ACCEPT, CONTENT_ENCODING, CONTENT_TYPE, DEFAULT_NAME, HOST, MAX_HEADERS,
-    USER_AGENT,
+	ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, DEFAULT_NAME, HOST, MAX_HEADERS,
+	USER_AGENT,
 };
 use crate::{
-    Connection, HeaderName, HeaderValue, HeadersMap, Method, NetError,
-    NetResult, ParseErrorKind, Route, Version,
+    Connection, Header, HeaderName, HeaderValue, HeadersSet, Method, NetError,
+    NetReader, NetResult, ParseErrorKind, Route, Version,
 };
 
 /// An HTTP request builder object.
@@ -25,7 +23,7 @@ pub struct RequestBuilder<A: ToSocketAddrs> {
     pub method: Option<Method>,
     pub path: Option<String>,
     pub version: Option<Version>,
-    pub headers: Option<HeadersMap>,
+    pub headers: HeadersSet,
     pub body: Option<Vec<u8>>,
 }
 
@@ -38,28 +36,32 @@ impl<A: ToSocketAddrs> Default for RequestBuilder<A> {
             method: None,
             path: None,
             version: None,
-            headers: None,
+            headers: BTreeSet<Header>::new(),
             body: None,
         }
     }
 }
 
 impl<A: ToSocketAddrs> RequestBuilder<A> {
+    /// Returns a `RequestBuilder instance`.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the HTTP method.
     pub fn method(&mut self, method: Method) -> &mut Self {
         self.method = Some(method);
         self
     }
 
+    /// Sets the URI path.
     pub fn path(&mut self, path: &str) -> &mut Self {
         self.path = Some(path.to_string());
         self
     }
 
+    /// Sets the protocol version.
     pub fn version(&mut self, version: Version) -> &mut Self {
         self.version = Some(version);
         self
@@ -83,21 +85,28 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
         self
     }
 
+    /// Adds a new header or updates the header value if it is already present.
     pub fn add_header(&mut self, name: &str, value: &str) -> &mut Self {
         let name = HeaderName::from(name);
         let value = HeaderValue::from(value);
+        let header = Header::new(name, value);
 
-        if let Some(map) = self.headers.as_mut() {
-            map.entry(name)
-                .and_modify(|val| *val = value.clone())
-                .or_insert(value);
+        if self.headers.is_empty() {
+            self.headers = BTreeSet<Header>::from([header]);
         } else {
-            self.headers = Some(BTreeMap::from([(name, value)]));
+            self.headers.insert(header);
         }
 
         self
     }
 
+    /// Returns true if the header is present.
+    #[must_use]
+    pub fn has_header(&self, name: &HeaderName) -> bool {
+        self.headers.contains(name)
+    }
+
+    /// Sets the content of the request body.
     pub fn body(&mut self, data: &[u8]) -> &mut Self {
         if !data.is_empty() {
             self.body = Some(data.to_vec());
@@ -106,7 +115,8 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
         self
     }
 
-    pub fn build(&mut self) -> IoResult<Request> {
+    /// Returns a `Request` instance from the `RequestBuilder`.
+    pub fn build(&mut self) -> NetResult<Request> {
         let conn = {
 			if let Some(addr) = self.addr.take() {
                 let stream = TcpStream::connect(addr)?;
@@ -123,200 +133,61 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
         };
 
         let method = self.method.take().unwrap_or_default();
-        let version = self.version.take().unwrap_or_default();
         let path = self.path.take().unwrap_or_else(|| String::from("/"));
-		let headers = self.headers.take();
+        let version = self.version.take().unwrap_or_default();
+        let request_line = RequestLine::new(method, path, version);
+
+		let headers = self.headers.unwrap_or_else(|| BTreeSet::<Header>::new());
 		let body = self.body.take();
 
 		Ok(Request {
             conn,
-            method,
-            path,
-            version,
+            request_line,
             headers,
             body,
         })
     }
 
-    pub fn send(&mut self) -> IoResult<Request> {
+    /// Sends an HTTP request and then returns the `Request` instance.
+    pub fn send(&mut self) -> NetResult<Request> {
         let mut req = self.build()?;
         req.send()?;
         Ok(req)
     }
 }
 
-/// Represents the components of an HTTP request.
-pub struct Request {
-    pub conn: Option<Connection>,
+/// Represents the first line of an HTTP request.
+#[derive(Debug)]
+pub struct RequestLine {
     pub method: Method,
     pub path: String,
     pub version: Version,
-    pub headers: Option<HeadersMap>,
-    pub body: Option<Vec<u8>>,
 }
 
-impl Default for Request {
+impl Default for RequestLine {
     fn default() -> Self {
-		Self {
-            conn: None,
-            method: Method::default(),
-            path: "/".to_string(),
-            version: Version::default(),
-            headers: None,
-            body: None,
+        Self {
+            method: Method::Get,
+            path: String::from("/"),
+            version: Version::OneDotOne
         }
     }
 }
-
-impl Display for Request {
+impl Display for RequestLine {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		// The request line.
-		writeln!(f, "{}", self.request_line())?;
-
-		// The request headers.
-		if let Some(headers) = self.headers.as_ref() {
-			for (name, value) in headers {
-				writeln!(f, "{name}: {value}")?;
-			}
-		}
-
-		// The request message body, if present.
-		if let Some(body) = self.body.as_ref() {
-			if !body.is_empty() && self.body_is_printable() {
-				let body = String::from_utf8_lossy(body);
-				write!(f, "\n{body}")?;
-			}
-		}
-
-		Ok(())
+        write!(f, "{} {} {}", &self.method, &self.path, &self.version)
     }
 }
 
-impl Debug for Request {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		f.debug_struct("Request")
-            .field("remote", &"Connection { ... }")
-			.field("method", &self.method)
-			.field("path", &self.path)
-			.field("version", &self.version)
-			.field("headers", &self.headers)
-            .field("body", &self.body.as_ref().map_or_else(
-                || None,
-                |body| if self.body_is_printable() {
-                    Some(body)
-                } else {
-                    None
-                })
-            )
-            .finish()
-    }
-}
-
-impl TryFrom<Connection> for Request {
-    type Error = NetError;
-
-    /// Parse a `Request` from a `Connection`.
-    fn try_from(mut conn: Connection) -> NetResult<Self> {
-        let mut buf = String::new();
-
-        // Parse the request line.
-        let (method, path, version) = {
-            match conn.read_line(&mut buf) {
-                Err(e) => return Err(NetError::from(e)),
-                Ok(0) => return Err(NetError::UnexpectedEof),
-                Ok(_) => Self::parse_request_line(&buf)?,
-            }
-        };
-
-        let mut num = 0;
-        let mut headers = BTreeMap::new();
-
-        // Parse the request headers.
-        while num <= MAX_HEADERS {
-            buf.clear();
-
-            match conn.read_line(&mut buf) {
-                Err(e) => return Err(NetError::from(e)),
-                Ok(0) => return Err(NetError::UnexpectedEof),
-                Ok(_) => {
-                    let trimmed = buf.trim();
-
-                    if trimmed.is_empty() {
-                        break;
-                    }
-
-                    let (name, value) = Self::parse_header(trimmed)?;
-                    headers.insert(name, value);
-                    num += 1;
-                }
-            }
-        }
-
-        // Parse the request body.
-        let body = Self::parse_body(b"");
-
-        let conn = Some(conn);
-        let headers = Some(headers);
-
-        Ok(Self {
-            conn,
-            method,
-            path,
-            version,
-            headers,
-            body,
-        })
-    }
-}
-
-impl Request {
-    /// Parses the first line of an HTTP request.
-    ///
-    /// request-line = method SP request-target SP HTTP-version
-    pub fn parse_request_line(line: &str) -> NetResult<(Method, String, Version)> {
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() {
-            return Err(ParseErrorKind::ReqLine)?;
-        }
-
-        let mut tokens = trimmed.splitn(3, ' ').map(str::trim);
-
-        let (Some(method), Some(path), Some(version)) = (
-            tokens.next(), tokens.next(), tokens.next()
-        ) else {
-            return Err(ParseErrorKind::ReqLine)?;
-        };
-
-        Ok((method.parse()?, path.to_string(), version.parse()?))
-    }
-
-    /// Parses a line into a header field name and value.
-    ///
-    /// field-line = field-name ":" OWS field-value OWS
-    pub fn parse_header(line: &str) -> NetResult<(HeaderName, HeaderValue)> {
-        let mut tokens = line.splitn(2, ':').map(str::trim);
-
-        let (Some(name), Some(value)) = (tokens.next(), tokens.next()) else {
-            return Err(ParseErrorKind::Header)?;
-        };
-
-        Ok((HeaderName::from(name), HeaderValue::from(value)))
-    }
-
-    /// Parses the request body.
-    ///
-    /// Presence of a request body depends on the Content-Length and
-    /// Transfer-Encoding headers.
-    #[must_use]
-    pub const fn parse_body(_buf: &[u8]) -> Option<Vec<u8>> {
-		// TODO
-		None
+impl RequestLine {
+    /// Returns a new `RequestLine` instance.
+    pub fn new(method: Method, path: String, version: Version) -> Self {
+        Self { method, path, version }
     }
 
     /// Returns the HTTP method.
     #[must_use]
-    pub const fn method(&self) -> Method {
+    pub fn method(&self) -> Method {
         self.method
     }
 
@@ -338,15 +209,124 @@ impl Request {
         self.version
     }
 
+    /// Parses a string slice into a URI path, a `Method`, and a `Version`
+    /// returning a `RequestLine` object.
+    pub fn parse(line: &str) -> NetResult<Self> {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() {
+            return Err(ParseErrorKind::RequestLine)?;
+        }
+
+        let mut tokens = trimmed.splitn(3, ' ').map(str::trim);
+
+        let (Some(method), Some(path), Some(version)) = (
+            tokens.next(), tokens.next(), tokens.next()
+        ) else {
+            return Err(ParseErrorKind::RequestLine)?;
+        };
+
+        let method = method.parse()?;
+        let path = path.to_string();
+        let version = version.parse()?;
+
+        Ok(Self { method, path, version })
+    }
+}
+
+/// Represents the components of an HTTP request.
+pub struct Request {
+    pub conn: Option<Connection>,
+    pub request_line: RequestLine,
+    pub headers: HeadersSet,
+    pub body: Option<Vec<u8>>,
+}
+
+impl Default for Request {
+    fn default() -> Self {
+		Self {
+            conn: None,
+            request_line: RequestLine::default(),
+            headers: BTreeSet::<Header>::new(),
+            body: None,
+        }
+    }
+}
+
+impl Display for Request {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		// The request line.
+		writeln!(f, "{}", self.request_line)?;
+
+		// The request headers.
+		for header in self.headers.iter() {
+			writeln!(f, "{header}")?;
+		}
+
+		// The request message body, if present.
+		if let Some(body) = self.body.as_ref() {
+			if !body.is_empty() && self.body_is_printable() {
+				let body = String::from_utf8_lossy(body);
+				write!(f, "\n{body}")?;
+			}
+		}
+
+		Ok(())
+    }
+}
+
+impl Debug for Request {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		f.debug_struct("Request")
+            .field("remote", &"Connection { ... }")
+			.field("request_line", &self.request_line)
+			.field("headers", &self.headers)
+            .field("body", &self.body.as_ref().map_or_else(
+                || None,
+                |body| if self.body_is_printable() {
+                    Some(body)
+                } else {
+                    None
+                })
+            )
+            .finish()
+    }
+}
+
+impl Request {
+    /// Returns the HTTP method.
+    #[must_use]
+    pub const fn method(&self) -> Method {
+        self.request_line.method
+    }
+
+    /// Returns the URI path to the target resource.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.request_line.path
+    }
+
+    /// Returns the `Route` representation of the target resource.
+    #[must_use]
+    pub fn route(&self) -> Route {
+        self.request_line.route()
+    }
+
+    /// Returns the HTTP version.
+    #[must_use]
+    pub const fn version(&self) -> Version {
+        self.request_line.version
+    }
+
     /// Returns the request line as a String.
     #[must_use]
     pub fn request_line(&self) -> String {
-        format!("{} {} {}", &self.method, &self.path, &self.version)
+        self.request_line.to_string()
     }
 
     /// Returns a reference to the `Request` object's headers.
     #[must_use]
-    pub const fn headers(&self) -> Option<&HeadersMap> {
+    pub const fn headers(&self) -> &HeadersSet {
         self.headers.as_ref()
     }
 
@@ -354,11 +334,11 @@ impl Request {
     pub fn default_headers(&mut self) {
         if let Some(remote) = self.remote_addr() {
             let host = format!("{}:{}", remote.ip(), remote.port());
-            self.set_header(HOST, host.into());
+            self.headers.insert(Header::new(HOST, host.into()));
         }
 
-        self.set_header(ACCEPT, "*/*".into());
-        self.set_header(USER_AGENT, DEFAULT_NAME.into());
+        self.set_header(Header::new(ACCEPT, "*/*".into()));
+        self.set_header(Header::new(USER_AGENT, DEFAULT_NAME.into()));
     }
 
     /// Returns true if the header is present.
@@ -369,22 +349,20 @@ impl Request {
         })
     }
 
-    /// Returns the header value for the given `HeaderName`, if present.
+    /// Returns the header value for the given `Header`, if present.
     #[must_use]
-    pub fn header(&self, name: &HeaderName) -> Option<&HeaderValue> {
-        self.headers.as_ref().map_or(None, 
-            |headers| headers.get(name)
-        )
+    pub fn header(&self, name: &Header) -> Option<&Header> {
+        self.headers.get(name)
     }
 
 	/// Adds or modifies the header field represented by `HeaderName`.
     pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
-        if let Some(headers) = self.headers.as_mut() {
-            headers.entry(name)
-                .and_modify(|v| *v = val.clone())
-                .or_insert(val);
+        let header = Header::new(name, val);
+
+        if self.headers.is_empty() {
+            self.headers = BTreeSet<Header>::from([header]);
         } else {
-            self.headers = Some(BTreeMap::from([(name, val)]));
+            self.headers.insert(Header::new(header));
         }
     }
 
@@ -467,20 +445,15 @@ impl Request {
         );
     }
 
-	/// Returns true if the body is unencoded and has a text or application
-	/// Content-Type header.
+	/// Returns true if the body has a text/* or application/* Content-Type header.
     #[must_use]
     pub fn body_is_printable(&self) -> bool {
-        if self.has_header(&CONTENT_ENCODING)
-            || !self.has_header(&CONTENT_TYPE)
-        {
-            return false;
+        if let Some(header) = self.headers.get(&CONTENT_TYPE) {
+            let body_type = header.value.to_string();
+            body_type.contains("text") || body_type.contains("application")
+        } else {
+            false
         }
-
-        self.header(&CONTENT_TYPE).map_or(false, |ct| {
-            let ct = ct.to_string();
-            ct.contains("text") || ct.contains("application")
-        })
     }
 
 	/// Returns a referense to the request body, if present.
@@ -518,13 +491,9 @@ impl Request {
 		writer.write_all(b"\r\n")?;
 
 		// The request headers.
-		if let Some(headers) = self.headers.as_ref() {
-            for (name, value) in headers {
-                writer.write_all(format!("{name}: ").as_bytes())?;
-                writer.write_all(value.as_bytes())?;
-                writer.write_all(b"\r\n")?;
-            }
-		}
+        self.headers.iter().for_each(|header| {
+            writer.write_all(format!("{header}\r\n").as_bytes());
+		});
 
 		// End of the headers section.
 		writer.write_all(b"\r\n")?;
@@ -538,5 +507,164 @@ impl Request {
 
 		writer.flush()?;
         Ok(())
+    }
+
+    /// Reads an HTTP request from a `Connection` and parses it into a `Request` object.
+    pub fn recv(mut conn: Connection) -> NetResult<Self> {
+        let mut header_num = 0;
+        let mut line = String::new();
+        let mut headers = BTreeSet<Header>::new();
+
+        // Parse the request line.
+        let request_line = match conn.read_line(&mut line) {
+            Err(e) => return Err(NetError::from(e)),
+            Ok(0) => return Err(NetError::UnexpectedEof),
+            Ok(_) => RequestLine::parse(&line)?,
+        };
+
+        // Parse the request headers.
+        while header_num <= MAX_HEADERS {
+            line.clear();
+
+            match conn.read_line(&mut line) {
+                Err(e) => return Err(NetError::from(e)),
+                Ok(0) => return Err(NetError::UnexpectedEof),
+                Ok(_) => {
+                    let trimmed = line.trim();
+
+                    if trimmed.is_empty() {
+                        break;
+                    }
+
+                    let header = Header::parse(trimmed)?;
+                    headers.insert(header);
+                    header_num += 1;
+                }
+            }
+        }
+
+        // Parse the request body.
+        let body_len = headers
+            .get(&CONTENT_LENGTH)
+            .and_then(|cont_len| {
+                let len_str = cont_len.to_string();
+                len_str.parse::<usize>().ok()
+            });
+
+        let body_type = headers
+            .get(&CONTENT_TYPE)
+            .and_then(|cont_type| Some(cont_type.to_string()));
+
+        let body = Self::parse_body(&mut conn.reader, body_len, body_type.as_ref());
+
+        let conn = Some(conn);
+        let headers = Some(headers);
+
+        Ok(Self { conn, request_line, headers, body })
+    }
+
+    /// Reads and parses the message body based on the Content-Type and
+    /// Content-Length headers values.
+    #[must_use]
+    pub fn parse_body(
+        reader: &mut NetReader,
+        cont_len: Option<usize>,
+        cont_type: Option<&String>
+    ) -> Option<Vec<u8>> {
+        let (Some(body_len), Some(body_type)) = (cont_len, cont_type) else {
+            return None;
+        };
+
+        if body_len == 0 {
+    		return None;
+    	}
+
+        let Ok(num_bytes) = u64::try_from(body_len) else {
+            return None;
+        };
+
+        if !body_type.contains("text") && !body_type.contains("application") {
+    		return None;
+    	}
+
+        let mut body = Vec::with_capacity(body_len);
+        let mut rdr = reader.take(num_bytes);
+
+        // TODO: handle chunked data and partial reads.
+        if rdr.read_to_end(&mut body).is_ok() {
+            if !body.is_empty() {
+                return Some(body);
+            }
+        }
+
+        None
+    }
+
+    /// Parses a string slice into a host address and a URI path.
+    #[must_use]
+    pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
+    	let uri = uri.trim();
+
+    	if let Some((scheme, rest)) = uri.split_once("://") {
+            // If "://" is present, we expect a URI like "http://httpbin.org".
+            if scheme.is_empty() || rest.is_empty() {
+    			return Err(ParseErrorKind::Uri)?;
+    		}
+
+    		match scheme {
+                "http" => match rest.split_once('/') {
+                    // Next "/" after the scheme, if present, starts the
+                    // path segment.
+    				Some((addr, path)) if path.is_empty() && addr.contains(':') => {
+                        // Example: http://httpbin.org:80/
+                        Ok((addr.to_string(), String::from("/")))
+                    },
+                    Some((addr, path)) if path.is_empty() => {
+                        // Example: http://httpbin.org/
+                        Ok((format!("{addr}:80"), String::from("/")))
+    				},
+    				Some((addr, path)) if addr.contains(':') => {
+                        // Example: http://httpbin.org:80/json
+                        Ok((addr.to_string(), format!("/{path}")))
+    				},
+                    Some((addr, path)) => {
+                        // Example: http://httpbin.org/json
+                        Ok((format!("{addr}:80"), format!("/{path}")))
+                    },
+    				None if rest.contains(':') => {
+                        // Example: http://httpbin.org:80
+                        Ok((rest.to_string(), String::from("/")))
+    				},
+                    None => {
+                        // Example: http://httpbin.org
+                        Ok((format!("{rest}:80"), String::from("/")))
+    				},
+    			},
+                "https" => Err(NetError::HttpsNotImplemented),
+                _ => Err(ParseErrorKind::Uri)?,
+    		}
+    	} else if let Some((addr, path)) = uri.split_once('/') {
+    		if addr.is_empty() {
+    			return Err(ParseErrorKind::Uri)?;
+    		}
+
+    		let addr = if addr.contains(':') {
+    			addr.to_string()
+    		} else {
+    			format!("{addr}:80")
+    		};
+
+    		let path = if path.is_empty() {
+    			String::from("/")
+    		} else {
+    			format!("/{path}")
+    		};
+
+    		Ok((addr, path))
+    	} else if uri.contains(':') {
+    		Ok((uri.to_string(), String::from("/")))
+    	} else {
+    		Ok((format!("{uri}:80"), String::from("/")))
+    	}
     }
 }

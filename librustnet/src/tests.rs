@@ -111,29 +111,29 @@ mod http {
 }
 
 #[cfg(test)]
-mod request {
+mod parser {
     use crate::{
-        Client, Method, HeaderName, HeadersMap, HeaderValue, Request, Version,
+        Method, HeaderName, HeadersMap, HeaderValue, Parser, Version,
     };
     use crate::consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT};
     use crate::header::names::HeaderKind;
     use std::collections::BTreeMap;
 
     #[test]
-    fn parse_request_line() {
+    fn request_line() {
         let uri = "/test";
-        let reqline1 = Request::parse_request_line("GET /test HTTP/1.1\r\n");
-        let reqline2 = Request::parse_request_line("HEAD /test HTTP/1.1\r\n");
-        let reqline3 = Request::parse_request_line("POST /test HTTP/1.1\r\n");
-        let reqline4 = Request::parse_request_line("PUT /test HTTP/1.1\r\n");
-        let reqline5 = Request::parse_request_line("PATCH /test HTTP/1.1\r\n");
-        let reqline6 = Request::parse_request_line("DELETE /test HTTP/1.1\r\n");
-        let reqline7 = Request::parse_request_line("TRACE /test HTTP/1.1\r\n");
-        let reqline8 = Request::parse_request_line("OPTIONS /test HTTP/1.1\r\n");
-        let reqline9 = Request::parse_request_line("CONNECT /test HTTP/1.1\r\n");
-        let bad1 = Request::parse_request_line("GET");
-        let bad2 = Request::parse_request_line("GET /test");
-        let bad3 = Request::parse_request_line("FOO bar baz");
+        let reqline1 = Parser::parse_request_line("GET /test HTTP/1.1\r\n");
+        let reqline2 = Parser::parse_request_line("HEAD /test HTTP/1.1\r\n");
+        let reqline3 = Parser::parse_request_line("POST /test HTTP/1.1\r\n");
+        let reqline4 = Parser::parse_request_line("PUT /test HTTP/1.1\r\n");
+        let reqline5 = Parser::parse_request_line("PATCH /test HTTP/1.1\r\n");
+        let reqline6 = Parser::parse_request_line("DELETE /test HTTP/1.1\r\n");
+        let reqline7 = Parser::parse_request_line("TRACE /test HTTP/1.1\r\n");
+        let reqline8 = Parser::parse_request_line("OPTIONS /test HTTP/1.1\r\n");
+        let reqline9 = Parser::parse_request_line("CONNECT /test HTTP/1.1\r\n");
+        let bad1 = Parser::parse_request_line("GET");
+        let bad2 = Parser::parse_request_line("GET /test");
+        let bad3 = Parser::parse_request_line("FOO bar baz");
 
         assert_eq!(reqline1, Ok((Method::Get, uri.to_string(), Version::OneDotOne)));
         assert_eq!(reqline2, Ok((Method::Head, uri.to_string(), Version::OneDotOne)));
@@ -174,14 +174,17 @@ mod request {
         ]);
 
         let mut output: HeadersMap = BTreeMap::new();
+
         for line in test.split('\n') {
             let trim = line.trim();
             if trim.is_empty() {
                 break;
             }
-            let (name, value) = Request::parse_header(trim).unwrap();
+
+            let (name, value) = Parser::parse_header(trim).unwrap();
             output.insert(name, value);
         }
+
         assert_eq!(output.len(), expected.len());
         assert!(output
             .iter()
@@ -197,13 +200,13 @@ mod request {
         macro_rules! test_uri_parser {
             ( $(SHOULD_ERROR: $uri:literal;)+ ) => {{
                 $(
-                    let parse_result = Client::parse_uri($uri);
+                    let parse_result = Parser::parse_uri($uri);
                     assert!(parse_result.is_err());
                 )+
             }};
             ( $($uri:literal: $addr:literal, $path:literal;)+ ) => {{
                 $(
-                    let (test_addr, test_path) = Client::parse_uri($uri).unwrap();
+                    let (test_addr, test_path) = Parser::parse_uri($uri).unwrap();
                     assert_eq!(test_addr, $addr);
                     assert_eq!(test_path, $path);
                 )+

@@ -14,7 +14,7 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::result::Result as StdResult;
 
 #[cfg(test)]
@@ -35,10 +35,10 @@ pub mod util;
 pub use client::Client;
 pub use connection::{Connection, NetReader, NetWriter};
 pub use errors::{NetError, ParseErrorKind};
-pub use header::{HeaderName, HeaderValue};
+pub use header::{Header, HeaderName, HeaderValue};
 pub use http::{Method, Status, Version};
-pub use request::{Request, RequestBuilder};
-pub use response::Response;
+pub use request::{Request, RequestBuilder, RequestLine};
+pub use response::{Response, ResponseBuilder, StatusLine};
 pub use router::{Resolved, Route, Router, Target};
 pub use server::{Server, ServerConfig};
 pub use threadpool::{ThreadPool, Worker};
@@ -54,5 +54,5 @@ pub mod consts {
 }
 
 pub type RoutesMap = BTreeMap<Route, Target>;
-pub type HeadersMap = BTreeMap<HeaderName, HeaderValue>;
+pub type HeadersSet = BTreeSet<Header>;
 pub type NetResult<T> = StdResult<T, NetError>;
