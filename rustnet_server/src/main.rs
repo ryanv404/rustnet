@@ -19,6 +19,7 @@ fn main() -> io::Result<()> {
     s.delete("/about");
     s.trace("/about");
     s.options("/about");
+    s.connect("127.0.0.1:1234");
 
     // Start the server.
     let server = s.start()?;

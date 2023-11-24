@@ -98,22 +98,15 @@ impl FromStr for Status {
     type Err = NetError;
 
     fn from_str(code: &str) -> NetResult<Self> {
-        u16::from_str(code).map_or_else(
-            |_| Err(ParseErrorKind::Status.into()),
-            Self::try_from
-        )
+        u16::from_str(code)
+            .map(|num| Self::from(num))
+            .map_err(|_| ParseErrorKind::Status.into())
     }
 }
 
-impl TryFrom<u16> for Status {
-    type Error = NetError;
-
-    fn try_from(code: u16) -> NetResult<Self> {
-        if (100..=600).contains(&code) {
-            Ok(Self(code))
-        } else {
-            Err(ParseErrorKind::Status.into())
-        }
+impl From<u16> for Status {
+    fn from(code: u16) -> Self {
+        Self(code)
     }
 }
 

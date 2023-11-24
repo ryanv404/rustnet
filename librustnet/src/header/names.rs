@@ -6,7 +6,7 @@ use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
 /// Header field name.
 #[derive(Clone, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct HeaderName {
-    pub inner: HdrRepr,
+    pub inner: HeaderKind,
 }
 
 impl Display for HeaderName {
@@ -21,9 +21,9 @@ impl Debug for HeaderName {
 	}
 }
 
-impl From<StdHeader> for HeaderName {
-    fn from(std: StdHeader) -> Self {
-        let inner = HdrRepr::Std(std);
+impl From<StandardHeader> for HeaderName {
+    fn from(std: StandardHeader) -> Self {
+        let inner = HeaderKind::Standard(std);
         Self { inner }
     }
 }
@@ -38,15 +38,15 @@ impl TryFrom<&[u8]> for HeaderName {
     type Error = NetError;
 
     fn try_from(b: &[u8]) -> NetResult<Self> {
-        let inner = HdrRepr::try_from(b)?;
+        let inner = HeaderKind::try_from(b)?;
         Ok(Self { inner })
     }
 }
 
 impl HeaderName {
-    /// Creates a new `HeaderName` from the given `HdrRepr`.
+    /// Creates a new `HeaderName` from the given `HeaderKind`.
     #[must_use]
-    pub const fn new(inner: HdrRepr) -> Self {
+    pub const fn new(inner: HeaderKind) -> Self {
         Self { inner }
     }
 
@@ -89,26 +89,26 @@ impl HeaderName {
 
 /// Header name representation.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum HdrRepr {
-    Std(StdHeader),
+pub enum HeaderKind {
+    Standard(StandardHeader),
     Custom(Vec<u8>),
 }
 
-impl From<&str> for HdrRepr {
+impl From<&str> for HeaderKind {
     fn from(s: &str) -> Self {
-        StdHeader::from_bytes(s.as_bytes()).map_or_else(
+        StandardHeader::from_bytes(s.as_bytes()).map_or_else(
             || Self::Custom(Vec::from(s)),
-            |header| Self::Std(header)
+            |header| Self::Standard(header)
         )
     }
 }
 
-impl TryFrom<&[u8]> for HdrRepr {
+impl TryFrom<&[u8]> for HeaderKind {
     type Error = NetError;
 
     fn try_from(b: &[u8]) -> NetResult<Self> {
-        match StdHeader::from_bytes(b) {
-            Some(std) => Ok(Self::Std(std)),
+        match StandardHeader::from_bytes(b) {
+            Some(std) => Ok(Self::Standard(std)),
             None if str::from_utf8(b).is_ok() => {
                 Ok(Self::Custom(b.to_ascii_lowercase()))
             },
@@ -117,12 +117,12 @@ impl TryFrom<&[u8]> for HdrRepr {
     }
 }
 
-impl HdrRepr {
+impl HeaderKind {
     /// Returns the header field name as a bytes slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            Self::Std(std) => std.as_bytes(),
+            Self::Standard(std) => std.as_bytes(),
             Self::Custom(ref buf) => buf.as_slice(),
         }
     }
@@ -132,7 +132,7 @@ impl HdrRepr {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Std(std) => std.as_bytes().is_empty(),
+            Self::Standard(std) => std.as_bytes().is_empty(),
             Self::Custom(ref buf) => buf.is_empty(),
         }
     }
@@ -142,29 +142,29 @@ macro_rules! impl_header_names {
     ($( $bytes:literal => $constant:ident, $variant:ident; )+) => {
         // Standard header names.
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
-        pub enum StdHeader {
+        pub enum StandardHeader {
             $( $variant, )+
         }
 
-        pub mod header_names {
-            use super::{HdrRepr, HeaderName, StdHeader};
+        pub mod header_consts {
+            use super::{HeaderKind, HeaderName, StandardHeader};
 
             $(
                 // Constants representing all of the standard header field names.
                 pub const $constant: HeaderName = HeaderName {
-                    inner: HdrRepr::Std(StdHeader::$variant)
+                    inner: HeaderKind::Standard(StandardHeader::$variant)
                 };
             )+
         }
 
-        impl Display for StdHeader {
+        impl Display for StandardHeader {
             fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
                 write!(f, "{}", self.as_str())
             }
         }
 
-        impl StdHeader {
-            /// Parses a bytes slice into a `StdHeader` if possible.
+        impl StandardHeader {
+            /// Parses a bytes slice into a `StandardHeader` if possible.
             #[must_use]
             pub fn from_bytes(input: &[u8]) -> Option<Self> {
                 let lowercase = trim_whitespace_bytes(input)
@@ -176,7 +176,7 @@ macro_rules! impl_header_names {
                 }
             }
 
-            /// Returns a bytes slice representation of the `StdHeader`.
+            /// Returns a bytes slice representation of the `StandardHeader`.
             #[must_use]
             pub const fn as_bytes(&self) -> &'static [u8] {
                 match *self {
@@ -184,7 +184,7 @@ macro_rules! impl_header_names {
                 }
             }
 
-            /// Returns a string slice representation of the `StdHeader`.
+            /// Returns a string slice representation of the `StandardHeader`.
             #[must_use]
             pub fn as_str(&self) -> &'static str {
                 // NOTE: The standard headers below are all UTF-8 compatible.
@@ -193,8 +193,8 @@ macro_rules! impl_header_names {
         }
 
         #[cfg(test)]
-        pub const TEST_HEADERS: &'static [(StdHeader, &'static [u8])] = &[
-            $( (StdHeader::$variant, $bytes), )+
+        pub const TEST_HEADERS: &'static [(StandardHeader, &'static [u8])] = &[
+            $( (StandardHeader::$variant, $bytes), )+
         ];
     };
 }

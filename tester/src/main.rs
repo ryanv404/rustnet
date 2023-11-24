@@ -66,7 +66,7 @@ fn main() {
 }
 
 macro_rules! test_client {
-    ($label:ident: $uri_path:literal, $tracker:expr) => {
+    ($label:ident: $method:literal, $uri_path:literal, $tracker:expr) => {
         fn $label(tracker: &mut TestResults) {
             tracker.client_total += 1;
 
@@ -90,18 +90,24 @@ macro_rules! test_client {
             let uri = concat!("54.86.118.241:80", $uri_path);
 
             let output = Command::new(&client_bin)
-                .args(["--client-tests", "--", uri])
+                .args([
+                    "--method",
+                    $method,
+                    "--client-tests",
+                    "--",
+                    uri
+                ])
                 .output()
                 .unwrap();
 
             match get_result(&output.stdout, &exp_file) {
                 Some((ref out, ref exp)) => {
-                    println!("[{RED}✗{CLR}] GET {}", $uri_path);
+                    println!("[{RED}✗{CLR}] {} {}", $method, $uri_path);
                     println!("OUTPUT:\n{out}\n\nEXPECTED:\n{exp}\n");
                 },
                 None => {
                     tracker.client_passed += 1;
-                    println!("[{GRN}✔{CLR}] GET {}", $uri_path);
+                    println!("[{GRN}✔{CLR}] {} {}", $method, $uri_path);
                 },
             }
         }
@@ -114,8 +120,6 @@ macro_rules! test_server {
     ($label:ident: $method:literal, $uri_path:literal, $tracker:expr) => {
         fn $label(tracker: &mut TestResults) {
             tracker.server_total += 1;
-
-            let uri = concat!("127.0.0.1:7878", $uri_path);
 
             let exp_file: PathBuf = [
                 CRATE_ROOT,
@@ -133,10 +137,32 @@ macro_rules! test_server {
                 CLIENT_FILE
             ].iter().collect();
 
-            let output = Command::new(&client_bin)
-                .args(["--server-tests", "--method", $method, "--", uri])
-                .output()
-                .unwrap();
+            let output = if $method == "CONNECT" {
+                Command::new(&client_bin)
+                    .args([
+                        "--server-tests",
+                        "--method",
+                        $method,
+                        "--path",
+                        $uri_path,
+                        "--",
+                        "127.0.0.1:7878"
+                    ])
+                    .output()
+                    .unwrap()
+            } else {
+                let uri = concat!("127.0.0.1:7878", $uri_path);
+                Command::new(&client_bin)
+                    .args([
+                        "--server-tests",
+                        "--method",
+                        $method,
+                        "--",
+                        uri
+                    ])
+                    .output()
+                    .unwrap()
+            };
 
             match get_result(&output.stdout, &exp_file) {
                 Some((ref out, ref exp)) => {
@@ -207,15 +233,20 @@ fn print_final_results(results: &TestResults) {
 fn run_client_tests(results: &mut TestResults) {
     if build_client().is_some() {
         println!("\n~~~~~~~~~~~~\nClient Tests\n~~~~~~~~~~~~");
-        test_client!(get_json: "/json", results);
-        test_client!(get_xml: "/xml", results);
-        test_client!(get_png: "/image/png", results);
-        test_client!(get_svg: "/image/svg", results);
-        test_client!(get_webp: "/image/webp", results);
-        test_client!(get_text: "/robots.txt", results);
-        test_client!(get_utf8: "/encoding/utf8", results);
-        test_client!(get_html: "/html", results);
-        test_client!(get_deny: "/deny", results);
+        test_client!(get_json: "GET", "/json", results);
+        test_client!(get_xml: "GET", "/xml", results);
+        test_client!(get_png: "GET", "/image/png", results);
+        test_client!(get_svg: "GET", "/image/svg", results);
+        test_client!(get_webp: "GET", "/image/webp", results);
+        test_client!(get_text: "GET", "/robots.txt", results);
+        test_client!(get_utf8: "GET", "/encoding/utf8", results);
+        test_client!(get_html: "GET", "/html", results);
+        test_client!(get_deny: "GET", "/deny", results);
+        test_client!(get_status_202: "GET", "/status/202", results);
+        test_client!(post_status_201: "POST", "/status/201", results);
+        test_client!(put_status_203: "PUT", "/status/203", results);
+        test_client!(patch_status_201: "PATCH", "/status/201", results);
+        test_client!(delete_status_200: "DELETE", "/status/200", results);
         println!();
     }
 }
@@ -236,6 +267,7 @@ fn run_server_tests(results: &mut TestResults) {
         test_server!(delete_about: "DELETE", "/about", results);
         test_server!(trace_about: "TRACE", "/about", results);
         test_server!(options_about: "OPTIONS", "/about", results);
+        test_server!(connect_test: "CONNECT", "127.0.0.1:1234", results);
         println!();
         server.kill().unwrap();
     }

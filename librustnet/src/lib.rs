@@ -37,7 +37,7 @@ pub use connection::{Connection, NetReader, NetWriter};
 pub use errors::{NetError, ParseErrorKind};
 pub use header::{HeaderName, HeaderValue};
 pub use http::{Method, Status, Version};
-pub use request::Request;
+pub use request::{Request, RequestBuilder};
 pub use response::Response;
 pub use router::{Resolved, Route, Router, Target};
 pub use server::{Server, ServerConfig};
@@ -45,7 +45,7 @@ pub use threadpool::{ThreadPool, Worker};
 pub use util::{trim_whitespace_bytes, get_datetime};
 
 pub mod consts {
-    pub use crate::header::header_names::*;
+    pub use crate::header::header_consts::*;
     pub const MAX_HEADERS: u16 = 1024;
     pub const NUM_WORKER_THREADS: usize = 4;
     pub const READER_BUFSIZE: usize = 1024;

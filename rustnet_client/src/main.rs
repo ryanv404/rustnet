@@ -9,7 +9,8 @@ const CLR: &str = "\x1b[0m";
 
 #[rustfmt::skip]
 fn main() -> io::Result<()> {
-    let mut method = Method::Get;
+    let mut path_arg = None;
+    let mut method_arg = None;
     let mut testing_client = false;
     let mut testing_server = false;
     let mut args = env::args().skip(1);
@@ -36,6 +37,16 @@ fn main() -> io::Result<()> {
                     show_help();
                     return Ok(());
                 },
+                // Uri path.
+                "--path" => {
+                    if let Some(uri_path) = args.next() {
+                        path_arg = Some(uri_path);
+                    } else {
+                        // Missing custom method argument.
+                        eprintln!("{RED}Missing required argument to `--path` option.{CLR}\n");
+                        return Ok(());
+                    }
+                },
                 // Custom method.
                 "--method" => {
                     let maybe_method = args
@@ -47,7 +58,7 @@ fn main() -> io::Result<()> {
                         });
 
                     if let Some(new_method) = maybe_method {
-                        method = new_method;
+                        method_arg = Some(new_method);
                     } else {
                         // Missing custom method argument.
                         eprintln!("{RED}Missing required argument to `--missing` option.{CLR}\n");
@@ -77,10 +88,10 @@ fn main() -> io::Result<()> {
     };
 
     // Parse the URI argument.
-    let (addr, ref path, body) = match Client::parse_uri(&uri) {
+    let (ref addr, ref path, ref body) = match Client::parse_uri(&uri) {
         Ok((addr, path)) => {
             let body = args.next().unwrap_or_default();
-            (addr, path, body)
+            (addr, path_arg.unwrap_or(path), body)
         },
         Err(_) => {
             eprintln!("{RED}Unable to parse the URI argument.{CLR}\n");
@@ -90,9 +101,9 @@ fn main() -> io::Result<()> {
 
     // Create an HTTP client and send a request.
     let mut client = Client::http()
-        .method(method)
-        .addr(&addr)
-        .path(&path)
+        .method(method_arg.unwrap_or(Method::Get))
+        .addr(addr)
+        .path(path)
         .body(body.as_bytes())
         .send()?;
 
@@ -198,7 +209,8 @@ fn show_help() {
         {GRN}Options:{CLR}\n    \
             -h, --help       Displays this help message.\n    \
             --client-tests   Use output style expected by client tests.\n    \
-            --method METHOD  Use METHOD as the request method (default: GET).\n    \
+            --method METHOD  Use METHOD as the request method (default: \"GET\").\n    \
+            --path PATH      Use PATH as the URI path (default: \"/\").\n    \
             --server-tests   Use output style expected by server tests.\n\
     ");
 }

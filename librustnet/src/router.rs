@@ -50,37 +50,60 @@ impl Router {
     }
 
     #[must_use]
-    pub fn resolve(&self, req: &Request) -> Resolved {
-        let method = req.method();
-
-        match self.get_target(&req.route()) {
-            Some(target) => {
-                req.log_status(200);
-                Resolved::new(Status(200), method, target)
+    pub fn resolve(&self, req: &Request, do_log: bool) -> Resolved {
+        let resolved = match (self.get_target(&req.route()), req.method()) {
+            (Some(target), Method::Get) => {
+                Resolved::new(Status(200), Method::Get, target)
             },
-            None if method == Method::Head => {
+            (Some(target), Method::Head) => {
+                Resolved::new(Status(200), Method::Head, target)
+            },
+            (Some(target), Method::Post) => {
+                Resolved::new(Status(200), Method::Post, target)
+            },
+            (Some(target), Method::Put) => {
+                Resolved::new(Status(200), Method::Put, target)
+            },
+            (Some(target), Method::Patch) => {
+                Resolved::new(Status(200), Method::Patch, target)
+            },
+            (Some(target), Method::Delete) => {
+                Resolved::new(Status(200), Method::Delete, target)
+            },
+            (Some(target), Method::Trace) => {
+                Resolved::new(Status(200), Method::Trace, target)
+            },
+            (Some(target), Method::Options) => {
+                Resolved::new(Status(200), Method::Options, target)
+            },
+            (Some(target), Method::Connect) => {
+                Resolved::new(Status(200), Method::Connect, target)
+            },
+            (None, Method::Head) => {
                 // Handle a HEAD request for a route that does not exist
                 // but does exist as for a GET request.
                 let route = Route::new(Method::Get, req.path());
-                
                 self.get_target(&route).map_or_else(
                     || {
                         // No route exists for a GET request either.
-                        req.log_status(404);
                         Resolved::new(Status(404), Method::Head, &self.get_error_page())
                     },
                     |target| {
                         // GET route exists so send it as a HEAD response.
-                        req.log_status(200);
                         Resolved::new(Status(200), Method::Head, target)
                     })
             },
-            None => {
+            (None, method) => {
                 // Handle routes that do not exist.
-                req.log_status(404);
                 Resolved::new(Status(404), method, &self.get_error_page())
             },
+        };
+
+        if do_log {
+            req.log_status(resolved.status.code());
         }
+
+        resolved
     }
 }
 

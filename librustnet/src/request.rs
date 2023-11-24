@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{
-    BufRead, Error as IoError, ErrorKind as IoErrorKind, Result as IoResult,
-    Write,
+    BufRead, ErrorKind as IoErrorKind, Result as IoResult, Write,
 };
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::str;
@@ -18,6 +17,7 @@ use crate::{
 };
 
 /// An HTTP request builder object.
+#[derive(Clone, Debug)]
 pub struct RequestBuilder<A: ToSocketAddrs> {
     pub addr: Option<A>,
     pub ip: Option<String>,
@@ -118,7 +118,7 @@ impl<A: ToSocketAddrs> RequestBuilder<A> {
                 let stream = TcpStream::connect(addr)?;
                 Connection::try_from(stream).ok()
             } else {
-                return Err(IoError::from(IoErrorKind::InvalidInput));
+                None
             }
         };
 
