@@ -242,7 +242,7 @@ fn run_client_tests(results: &mut TestResults) {
         test_client!(get_utf8: "GET", "/encoding/utf8", results);
         test_client!(get_html: "GET", "/html", results);
         test_client!(get_deny: "GET", "/deny", results);
-        test_client!(get_status_202: "GET", "/status/202", results);
+        test_client!(get_status_418: "GET", "/status/418", results);
         test_client!(post_status_201: "POST", "/status/201", results);
         test_client!(put_status_203: "PUT", "/status/203", results);
         test_client!(patch_status_201: "PATCH", "/status/201", results);

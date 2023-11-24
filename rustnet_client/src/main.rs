@@ -1,6 +1,6 @@
 use std::{env, io};
 
-use librustnet::{Client, Method, Parser, Response, consts::DATE};
+use librustnet::{Client, Method, Response, consts::DATE};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -88,7 +88,7 @@ fn main() -> io::Result<()> {
     };
 
     // Parse the URI argument.
-    let (ref addr, ref path, ref body) = match Parser::parse_uri(&uri) {
+    let (ref addr, ref path, ref body) = match Client::parse_uri(&uri) {
         Ok((addr, path)) => {
             let body = args.next().unwrap_or_default();
             (addr, path_arg.unwrap_or(path), body)
@@ -100,7 +100,7 @@ fn main() -> io::Result<()> {
     };
 
     // Create an HTTP client and send a request.
-    let mut client = Client::http()
+    let mut client = Client::new()
         .method(method_arg.unwrap_or(Method::Get))
         .addr(addr)
         .path(path)
@@ -111,16 +111,9 @@ fn main() -> io::Result<()> {
     let mut res = client.recv()?;
 
     // Ignore Date headers in tests.
-    if testing_client {
-        client.req.headers.as_mut().map(
-            |headers| headers.remove(&DATE)
-        );
-    }
-
-    if testing_server {
-        res.headers.as_mut().map(
-            |headers| headers.remove(&DATE)
-        );
+    if testing_client || testing_server {
+        client.req.headers.remove(&DATE);
+        res.headers.remove(&DATE);
     }
 
     if testing_client {

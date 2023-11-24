@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::Path;
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
 
 impl Display for HeaderValue {
@@ -38,7 +38,13 @@ impl From<&[u8]> for HeaderValue {
 impl From<usize> for HeaderValue {
     fn from(num: usize) -> Self {
         let num = num.to_string();
-        Self(Vec::from(&*num))
+        Self(Vec::from(num.as_str()))
+    }
+}
+
+impl From<Vec<u8>> for HeaderValue {
+    fn from(vec: Vec<u8>) -> Self {
+        Self(vec)
     }
 }
 

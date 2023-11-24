@@ -187,9 +187,10 @@ impl Server {
 
     /// Handles a request from a remote connection.
     pub fn respond(conn: Connection, router: &Arc<Router>) -> NetResult<()> {
-        let req = Request::recv(conn)?;
+        let cloned_conn = conn.try_clone()?;
+        let req = Request::try_from(cloned_conn)?;
         let resolved_route = router.resolve(&req, true);
-        let mut res = Response::from_request(req, &resolved_route)?;
+        let mut res = Response::from_request(req, &resolved_route, conn)?;
         res.send()?;
         Ok(())
     }

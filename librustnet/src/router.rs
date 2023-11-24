@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::{Method, Request, RoutesMap, Status};
+use crate::{Method, Request, Status};
 
 /// Represents an endpoint defined by an HTTP method and a URI path.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Route {
     pub method: Method,
     pub uri_path: String,
@@ -18,10 +19,8 @@ impl Route {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Router {
-    pub routes: RoutesMap,
-}
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Router(pub BTreeMap<Route, Target>);
 
 impl Router {
     #[must_use]
@@ -30,17 +29,17 @@ impl Router {
     }
 
     pub fn mount(&mut self, route: Route, target: Target) {
-        self.routes.insert(route, target);
+        self.0.insert(route, target);
     }
 
     #[must_use]
     pub fn get_target(&self, route: &Route) -> Option<&Target> {
-        self.routes.get(route)
+        self.0.get(route)
     }
 
     #[must_use]
     pub fn route_exists(&self, route: &Route) -> bool {
-        self.routes.contains_key(route)
+        self.0.contains_key(route)
     }
 
     #[must_use]
@@ -51,7 +50,7 @@ impl Router {
 
     #[must_use]
     pub fn resolve(&self, req: &Request, do_log: bool) -> Resolved {
-        let resolved = match (self.get_target(&req.route()), req.method()) {
+        let resolved = match (self.get_target(&req.route()), *req.method()) {
             (Some(target), Method::Get) => {
                 Resolved::new(Status(200), Method::Get, target)
             },
@@ -100,14 +99,14 @@ impl Router {
         };
 
         if do_log {
-            req.log_status(resolved.status.code());
+            // req.log_status(resolved.status.code());
         }
 
         resolved
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Empty,
     File(PathBuf),
@@ -150,7 +149,7 @@ impl Target {
 
 // TODO: Just construct a `Response` directly instead of using a `Resolved` object.
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Resolved {
     pub status: Status,
     pub method: Method,

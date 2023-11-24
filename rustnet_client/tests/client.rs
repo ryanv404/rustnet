@@ -1,4 +1,4 @@
-use librustnet::{Client, Status, Version, HeaderValue};
+use librustnet::{Client, HeaderValue, Status, Version};
 use librustnet::consts::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION,
     CONTENT_LENGTH, CONTENT_TYPE, SERVER,
@@ -10,7 +10,7 @@ macro_rules! test_by_status_code {
         #[test]
         fn $label() {
             $(
-                let mut client = Client::http()
+                let mut client = Client::new()
                     .addr("httpbin.org:80")
                     .path(concat!("/status/", $code))
                     .send()
@@ -18,11 +18,11 @@ macro_rules! test_by_status_code {
 
                 let res = client.recv().unwrap();
 
-                assert_eq!(res.version, Version::OneDotOne);
-                assert_eq!(res.status, Status(502));
-                assert_eq!(res.header(&CONNECTION), Some(&HeaderValue::from("keep-alive")));
-                assert_eq!(res.header(&CONTENT_LENGTH), Some(&HeaderValue::from("122")));
-                assert_eq!(res.header(&CONTENT_TYPE), Some(&HeaderValue::from("text/html")));
+                assert_eq!(res.status_line.version, Version::OneDotOne);
+                assert_eq!(res.status_line.status, Status(502));
+                assert_eq!(res.get_header(&CONNECTION), Some(&HeaderValue::from("keep-alive")));
+                assert_eq!(res.get_header(&CONTENT_LENGTH), Some(&HeaderValue::from("122")));
+                assert_eq!(res.get_header(&CONTENT_TYPE), Some(&HeaderValue::from("text/html")));
                 assert!(res.body().is_some());
             )+
         }
@@ -31,7 +31,7 @@ macro_rules! test_by_status_code {
         #[test]
         fn $label() {
             $(
-                let mut client = Client::http()
+                let mut client = Client::new()
                     .addr("httpbin.org:80")
                     .path(concat!("/status/", $code))
                     .send()
@@ -39,16 +39,16 @@ macro_rules! test_by_status_code {
 
                 let res = client.recv().unwrap();
 
-                assert_eq!(res.version, Version::OneDotOne);
-                assert_eq!(res.status, Status($code));
-                assert_eq!(res.header(&ACCESS_CONTROL_ALLOW_CREDENTIALS), Some(&HeaderValue::from("true")));
-                assert_eq!(res.header(&ACCESS_CONTROL_ALLOW_ORIGIN), Some(&HeaderValue::from("*")));
-                assert_eq!(res.header(&SERVER), Some(&HeaderValue::from("gunicorn/19.9.0")));
-                assert_eq!(res.header(&CONNECTION), Some(&HeaderValue::from("keep-alive")));
+                assert_eq!(res.status_line.version, Version::OneDotOne);
+                assert_eq!(res.status_line.status, Status($code));
+                assert_eq!(res.get_header(&ACCESS_CONTROL_ALLOW_CREDENTIALS), Some(&HeaderValue::from("true")));
+                assert_eq!(res.get_header(&ACCESS_CONTROL_ALLOW_ORIGIN), Some(&HeaderValue::from("*")));
+                assert_eq!(res.get_header(&SERVER), Some(&HeaderValue::from("gunicorn/19.9.0")));
+                assert_eq!(res.get_header(&CONNECTION), Some(&HeaderValue::from("keep-alive")));
                 if !matches!($code, 100..=200) {
-                    assert_eq!(res.header(&CONTENT_LENGTH), Some(&HeaderValue::from("0")));
+                    assert_eq!(res.get_header(&CONTENT_LENGTH), Some(&HeaderValue::from("0")));
                 }
-                assert_eq!(res.header(&CONTENT_TYPE), Some(&HeaderValue::from("text/html; charset=utf-8")));
+                assert_eq!(res.get_header(&CONTENT_TYPE), Some(&HeaderValue::from("text/html; charset=utf-8")));
                 assert!(res.body().is_none());
             )+
         }

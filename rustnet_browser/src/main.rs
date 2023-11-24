@@ -1,7 +1,10 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{self, BufRead, BufWriter, StdinLock, StdoutLock, Write};
+use std::io::{
+    self, BufRead, BufWriter, Result as IoResult, StdinLock, StdoutLock,
+    Write
+};
 
-use librustnet::{Client, Parser, Response};
+use librustnet::{Client, Response};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -17,7 +20,10 @@ fn main() {
 
     browser.clear_screen();
     browser.print_intro_message();
-    browser.run();
+    
+    if let Err(e) = browser.run() {
+        eprintln!("Error: {e}");
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -68,7 +74,7 @@ impl<'a> Browser<'a> {
         }
     }
 
-    fn run(&mut self) {
+    fn run(&mut self) -> IoResult<()> {
         self.is_running = true;
         let mut line = String::new();
 
@@ -89,8 +95,12 @@ impl<'a> Browser<'a> {
                 "status" => self.set_output_style(OutputStyle::Status),
                 "verbose" => self.set_output_style(OutputStyle::Verbose),
                 uri if self.output_style == OutputStyle::Request => {
-                    if let Ok((addr, path)) = Parser::parse_uri(uri) {
-                        self.client = Client::http().addr(addr).path(&path).build().ok();
+                    if let Ok((addr, path)) = Client::parse_uri(uri) {
+                        self.client = Client::new()
+                            .addr(addr)
+                            .path(&path)
+                            .build()
+                            .ok();
                     }
 
                     self.print_request();
@@ -112,6 +122,8 @@ impl<'a> Browser<'a> {
                 }
             }
         }
+
+        Ok(())
     }
 
     #[allow(unused)]
@@ -245,7 +257,7 @@ impl<'a> Browser<'a> {
 
     fn set_path(&mut self, path: &str) {
         if let Some(client) = self.client.as_mut() {
-            client.req.path = path.to_string();
+            client.req.request_line.path = path.to_string();
         }
     }
 

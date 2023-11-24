@@ -14,9 +14,6 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::result::Result as StdResult;
-
 #[cfg(test)]
 mod tests;
 
@@ -32,12 +29,12 @@ pub mod server;
 pub mod threadpool;
 pub mod util;
 
-pub use client::Client;
+pub use client::{Client, ClientBuilder};
 pub use connection::{Connection, NetReader, NetWriter};
-pub use errors::{NetError, ParseErrorKind};
-pub use header::{Header, HeaderName, HeaderValue};
+pub use errors::{NetError, NetResult, ParseErrorKind};
+pub use header::{Header, HeaderKind, HeaderName, Headers, HeaderValue};
 pub use http::{Method, Status, Version};
-pub use request::{Request, RequestBuilder, RequestLine};
+pub use request::{Request, RequestLine};
 pub use response::{Response, ResponseBuilder, StatusLine};
 pub use router::{Resolved, Route, Router, Target};
 pub use server::{Server, ServerConfig};
@@ -50,9 +47,4 @@ pub mod consts {
     pub const NUM_WORKER_THREADS: usize = 4;
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
-    pub const DEFAULT_NAME: &str = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
 }
-
-pub type RoutesMap = BTreeMap<Route, Target>;
-pub type HeadersSet = BTreeSet<Header>;
-pub type NetResult<T> = StdResult<T, NetError>;

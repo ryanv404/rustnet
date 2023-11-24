@@ -1,7 +1,8 @@
-use std::cmp::Ordering;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::collections::BTreeMap;
+use std::net::IpAddr;
 
 use crate::{NetResult, ParseErrorKind};
+use crate::consts::{ACCEPT, HOST, SERVER, USER_AGENT};
 
 pub mod names;
 pub mod values;
@@ -9,62 +10,12 @@ pub mod values;
 pub use names::{header_consts, HeaderKind, HeaderName};
 pub use values::HeaderValue;
 
-/// An object that represents a header field.
-#[derive(Debug)]
-pub struct Header {
-    pub name: HeaderName,
-    pub value: HeaderValue,
-}
-
-impl PartialEq<Self> for Header {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl PartialEq<HeaderName> for Header {
-    fn eq(&self, other: &HeaderName) -> bool {
-        self.name == *other
-    }
-}
-
-impl Eq for Header {}
-
-impl PartialOrd<Header> for Header {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.name.partial_cmp(&other.name))
-    }
-}
-
-impl PartialOrd<HeaderName> for Header {
-    fn partial_cmp(&self, other: &HeaderName) -> Option<Ordering> {
-        Some(self.name.partial_cmp(&other))
-    }
-}
-
-impl Ord for Header {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.name.cmp(&other.name)
-    }
-}
-
-impl Display for Header {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}: {}", &self.name, &self.value)
-    }
-}
+pub struct Header;
 
 impl Header {
-    /// Returns a new `Header` instance.
-    pub fn new(name: HeaderName, value: HeaderValue) -> Self {
-        Self { name, value }
-    }
-
-    /// Parses a string slice into a `Header` object.
-    pub fn parse(line: &str) -> NetResult<Header> {
-        let mut tokens = line
-            .splitn(2, ':')
-            .map(str::trim);
+    /// Parses a string slice into a `HeaderName` and a `HeaderValue`.
+    pub fn parse(line: &str) -> NetResult<(HeaderName, HeaderValue)> {
+        let mut tokens = line.splitn(2, ':').map(str::trim);
 
         let (Some(name), Some(value)) = (tokens.next(), tokens.next()) else {
             return Err(ParseErrorKind::Header)?;
@@ -73,7 +24,56 @@ impl Header {
         let hdr_name = HeaderName::from(name);
         let hdr_value = HeaderValue::from(value);
 
-        Ok(Self::new(hdr_name, hdr_value))
+        Ok((hdr_name, hdr_value))
     }
 }
 
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
+
+impl Headers {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self, name: &HeaderName) -> Option<&HeaderValue> {
+        self.0.get(name)
+    }
+
+    pub fn contains(&self, name: &HeaderName) -> bool {
+        self.0.contains_key(name)
+    }
+
+    pub fn insert(&mut self, name: HeaderName, value: HeaderValue) {
+        self.0.entry(name)
+            .and_modify(|v| *v = value.clone())
+            .or_insert(value);
+    }
+
+    pub fn remove(&mut self, name: &HeaderName) {
+        self.0.remove(name);
+    }
+
+    /// Inserts a Host header with the value "ip:port".
+    pub fn insert_host(&mut self, ip: IpAddr, port: u16) {
+        let host = format!("{ip}:{port}");
+        self.insert(HOST, host.into());
+    }
+
+    /// Inserts the default User-Agent header.
+    pub fn insert_user_agent(&mut self) {
+        let agent = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
+        self.insert(USER_AGENT, agent.into());
+    }
+
+    /// Inserts an Accept header with a value of "*/*".
+    pub fn insert_accept_all(&mut self) {
+        self.insert(ACCEPT, "*/*".into());
+    }
+
+    /// Inserts the default Server header.
+    pub fn insert_server(&mut self) {
+        let server = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
+        self.insert(SERVER, server.into());
+    }
+}
