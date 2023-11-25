@@ -99,7 +99,7 @@ impl FromStr for Status {
 
     fn from_str(code: &str) -> NetResult<Self> {
         u16::from_str(code)
-            .map(|num| Self::from(num))
+            .map(Self::from)
             .map_err(|_| ParseErrorKind::Status.into())
     }
 }
@@ -114,16 +114,18 @@ impl Status {
     /// Returns the reason phrase for a status.
     #[must_use]
     #[rustfmt::skip]
+    #[allow(clippy::too_many_lines)]
     #[allow(clippy::match_same_arms)]
+    #[allow(clippy::match_overlapping_arm)]
     pub const fn msg(&self) -> &'static str {
         match self.0 {
-            // 1xx (Informational) Statuses.
+            // 1xx informational status.
             100 => "Continue",
             101 => "Switching Protocols",
             102 => "Processing",
             103 => "Early Hints",
 
-            // 2xx (Successful) Statuses.
+            // 2xx successful status.
             200 => "OK",
             201 => "Created",
             202 => "Accepted",
@@ -136,7 +138,7 @@ impl Status {
             218 => "This Is Fine",
             226 => "IM Used",
 
-            // 3xx (Redirect) Statuses.
+            // 3xx redirect status.
             300 => "Multiple Choices",
             301 => "Moved Permanently",
             302 => "Found",
@@ -147,7 +149,7 @@ impl Status {
             307 => "Temporary Redirect",
             308 => "Permanent Redirect",
 
-            // 4xx (Client Error) Statuses.
+            // 4xx client error status.
             400 => "Bad Request", // No or multiple Host headers, invalid request line.
             401 => "Unauthorized",
             402 => "Payment Required",
@@ -194,7 +196,7 @@ impl Status {
             498 => "Invalid Token",
             499 => "Token Required or Client Closed Request",
 
-            // 5xx (Server Error) Statuses.
+            // 5xx server error status.
             500 => "Internal Server Error",
             501 => "Not Implemented", // Unimplemented methods, etc.
             502 => "Bad Gateway",
@@ -220,6 +222,13 @@ impl Status {
             561 => "Unauthorized",
             598 => "Network Read Timeout Error",
             599 => "Network Connect Timeout Error",
+
+            // Fall back to status ranges if unmatched.
+            100..=199 => "Informational",
+            200..=299 => "Success",
+            300..=399 => "Redirect",
+            400..=499 => "Client Error",
+            500..=599 => "Server Error",
             _ => "",
         }
     }
@@ -262,8 +271,8 @@ impl FromStr for Version {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        // HTTP versions are case-sensitive.
-        // Zero is implied by a missing minor version number.
+        // HTTP versions are case-sensitive and aero is implied by a missing
+        // minor version number.
         match s {
             "HTTP/0.9" => Ok(Self::ZeroDotNine),
             "HTTP/1.0" => Ok(Self::OneDotZero),
@@ -310,7 +319,6 @@ impl Version {
     }
 
     /// Returns whether the protocol version is supported.
-    /// Currently only HTTP version 1.1 is supported.
     #[must_use]
     pub fn is_supported(&self) -> bool {
         *self == Self::OneDotOne

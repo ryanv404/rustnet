@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::env;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -6,17 +7,19 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+use librustnet::StatusLine;
+
 const CRATE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[cfg(windows)]
-const SERVER_FILE: &str = "rustnet_server.exe";
+const SERVER_FILE: &str = "server.exe";
 #[cfg(not(windows))]
-const SERVER_FILE: &str = "rustnet_server";
+const SERVER_FILE: &str = "server";
 
 #[cfg(windows)]
-const CLIENT_FILE: &str = "rustnet_client.exe";
+const CLIENT_FILE: &str = "client.exe";
 #[cfg(not(windows))]
-const CLIENT_FILE: &str = "rustnet_client";
+const CLIENT_FILE: &str = "client";
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -41,8 +44,10 @@ fn main() {
             match arg.as_str() {
                 "client" => {
                     remove_old_builds("client");
-                    run_client_tests(&mut results);
-                    print_final_results(&results);
+                    if build_client().is_some() {
+                        run_client_tests(&mut results);
+                        print_final_results(&results);
+                    }
                 },
                 "server" => {
                     remove_old_builds("server");
@@ -53,9 +58,11 @@ fn main() {
                 },
                 "all" => {
                     remove_old_builds("all");
-                    run_client_tests(&mut results);
-                    run_server_tests(&mut results);
-                    print_final_results(&results);
+                    if build_client().is_some() {
+                        run_client_tests(&mut results);
+                        run_server_tests(&mut results);
+                        print_final_results(&results);
+                    }
                 },
                 _ => {
                     println!("{RED}Unknown argument: `{arg}`{CLR}\n");
@@ -73,7 +80,7 @@ macro_rules! test_client {
             let exp_file: PathBuf = [
                 CRATE_ROOT,
                 "..",
-                "rustnet_client",
+                "client",
                 "test_data",
                 concat!(stringify!($label), ".txt")
             ].iter().collect();
@@ -124,7 +131,7 @@ macro_rules! test_server {
             let exp_file: PathBuf = [
                 CRATE_ROOT,
                 "..",
-                "rustnet_server",
+                "server",
                 "test_data",
                 concat!(stringify!($label), ".txt")
             ].iter().collect();
@@ -231,24 +238,22 @@ fn print_final_results(results: &TestResults) {
 }
 
 fn run_client_tests(results: &mut TestResults) {
-    if build_client().is_some() {
-        println!("\n~~~~~~~~~~~~\nClient Tests\n~~~~~~~~~~~~");
-        test_client!(get_json: "GET", "/json", results);
-        test_client!(get_xml: "GET", "/xml", results);
-        test_client!(get_png: "GET", "/image/png", results);
-        test_client!(get_svg: "GET", "/image/svg", results);
-        test_client!(get_webp: "GET", "/image/webp", results);
-        test_client!(get_text: "GET", "/robots.txt", results);
-        test_client!(get_utf8: "GET", "/encoding/utf8", results);
-        test_client!(get_html: "GET", "/html", results);
-        test_client!(get_deny: "GET", "/deny", results);
-        test_client!(get_status_418: "GET", "/status/418", results);
-        test_client!(post_status_201: "POST", "/status/201", results);
-        test_client!(put_status_203: "PUT", "/status/203", results);
-        test_client!(patch_status_201: "PATCH", "/status/201", results);
-        test_client!(delete_status_200: "DELETE", "/status/200", results);
-        println!();
-    }
+    println!("\n~~~~~~~~~~~~\nClient Tests\n~~~~~~~~~~~~");
+    test_client!(get_json: "GET", "/json", results);
+    test_client!(get_xml: "GET", "/xml", results);
+    test_client!(get_png: "GET", "/image/png", results);
+    test_client!(get_svg: "GET", "/image/svg", results);
+    test_client!(get_webp: "GET", "/image/webp", results);
+    test_client!(get_text: "GET", "/robots.txt", results);
+    test_client!(get_utf8: "GET", "/encoding/utf8", results);
+    test_client!(get_html: "GET", "/html", results);
+    test_client!(get_deny: "GET", "/deny", results);
+    test_client!(get_status_418: "GET", "/status/418", results);
+    test_client!(post_status_201: "POST", "/status/201", results);
+    test_client!(put_status_203: "PUT", "/status/203", results);
+    test_client!(patch_status_201: "PATCH", "/status/201", results);
+    test_client!(delete_status_200: "DELETE", "/status/200", results);
+    println!();
 }
 
 fn run_server_tests(results: &mut TestResults) {
@@ -278,7 +283,7 @@ fn build_client() -> Option<()> {
     io::stdout().flush().unwrap();
 
     let build_status = Command::new("cargo")
-        .args(["build", "-p", "rustnet_client"])
+        .args(["build", "-p", "client"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -294,11 +299,19 @@ fn build_client() -> Option<()> {
 }
 
 fn build_and_start_server() -> Option<Child> {
+    let client_bin: PathBuf = [
+        CRATE_ROOT,
+        "..",
+        "target",
+        "debug",
+        CLIENT_FILE
+    ].iter().collect();
+
     print!("Building server...");
     io::stdout().flush().unwrap();
 
     let build_status = Command::new("cargo")
-        .args(["build", "-p", "rustnet_server"])
+        .args(["build", "-p", "server"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -337,14 +350,14 @@ fn build_and_start_server() -> Option<Child> {
         attempt_num += 1;
         thread::sleep(Duration::from_millis(500));
 
-        let conn_status = Command::new("curl")
-            .arg("127.0.0.1:7878/")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+        let output = Command::new(&client_bin)
+            .args(["--server-tests", "--", "127.0.0.1:7878/"])
+            .output()
             .unwrap();
 
-        if conn_status.success() {
+        let res = String::from_utf8_lossy(&output.stdout);
+
+        if successful_status(res.borrow()) {
             println!("{GRN}✔{CLR}");
             return Some(server);
         } else if attempt_num > max_attempts {
@@ -355,12 +368,25 @@ fn build_and_start_server() -> Option<Child> {
     }
 }
 
+fn successful_status(input: &str) -> bool {
+    let input = input.trim_start();
+
+    let Some((line, _)) = input.split_once('\n') else {
+        return false;
+    };
+
+    let Ok(status_line) = StatusLine::parse(line) else {
+        return false;
+    };
+
+    matches!(status_line.status.code(), 200..=299)
+}
+
 fn get_result(
     test_output: &[u8],
     expected_output: &PathBuf
 ) -> Option<(String, String)> {
     let output = String::from_utf8_lossy(test_output);
-
     let mut expected = String::new();
     let mut f = File::open(expected_output).unwrap();
     f.read_to_string(&mut expected).unwrap();
@@ -405,7 +431,7 @@ fn remove_old_builds(kind: &str) {
 
     if kind == "client" || kind == "all" {
         let clean_client = Command::new("cargo")
-            .args(["clean", "-p", "rustnet_client"])
+            .args(["clean", "-p", "client"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -422,7 +448,7 @@ fn remove_old_builds(kind: &str) {
 
     if kind == "server" || kind == "all" {
         let clean_server = Command::new("cargo")
-            .args(["clean", "-p", "rustnet_server"])
+            .args(["clean", "-p", "server"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()

@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{BufRead, ErrorKind as IoErrorKind};
 use std::str;
+use std::string::ToString;
 
 use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS};
 use crate::{
@@ -34,13 +35,14 @@ impl Display for RequestLine {
 
 impl RequestLine {
     /// Returns a new `RequestLine` instance.
-    pub fn new(method: Method, path: String, version: Version) -> Self {
+    #[must_use]
+    pub const fn new(method: Method, path: String, version: Version) -> Self {
         Self { method, path, version }
     }
 
     /// Returns the HTTP method.
     #[must_use]
-    pub fn method(&self) -> Method {
+    pub const fn method(&self) -> Method {
         self.method
     }
 
@@ -121,13 +123,12 @@ impl Debug for Request {
 		f.debug_struct("Request")
 			.field("request_line", &self.request_line)
 			.field("headers", &self.headers)
-            .field("body", &self.body.as_ref().map_or(None,
+            .field("body", &self.body.as_ref().and_then(
                 |body| if self.body_is_printable() {
                     Some(body)
                 } else {
                     None
-                })
-            )
+                }))
             .finish()
     }
 }
@@ -182,7 +183,7 @@ impl TryFrom<Connection> for Request {
             });
 
         let maybe_type = headers.get(&CONTENT_TYPE)
-            .map(|con_type| con_type.to_string());
+            .map(ToString::to_string);
 
         let body = {
             if let (Some(ref ctype), Some(clen)) = (maybe_type, maybe_len) {
@@ -192,7 +193,7 @@ impl TryFrom<Connection> for Request {
             }
         };
 
-        Ok(Request { request_line, headers, body })
+        Ok(Self { request_line, headers, body })
     }
 }
 
@@ -264,25 +265,14 @@ impl Request {
         }
     }
 
-    // /// Logs the response status and request line.
-    // pub fn log_status(&self, status_code: u16) {
-    //     println!(
-    //         "[{}|{status_code}] {} {}",
-    //         self.remote_addr(),
-    //         self.method(),
-    //         self.path()
-    //     );
-    // }
-
 	/// Returns true if the body has a text/* or application/* Content-Type header.
     #[must_use]
     pub fn body_is_printable(&self) -> bool {
-        if let Some(val) = self.headers.get(&CONTENT_TYPE) {
-            let body_type = val.to_string();
-            body_type.contains("text") || body_type.contains("application")
-        } else {
-            false
-        }
+        self.headers.get(&CONTENT_TYPE).map_or(false,
+            |val| {
+                let body_type = val.to_string();
+                body_type.contains("text") || body_type.contains("application")
+            })
     }
 
 	/// Returns a reference to the request body, if present.

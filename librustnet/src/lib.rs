@@ -37,7 +37,7 @@ pub use http::{Method, Status, Version};
 pub use request::{Request, RequestLine};
 pub use response::{Response, ResponseBuilder, StatusLine};
 pub use router::{Resolved, Route, Router, Target};
-pub use server::{Server, ServerConfig};
+pub use server::{Server, ServerBuilder};
 pub use threadpool::{ThreadPool, Worker};
 pub use util::{trim_whitespace_bytes, get_datetime};
 
@@ -47,4 +47,7 @@ pub mod consts {
     pub const NUM_WORKER_THREADS: usize = 4;
     pub const READER_BUFSIZE: usize = 1024;
     pub const WRITER_BUFSIZE: usize = 1024;
+
+    #[cfg(test)]
+    pub use crate::header::names::TEST_HEADERS;
 }

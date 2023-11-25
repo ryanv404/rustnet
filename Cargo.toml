@@ -1,9 +1,8 @@
 [workspace]
 members = [
     "librustnet",
-    "rustnet_client",
-    "rustnet_server",
-    "rustnet_browser",
+    "client",
+    "server",
     "tester"
 ]
 

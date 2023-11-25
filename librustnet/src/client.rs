@@ -1,3 +1,4 @@
+use std::borrow::ToOwned;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{
     BufRead, Error as IoError, ErrorKind as IoErrorKind, Read, Write,
@@ -133,7 +134,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 
         let path = self.path.as_ref().map_or_else(
             || String::from("/"),
-            |path| path.to_owned()
+            ToOwned::to_owned
         );
 
         let request_line = RequestLine::new(self.method, path, self.version);
@@ -213,27 +214,32 @@ impl Client {
 
     /// Returns a new `ClientBuilder` instance.
     #[must_use]
+    #[allow(clippy::new_ret_no_self)]
     pub fn new<A: ToSocketAddrs>() -> ClientBuilder<A> {
         ClientBuilder::new()
     }
     
 
     /// Returns the method.
+    #[must_use]
     pub const fn method(&self) -> &Method {
         self.req.method()
     }
 
 	/// Returns the URI path to the target resource.
+    #[must_use]
     pub fn path(&self) -> &str {
         self.req.path()
     }
 
     /// Returns the protocol version.
+    #[must_use]
     pub const fn version(&self) -> &Version {
         self.req.version()
     }
 
     /// Returns a reference to the request headers.
+    #[must_use]
     pub const fn headers(&self) -> &Headers {
         self.req.headers()
     }
@@ -256,6 +262,7 @@ impl Client {
     }
 
     /// Returns a formatted string of all of the request headers.
+    #[must_use]
     pub fn headers_to_string(&self) -> String {
         self.req.headers_to_string()
     }
@@ -277,53 +284,54 @@ impl Client {
     }
 
     /// Returns a reference to the request body, if present.
+    #[must_use]
     pub const fn body(&self) -> Option<&Vec<u8>> {
         self.req.body()
     }
 
-        /// Returns the `SocketAddr` of the remote connection.
-        #[must_use]
-        pub fn remote_addr(&self) -> &SocketAddr {
-            &self.conn.remote_addr
-        }
+    /// Returns the `SocketAddr` of the remote connection.
+    #[must_use]
+    pub const fn remote_addr(&self) -> &SocketAddr {
+        &self.conn.remote_addr
+    }
 
-        /// Returns the `IpAddr` of the remote connection.
-        #[must_use]
-        pub fn remote_ip(&self) -> IpAddr {
-            self.remote_addr().ip()
-        }
+    /// Returns the `IpAddr` of the remote connection.
+    #[must_use]
+    pub const fn remote_ip(&self) -> IpAddr {
+        self.remote_addr().ip()
+    }
 
-        /// Returns the port being used by the remote connection.
-        #[must_use]
-        pub fn remote_port(&self) -> u16 {
-            self.remote_addr().port()
-        }
+    /// Returns the port being used by the remote connection.
+    #[must_use]
+    pub const fn remote_port(&self) -> u16 {
+        self.remote_addr().port()
+    }
 
-        /// Returns the `SocketAddr` of the local connection.
-        #[must_use]
-        pub fn local_addr(&self) -> &SocketAddr {
-            &self.conn.local_addr
-        }
+    /// Returns the `SocketAddr` of the local connection.
+    #[must_use]
+    pub const fn local_addr(&self) -> &SocketAddr {
+        &self.conn.local_addr
+    }
 
-        /// Returns the `IpAddr` of the local connection.
-        #[must_use]
-        pub fn local_ip(&self) -> IpAddr {
-            self.local_addr().ip()
-        }
+    /// Returns the `IpAddr` of the local connection.
+    #[must_use]
+    pub const fn local_ip(&self) -> IpAddr {
+        self.local_addr().ip()
+    }
 
-        /// Returns the port being used by the local connection.
-        #[must_use]
-        pub fn local_port(&self) -> u16 {
-            self.local_addr().port()
-        }
+    /// Returns the port being used by the local connection.
+    #[must_use]
+    pub const fn local_port(&self) -> u16 {
+        self.local_addr().port()
+    }
 
     /// Returns the request line as a String.
+    #[must_use]
     pub fn request_line(&self) -> String {
 		self.req.request_line()
     }
 
     /// Writes an HTTP request to a remote host.
-    #[must_use]
     pub fn send(&mut self) -> NetResult<()> {
         self.include_default_headers();
 
@@ -375,17 +383,14 @@ impl Client {
         let mut rdr = reader.take(num_bytes);
 
         // TODO: handle chunked data and partial reads.
-        if rdr.read_to_end(&mut body).is_ok() {
-            if !body.is_empty() {
-                return Some(body);
-            }
+        if rdr.read_to_end(&mut body).is_ok() && !body.is_empty() {
+            Some(body)
+        } else {
+            None
         }
-
-        None
     }
 
     /// Parses a string slice into a host address and a URI path.
-    #[must_use]
     pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
         let uri = uri.trim();
 

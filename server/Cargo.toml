@@ -1,6 +1,6 @@
 [package]
-name = "rustnet_browser"
-description = "A terminal HTTP client."
+name = "server"
+description = "An HTTP server written with librustnet."
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

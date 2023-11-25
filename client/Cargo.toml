@@ -1,6 +1,6 @@
 [package]
-name = "rustnet_client"
-description = "An HTTP client."
+name = "client"
+description = "An HTTP client written with librustnet."
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

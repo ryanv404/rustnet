@@ -135,22 +135,38 @@ impl Connection {
         Ok(Self { local_addr, remote_addr, reader, writer })
     }
 
+    /// Returns the local client's socket address.
+    #[must_use]
+    pub const fn local_addr(&self) -> &SocketAddr {
+        &self.local_addr
+    }
+
     /// Returns the local client's IP address.
+    #[must_use]
     pub const fn local_ip(&self) -> IpAddr {
         self.local_addr.ip()
     }
 
     /// Returns the local client's port.
+    #[must_use]
     pub const fn local_port(&self) -> u16 {
         self.local_addr.port()
     }
 
+    /// Returns the local client's socket address.
+    #[must_use]
+    pub const fn remote_addr(&self) -> &SocketAddr {
+        &self.remote_addr
+    }
+
     /// Returns the remote host's IP address.
+    #[must_use]
     pub const fn remote_ip(&self) -> IpAddr {
         self.remote_addr.ip()
     }
 
     /// Returns the remote host's port.
+    #[must_use]
     pub const fn remote_port(&self) -> u16 {
         self.remote_addr.port()
     }

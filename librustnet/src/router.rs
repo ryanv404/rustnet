@@ -49,8 +49,8 @@ impl Router {
     }
 
     #[must_use]
-    pub fn resolve(&self, req: &Request, do_log: bool) -> Resolved {
-        let resolved = match (self.get_target(&req.route()), *req.method()) {
+    pub fn resolve(&self, req: &Request) -> Resolved {
+        match (self.get_target(&req.route()), *req.method()) {
             (Some(target), Method::Get) => {
                 Resolved::new(Status(200), Method::Get, target)
             },
@@ -96,16 +96,11 @@ impl Router {
                 // Handle routes that do not exist.
                 Resolved::new(Status(404), method, &self.get_error_page())
             },
-        };
-
-        if do_log {
-            // req.log_status(resolved.status.code());
         }
-
-        resolved
     }
 }
 
+/// Target resources used by server end-points.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Empty,
@@ -157,6 +152,7 @@ pub struct Resolved {
 }
 
 impl Resolved {
+    /// Returns a new `Resolved` instance.
     #[must_use]
     pub fn new(status: Status, method: Method, target: &Target) -> Self {
         let target = target.to_owned();
@@ -165,14 +161,14 @@ impl Resolved {
 
     /// Returns the response status.
     #[must_use]
-    pub const fn status(&self) -> Status {
-        self.status
+    pub const fn status(&self) -> &Status {
+        &self.status
     }
 
     /// Returns the HTTP method.
     #[must_use]
-    pub const fn method(&self) -> Method {
-        self.method
+    pub const fn method(&self) -> &Method {
+        &self.method
     }
 
     /// Returns the resolved target resource.

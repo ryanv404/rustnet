@@ -34,13 +34,13 @@ impl Display for ParseErrorKind {
 
 impl From<ParseErrorKind> for IoError {
     fn from(kind: ParseErrorKind) -> Self {
-        IoError::new(IoErrorKind::InvalidData, kind.to_string())
+        Self::new(IoErrorKind::InvalidData, kind.to_string())
     }
 }
 
 impl From<ParseErrorKind> for NetError {
     fn from(kind: ParseErrorKind) -> Self {
-        NetError::ParseError(kind)
+        Self::ParseError(kind)
     }
 }
 
@@ -68,6 +68,7 @@ impl Display for NetError {
 }
 
 impl From<IoError> for NetError {
+    #[allow(clippy::match_same_arms)]
     fn from(err: IoError) -> Self {
         match err.kind() {
             kind @ IoErrorKind::UnexpectedEof => Self::ReadError(kind),
@@ -79,15 +80,16 @@ impl From<IoError> for NetError {
 }
 
 impl From<NetError> for IoError {
+    #[allow(clippy::match_same_arms)]
     fn from(err: NetError) -> Self {
         match err {
             NetError::HttpsNotImplemented => {
-                IoError::new(IoErrorKind::Unsupported, err.to_string())
+                Self::new(IoErrorKind::Unsupported, err.to_string())
             },
             NetError::ParseError(_) => err.into(),
-            NetError::ReadError(kind) => IoError::from(kind),
-            NetError::WriteError(kind) => IoError::from(kind),
-            NetError::IoError(kind) => IoError::from(kind),
+            NetError::ReadError(kind) => Self::from(kind),
+            NetError::WriteError(kind) => Self::from(kind),
+            NetError::IoError(kind) => Self::from(kind),
         }
     }
 }

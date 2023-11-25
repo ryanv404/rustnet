@@ -32,14 +32,20 @@ impl Header {
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
 
 impl Headers {
+    /// Returns a new `Headers` instance.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns a the value associated with the given `HeaderName`, if present.
+    #[must_use]
     pub fn get(&self, name: &HeaderName) -> Option<&HeaderValue> {
         self.0.get(name)
     }
 
+    /// Returns true if the header represented by `HeaderName` is present.
+    #[must_use]
     pub fn contains(&self, name: &HeaderName) -> bool {
         self.0.contains_key(name)
     }

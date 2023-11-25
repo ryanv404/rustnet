@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::io::{BufRead, ErrorKind as IoErrorKind, Read, Result as IoResult, Write};
+use std::string::ToString;
 
 use crate::consts::{
     CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS,
@@ -130,7 +131,8 @@ impl Display for StatusLine {
 
 impl StatusLine {
     /// Returns a new `StatusLine` instance.
-    pub fn new(version: Version, status: Status) -> Self {
+    #[must_use]
+    pub const fn new(version: Version, status: Status) -> Self {
         Self { version, status }
     }
 
@@ -178,11 +180,11 @@ impl StatusLine {
             return Err(ParseErrorKind::Version.into());
         };
 
-        if let Ok(status) = status_code.parse::<Status>() {
-            Ok(Self::new(version, status))
-        } else {
-            Err(ParseErrorKind::Status.into())
-        }
+        status_code.parse::<Status>()
+            .map_or_else(
+                |_| Err(ParseErrorKind::Status.into()),
+                |status| Ok(Self::new(version, status))
+            )
     }
 }
 
@@ -230,12 +232,19 @@ impl Debug for Response {
 }
 
 impl Response {
+    /// Returns a new `ResponseBuilder` instance.
+    #[must_use]
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(conn: Connection) -> ResponseBuilder {
         ResponseBuilder::new(conn)
     }
 
     /// Parses a `Response` object from a `Request`.
-    pub fn from_request(req: Request, resolved: &Resolved, conn: Connection) -> NetResult<Self> {
+    pub fn from_request(
+        req: &Request,
+        resolved: &Resolved,
+        conn: Connection
+    ) -> NetResult<Self> {
         let mut headers = Headers::new();
 
         let body = match resolved.target() {
@@ -361,12 +370,11 @@ impl Response {
 	/// Content-Type header.
 	#[must_use]
     pub fn body_is_printable(&self) -> bool {
-        if let Some(value) = self.headers.get(&CONTENT_TYPE) {
-            let body_type = value.to_string();
-            body_type.contains("text") || body_type.contains("application")
-        } else {
-            false
-        }
+        self.headers.get(&CONTENT_TYPE).map_or(false,
+            |value| {
+                let body_type = value.to_string();
+                body_type.contains("text") || body_type.contains("application")
+            })
 	}
 
     /// Returns the response body as a copy-on-write string.
@@ -457,8 +465,9 @@ impl Response {
                 len_str.parse::<usize>().ok()
             });
 
-        let maybe_type = headers.get(&CONTENT_TYPE)
-            .map(|con_type| con_type.to_string());
+        let maybe_type = headers
+            .get(&CONTENT_TYPE)
+            .map(ToString::to_string);
 
         let body = {
             if let (Some(ref ctype), Some(clen)) = (maybe_type, maybe_len) {
@@ -495,12 +504,10 @@ impl Response {
         let mut rdr = reader.take(num_bytes);
 
         // TODO: handle chunked data and partial reads.
-        if rdr.read_to_end(&mut body).is_ok() {
-            if !body.is_empty() {
-                return Some(body);
-            }
+        if rdr.read_to_end(&mut body).is_ok() && !body.is_empty() {
+            Some(body)
+        } else {
+            None
         }
-
-        None
     }
 }

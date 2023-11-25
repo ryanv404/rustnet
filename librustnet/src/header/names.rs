@@ -4,7 +4,7 @@ use std::str;
 use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HeaderName {
     pub inner: HeaderKind,
 }
@@ -15,11 +15,11 @@ impl Display for HeaderName {
     }
 }
 
-impl Debug for HeaderName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		Debug::fmt(&self.to_titlecase(), f)
-	}
-}
+//impl Debug for HeaderName {
+//    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+//		Debug::fmt(&self.to_titlecase(), f)
+//	}
+//}
 
 impl From<StandardHeader> for HeaderName {
     fn from(std: StandardHeader) -> Self {
@@ -98,7 +98,7 @@ impl From<&str> for HeaderKind {
     fn from(s: &str) -> Self {
         StandardHeader::from_bytes(s.as_bytes()).map_or_else(
             || Self::Custom(Vec::from(s)),
-            |header| Self::Standard(header)
+            Self::Standard
         )
     }
 }
@@ -371,6 +371,7 @@ impl_header_names! {
     b"x-forwarded-host" => X_FORWARDED_HOST, XForwardedHost;
     b"x-forwarded-proto" => X_FORWARDED_PROTO, XForwardedProto;
     b"x-frame-options" => X_FRAME_OPTIONS, XFrameOptions;
+    b"x-more-info" => X_MORE_INFO, XMoreInfo;
     b"x-powered-by" => X_POWERED_BY, XPoweredBy;
     b"x-request-id" => X_REQUEST_ID, XRequestId;
     b"x-robots-tag" => X_ROBOTS_TAG, XRobotsTag;

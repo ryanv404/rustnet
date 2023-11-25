@@ -14,27 +14,27 @@ use crate::{
 };
 
 /// Configures the socket address and the router for a `Server`.
-pub struct ServerConfig<A: ToSocketAddrs> {
-    /// User-provided socket address.
+pub struct ServerBuilder<A: ToSocketAddrs> {
     pub addr: A,
-    /// The server's router.
     pub router: Router,
+    pub do_logging: bool,
 }
 
-impl<A: ToSocketAddrs> ServerConfig<A> {
-    /// Creates a `ServerConfig` object containing the provided socket address.
+impl<A: ToSocketAddrs> ServerBuilder<A> {
+    /// Creates a `ServerBuilder` object containing the provided socket address.
     pub fn new(addr: A) -> Self {
         Self {
             addr,
             router: Router::new(),
+            do_logging: false
         }
     }
 
     /// Starts the server, returning a handle to the running `Server` instance.
     pub fn start(self) -> IoResult<Server> {
-        let Self { addr, router } = self;
+        let Self { addr, router, do_logging } = self;
         let router = Arc::new(router);
-        Server::new(addr, router)
+        Server::new(addr, router, do_logging)
     }
 
     /// Configures handling of a GET request.
@@ -99,6 +99,11 @@ impl<A: ToSocketAddrs> ServerConfig<A> {
         let target = Target::File(file_path.into());
         self.router.mount(route, target);
     }
+
+    /// Enables logging of request lines and status codes to stdout.
+    pub fn enable_logging(&mut self) {
+        self.do_logging = true;
+    }
 }
 
 /// A wrapper around a `TcpListener` instance.
@@ -138,23 +143,34 @@ pub struct Server {
     pub local_addr: SocketAddr,
     /// Trigger for closing the server.
     pub keep_listening: Arc<AtomicBool>,
+    /// Flag to enable logging of each connection to stdout.
+    pub do_logging: Arc<AtomicBool>,
 }
 
 impl Server {
-    /// Returns a `ServerConfig` builder containing the provided socket address.
-    pub fn http<A: ToSocketAddrs>(addr: A) -> ServerConfig<A> {
-        ServerConfig::new(addr)
+    /// Returns a `ServerBuilder` containing the provided socket address.
+    pub fn http<A: ToSocketAddrs>(addr: A) -> ServerBuilder<A> {
+        ServerBuilder::new(addr)
     }
 
     /// Returns a `Server` instance this is bound to the given address.
-    pub fn new<A: ToSocketAddrs>(addr: A, router: Arc<Router>) -> IoResult<Self> {
+    pub fn new<A: ToSocketAddrs>(
+        addr: A,
+        router: Arc<Router>,
+        enable_logging: bool
+    ) -> IoResult<Self> {
         let listener = Listener::bind(addr)?;
         let local_addr = listener.local_addr()?;
+
+        let do_logging = Arc::new(AtomicBool::new(enable_logging));
+        let do_log = Arc::clone(&do_logging);
 
         let keep_listening = Arc::new(AtomicBool::new(true));
         let listening = Arc::clone(&keep_listening);
 
-        Self::log_start_up(&local_addr);
+        if do_logging.load(Ordering::Relaxed) {
+            Self::log_start_up(&local_addr);
+        }
 
         // Spawn listener thread.
         let handle = spawn(move || {
@@ -165,16 +181,21 @@ impl Server {
                 match listener.accept() {
                     Ok(conn) => {
                         let rtr = Arc::clone(&router);
+                        let log = Arc::clone(&do_log);
 
                         // Task an available worker thread with responding.
                         pool.execute(move || {
-                            if let Err(e) = Self::respond(conn, &rtr) {
+                            if let Err(e) = Self::respond(conn, &rtr, &log) {
                                 Self::log_error(&e);
                             }
                         });
-                    }
+                    },
                     Err(e) => Self::log_error(&e),
                 }
+            }
+
+            if do_log.load(Ordering::Relaxed) {
+                Self::log_shutdown();
             }
         });
 
@@ -182,29 +203,54 @@ impl Server {
             handle,
             local_addr,
             keep_listening,
+            do_logging
         })
     }
 
     /// Handles a request from a remote connection.
-    pub fn respond(conn: Connection, router: &Arc<Router>) -> NetResult<()> {
+    pub fn respond(
+        conn: Connection,
+        router: &Arc<Router>,
+        do_logging: &Arc<AtomicBool>
+    ) -> NetResult<()> {
         let cloned_conn = conn.try_clone()?;
         let req = Request::try_from(cloned_conn)?;
-        let resolved_route = router.resolve(&req, true);
-        let mut res = Response::from_request(req, &resolved_route, conn)?;
+        let resolved = router.resolve(&req);
+
+        if do_logging.load(Ordering::Relaxed) {
+            Self::log_with_status(
+                conn.remote_ip(),
+                resolved.status.code(),
+                &req
+            );
+        }
+
+        let mut res = Response::from_request(&req, &resolved, conn)?;
         res.send()?;
         Ok(())
     }
 
-    /// Returns the IP address on which the server is listening.
+    /// Returns the local socket address of the server.
+    #[must_use]
+    pub const fn local_addr(&self) -> &SocketAddr {
+        &self.local_addr
+    }
+
+    /// Returns the local IP address of the server.
     #[must_use]
     pub const fn local_ip(&self) -> IpAddr {
         self.local_addr.ip()
     }
 
-    /// Returns the port on which the server is listening.
+    /// Returns the local port of the server.
     #[must_use]
     pub const fn local_port(&self) -> u16 {
         self.local_addr.port()
+    }
+
+    /// Logs the response status and request line.
+    pub fn log_with_status(ip: IpAddr, status: u16, req: &Request) {
+        println!("[{ip}|{status}] {} {}", req.method(), req.path());
     }
 
     /// Logs a non-terminating server error.
@@ -220,13 +266,13 @@ impl Server {
     }
 
     /// Logs a server shutdown message to stdout.
-    pub fn log_shutdown(&self) {
+    pub fn log_shutdown() {
         eprintln!("[SERVER] Now shutting down.");
     }
 
     /// Triggers graceful shutdown of the server.
     pub fn shutdown(&self) {
-        self.log_shutdown();
+        Self::log_shutdown();
 
         // Stops the listener thread's loop.
         self.keep_listening.store(false, Ordering::Relaxed);
