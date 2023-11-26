@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::fs;
 use std::io::{BufRead, ErrorKind as IoErrorKind, Read, Result as IoResult, Write};
+use std::net::{IpAddr, SocketAddr};
 use std::string::ToString;
 
 use crate::consts::{
@@ -9,8 +9,7 @@ use crate::consts::{
 };
 use crate::{
     Connection, Header, HeaderName, HeaderValue, Headers, Method, NetError,
-    NetReader, NetResult, ParseErrorKind, Request, Resolved, Status, Target,
-    Version,
+    NetReader, NetResult, Status, Version,
 };
 
 /// An HTTP response builder object.
@@ -39,25 +38,25 @@ impl ResponseBuilder {
     }
 
     /// Sets the protocol version.
-    pub fn version(&mut self, version: Version) -> &mut Self {
+    pub fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
 
     /// Sets the HTTP response status.
-    pub fn status(&mut self, status: Status) -> &mut Self {
+    pub fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self
     }
 
     /// Sets the HTTP request method.
-    pub fn method(&mut self, method: Method) -> &mut Self {
+    pub fn method(mut self, method: Method) -> Self {
         self.method = Some(method);
         self
     }
 
     /// Adds a new header or updates the header value if it is already present.
-    pub fn add_header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
+    pub fn insert_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
@@ -69,38 +68,35 @@ impl ResponseBuilder {
     }
 
     /// Sets the content of the response body.
-    pub fn body(&mut self, data: &[u8]) -> &mut Self {
-        if data.is_empty() {
-            return self;
-        }
-
+    pub fn body(mut self, data: &[u8]) -> Self {
         self.headers.insert(CONTENT_LENGTH, data.len().into());
-        self.headers.insert(CONTENT_TYPE, "text/plain".into());
-
+        self.headers.insert(CONTENT_TYPE, Vec::from("text/plain").into());
         self.body = Some(data.to_vec());
         self
     }
 
     /// Returns a `Response` instance from the `ResponseBuilder`.
-    pub fn build(&mut self) -> NetResult<Response> {
+    pub fn build(mut self) -> NetResult<Response> {
+        let conn = self.conn.try_clone()?;
+
         let method = self.method.take().unwrap_or_default();
         let status = self.status.take().unwrap_or_default();
         let status_line = StatusLine::new(self.version, status);
-		let headers = self.headers.clone();
+
+        let headers = self.headers;
 		let body = self.body.take();
-        let conn = self.conn.try_clone()?;
 
 		Ok(Response {
-            conn,
             method,
             status_line,
             headers,
             body,
+            conn,
         })
     }
 
     /// Sends an HTTP response and then returns the `Response` instance.
-    pub fn send(&mut self) -> NetResult<Response> {
+    pub fn send(self) -> NetResult<Response> {
         let mut res = self.build()?;
         res.send()?;
         Ok(res)
@@ -108,7 +104,7 @@ impl ResponseBuilder {
 }
 
 /// Represents the status line of an HTTP response.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StatusLine {
     pub version: Version,
     pub status: Status,
@@ -125,7 +121,7 @@ impl Default for StatusLine {
 
 impl Display for StatusLine {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{} {}", &self.version, &self.status)
+        write!(f, "{} {}", self.version, self.status)
     }
 }
 
@@ -138,14 +134,14 @@ impl StatusLine {
 
     /// Returns the protocol version.
     #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.version
+    pub const fn version(&self) -> Version {
+        self.version
     }
 
     /// Returns the response status.
     #[must_use]
-    pub const fn status(&self) -> &Status {
-        &self.status
+    pub const fn status(&self) -> Status {
+        self.status
     }
 
     /// Returns the status code.
@@ -160,41 +156,24 @@ impl StatusLine {
         self.status.msg()
     }
 
-    /// Parses a string slice into a `Version` and a `Status` returning a
-    /// `StatusLine` object.
+    /// Parses a string slice into a `StatusLine` object.
     pub fn parse(line: &str) -> NetResult<Self> {
-        let trimmed = line.trim();
+        let mut tokens = line.trim_start().splitn(3, ' ');
 
-        if trimmed.is_empty() {
-            return Err(ParseErrorKind::StatusLine.into());
-        }
+        let version = Version::parse(tokens.next())?;
+        let status = Status::parse(tokens.next())?;
 
-        let mut tokens = trimmed.splitn(3, ' ').map(str::trim);
-        let parts = (tokens.next(), tokens.next(), tokens.next());
-
-        let (Some(version), Some(status_code), Some(_status_msg)) = parts else {
-            return Err(ParseErrorKind::StatusLine.into());
-        };
-
-        let Ok(version) = version.parse::<Version>() else {
-            return Err(ParseErrorKind::Version.into());
-        };
-
-        status_code.parse::<Status>()
-            .map_or_else(
-                |_| Err(ParseErrorKind::Status.into()),
-                |status| Ok(Self::new(version, status))
-            )
+        Ok(Self::new(version, status))
     }
 }
 
 /// Represents the components of an HTTP response.
 pub struct Response {
-    pub conn: Connection,
     pub method: Method,
     pub status_line: StatusLine,
     pub headers: Headers,
     pub body: Option<Vec<u8>>,
+    pub conn: Connection,
 }
 
 impl Display for Response {
@@ -232,72 +211,64 @@ impl Debug for Response {
 }
 
 impl Response {
-    /// Returns a new `ResponseBuilder` instance.
-    #[must_use]
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(conn: Connection) -> ResponseBuilder {
-        ResponseBuilder::new(conn)
-    }
-
-    /// Parses a `Response` object from a `Request`.
-    pub fn from_request(
-        req: &Request,
-        resolved: &Resolved,
-        conn: Connection
-    ) -> NetResult<Self> {
-        let mut headers = Headers::new();
-
-        let body = match resolved.target() {
-            Target::File(ref filepath) => {
-                let content = fs::read(filepath)?;
-
-				if content.is_empty() {
-					None
-				} else {
-					let cont_type = HeaderValue::infer_content_type(filepath);
-					headers.insert(CONTENT_TYPE, cont_type);
-					headers.insert(CONTENT_LENGTH, content.len().into());
-
-					if *req.method() == Method::Head {
-						None
-					} else {
-						Some(content)
-					}
-				}
-            },
-            Target::Text(ref text) => Some(text.clone().into_bytes()),
-            Target::Bytes(ref bytes) => Some(bytes.to_owned()),
-            Target::Empty => None,
-        };
-
-        let method = *req.method();
-        let status_line = StatusLine::new(*req.version(), resolved.status);
-
-        Ok(Self { conn, method, status_line, headers, body })
-    }
-
     /// Returns the protocol version.
     #[must_use]
-    pub const fn version(&self) -> &Version {
-        self.status_line.version()
+    pub const fn version(&self) -> Version {
+        self.status_line.version
     }
 
     /// Returns the response's `Status` value.
     #[must_use]
-    pub const fn status(&self) -> &Status {
-        self.status_line.status()
+    pub const fn status(&self) -> Status {
+        self.status_line.status
     }
 
     /// Returns the status code.
     #[must_use]
     pub const fn status_code(&self) -> u16 {
-        self.status_line.status_code()
+        self.status_line.status.code()
     }
 
     /// Returns the status reason phrase.
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
-        self.status_line.status_msg()
+        self.status_line.status.msg()
+    }
+
+    /// Returns the `SocketAddr` of the remote half of the connection.
+    #[must_use]
+    pub const fn remote_addr(&self) -> SocketAddr {
+        self.conn.remote_addr
+    }
+
+    /// Returns the `IpAddr` of the remote half of the connection.
+    #[must_use]
+    pub const fn remote_ip(&self) -> IpAddr {
+        self.conn.remote_addr.ip()
+    }
+
+    /// Returns the port in use by the remote half of the connection.
+    #[must_use]
+    pub const fn remote_port(&self) -> u16 {
+        self.conn.remote_addr.port()
+    }
+
+    /// Returns the `SocketAddr` of the local half of the connection.
+    #[must_use]
+    pub const fn local_addr(&self) -> SocketAddr {
+        self.conn.local_addr
+    }
+
+    /// Returns the `IpAddr` of the local half of the  connection.
+    #[must_use]
+    pub const fn local_ip(&self) -> IpAddr {
+        self.conn.local_addr.ip()
+    }
+
+    /// Returns the port in use by the local half of the connection.
+    #[must_use]
+    pub const fn local_port(&self) -> u16 {
+        self.conn.local_addr.port()
     }
 
     /// Returns a map of the response's headers.
@@ -313,7 +284,7 @@ impl Response {
     }
 
     /// Adds or modifies the header field represented by `HeaderName`.
-    pub fn set_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn insert_header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
     }
 
@@ -326,7 +297,7 @@ impl Response {
     /// Returns the response headers as a String.
     #[must_use]
     pub fn headers_to_string(&self) -> String {
-        if self.headers.0.is_empty() {
+        if self.headers.is_empty() {
             String::new()
         } else {
             self.headers.0.iter().fold(String::new(), 
@@ -370,11 +341,13 @@ impl Response {
 	/// Content-Type header.
 	#[must_use]
     pub fn body_is_printable(&self) -> bool {
-        self.headers.get(&CONTENT_TYPE).map_or(false,
-            |value| {
-                let body_type = value.to_string();
-                body_type.contains("text") || body_type.contains("application")
-            })
+        self.headers
+            .get(&CONTENT_TYPE)
+            .map_or(false,
+                |value| {
+                    let body_type = value.to_string();
+                    body_type.contains("text") || body_type.contains("application")
+                })
 	}
 
     /// Returns the response body as a copy-on-write string.
@@ -423,26 +396,23 @@ impl Response {
 
     /// Reads an HTTP response from a `Connection` and parses it into a `Response`.
     pub fn recv(mut conn: Connection, method: Method) -> NetResult<Self> {
-        let mut num_headers = 0;
         let mut line = String::new();
-        let mut headers = Headers::new();
 
         let status_line = match conn.read_line(&mut line) {
             Err(e) => return Err(NetError::ReadError(e.kind())),
-            Ok(0) => {
-                return Err(NetError::ReadError(IoErrorKind::UnexpectedEof));
-            },
+            Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
             Ok(_) => StatusLine::parse(&line)?,
         };
+
+        let mut num_headers = 0;
+        let mut headers = Headers::new();
 
         while num_headers <= MAX_HEADERS {
             line.clear();
 
             match conn.read_line(&mut line) {
                 Err(e) => return Err(NetError::ReadError(e.kind())),
-                Ok(0) => {
-                    return Err(NetError::ReadError(IoErrorKind::UnexpectedEof));
-                },
+                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
                 Ok(_) => {
                     let trimmed = line.trim();
 
@@ -452,6 +422,7 @@ impl Response {
 
                     let (name, value) = Header::parse(trimmed)?;
                     headers.insert(name, value);
+
                     num_headers += 1;
                 }
             }
@@ -460,10 +431,11 @@ impl Response {
         // Parse the response body.
         let maybe_len = headers
             .get(&CONTENT_LENGTH)
-            .and_then(|len| {
-                let len_str = len.to_string();
-                len_str.parse::<usize>().ok()
-            });
+            .and_then(
+                |len| {
+                    let len_str = len.to_string();
+                    usize::from_str_radix(&len_str, 10).ok()
+                });
 
         let maybe_type = headers
             .get(&CONTENT_TYPE)
@@ -471,13 +443,19 @@ impl Response {
 
         let body = {
             if let (Some(ref ctype), Some(clen)) = (maybe_type, maybe_len) {
-                Self::parse_body(&mut conn.reader, clen, ctype.as_str())
+                Self::parse_body(&mut conn.reader, clen, ctype)
             } else {
                 None
             }
         };
 
-        Ok(Self { conn, method, status_line, headers, body })
+        Ok(Self {
+            method,
+            status_line,
+            headers,
+            body,
+            conn
+        })
     }
 
     /// Reads and parses the message body based on the Content-Type and
@@ -488,10 +466,6 @@ impl Response {
         len_val: usize,
         type_val: &str
     ) -> Option<Vec<u8>> {
-        if len_val == 0 {
-            return None;
-        }
-
         let Ok(num_bytes) = u64::try_from(len_val) else {
             return None;
         };

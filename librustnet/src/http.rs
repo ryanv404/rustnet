@@ -44,7 +44,7 @@ impl FromStr for Method {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        match s {
+        match s.trim() {
             // HTTP methods are case-sensitive.
             "GET" => Ok(Self::Get),
             "PUT" => Ok(Self::Put),
@@ -55,7 +55,7 @@ impl FromStr for Method {
             "DELETE" => Ok(Self::Delete),
             "CONNECT" => Ok(Self::Connect),
             "OPTIONS" => Ok(Self::Options),
-            _ => Err(ParseErrorKind::Method.into()),
+            _ => Err(ParseErrorKind::Method)?,
         }
     }
 }
@@ -75,6 +75,13 @@ impl Method {
             Self::Connect => "CONNECT",
             Self::Options => "OPTIONS",
         }
+    }
+
+    #[must_use]
+    pub fn parse(maybe_method: Option<&str>) -> NetResult<Self> {
+        maybe_method
+            .ok_or(ParseErrorKind::Method.into())
+            .and_then(|s| Self::from_str(s))
     }
 }
 
@@ -97,9 +104,9 @@ impl Display for Status {
 impl FromStr for Status {
     type Err = NetError;
 
-    fn from_str(code: &str) -> NetResult<Self> {
-        u16::from_str(code)
-            .map(Self::from)
+    fn from_str(s: &str) -> NetResult<Self> {
+        u16::from_str_radix(s.trim(), 10)
+            .map(|code| Self(code))
             .map_err(|_| ParseErrorKind::Status.into())
     }
 }
@@ -238,6 +245,13 @@ impl Status {
     pub const fn code(&self) -> u16 {
         self.0
     }
+
+    #[must_use]
+    pub fn parse(maybe_status: Option<&str>) -> NetResult<Self> {
+        maybe_status
+            .ok_or(ParseErrorKind::Status.into())
+            .and_then(|s| Self::from_str(s))
+    }
 }
 
 /// The HTTP protocol version.
@@ -271,9 +285,9 @@ impl FromStr for Version {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        // HTTP versions are case-sensitive and aero is implied by a missing
+        // HTTP versions are case-sensitive and a zero is implied by a missing
         // minor version number.
-        match s {
+        match s.trim() {
             "HTTP/0.9" => Ok(Self::ZeroDotNine),
             "HTTP/1.0" => Ok(Self::OneDotZero),
             "HTTP/1.1" => Ok(Self::OneDotOne),
@@ -322,5 +336,12 @@ impl Version {
     #[must_use]
     pub fn is_supported(&self) -> bool {
         *self == Self::OneDotOne
+    }
+
+    #[must_use]
+    pub fn parse(maybe_version: Option<&str>) -> NetResult<Self> {
+        maybe_version
+            .ok_or(ParseErrorKind::Version.into())
+            .and_then(|s| Self::from_str(s))
     }
 }

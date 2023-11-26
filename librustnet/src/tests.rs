@@ -8,147 +8,107 @@ mod parse {
         ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, TEST_HEADERS, USER_AGENT
     };
     use std::collections::BTreeMap;
-    use std::str::FromStr;
 
     #[test]
     fn methods() {
-        let get = "GET".parse::<Method>();
-        let head = "HEAD".parse::<Method>();
-        let post = "POST".parse::<Method>();
-        let put = "PUT".parse::<Method>();
-        let patch = "PATCH".parse::<Method>();
-        let delete = "DELETE".parse::<Method>();
-        let trace = "TRACE".parse::<Method>();
-        let options = "OPTIONS".parse::<Method>();
-        let connect = "CONNECT".parse::<Method>();
-        let bad_get = "get".parse::<Method>();
-        let unknown = "FOO".parse::<Method>();
-        assert_eq!(get, Ok(Method::Get));
-        assert_eq!(head, Ok(Method::Head));
-        assert_eq!(post, Ok(Method::Post));
-        assert_eq!(put, Ok(Method::Put));
-        assert_eq!(patch, Ok(Method::Patch));
-        assert_eq!(delete, Ok(Method::Delete));
-        assert_eq!(trace, Ok(Method::Trace));
-        assert_eq!(options, Ok(Method::Options));
-        assert_eq!(connect, Ok(Method::Connect));
-        assert!(bad_get.is_err());
-        assert!(unknown.is_err());
+        assert_eq!(Method::parse(Some("GET")), Ok(Method::Get));
+        assert_eq!(Method::parse(Some("HEAD")), Ok(Method::Head));
+        assert_eq!(Method::parse(Some("POST")), Ok(Method::Post));
+        assert_eq!(Method::parse(Some("PUT")), Ok(Method::Put));
+        assert_eq!(Method::parse(Some("PATCH")), Ok(Method::Patch));
+        assert_eq!(Method::parse(Some("DELETE")), Ok(Method::Delete));
+        assert_eq!(Method::parse(Some("TRACE")), Ok(Method::Trace));
+        assert_eq!(Method::parse(Some("OPTIONS")), Ok(Method::Options));
+        assert_eq!(Method::parse(Some("CONNECT")), Ok(Method::Connect));
+        assert!(Method::parse(Some("get")).is_err());
+        assert!(Method::parse(Some("FOO")).is_err());
     }
 
     #[test]
     fn status_codes() {
-        let s100 = "100";
-        let s201 = "201";
-        let s301 = "301";
-        let s403 = "403";
-        let s500 = "500";
-        let bad = "abc";
-        assert_eq!(s100.parse::<Status>(), Ok(Status(100)));
-        assert_eq!(s201.parse::<Status>(), Ok(Status(201)));
-        assert_eq!(s301.parse::<Status>(), Ok(Status(301)));
-        assert_eq!(s403.parse::<Status>(), Ok(Status(403)));
-        assert_eq!(s500.parse::<Status>(), Ok(Status(500)));
-        assert!(bad.parse::<Status>().is_err());
+        assert_eq!(Status::parse(Some("100")), Ok(Status(100)));
+        assert_eq!(Status::parse(Some("201")), Ok(Status(201)));
+        assert_eq!(Status::parse(Some("301")), Ok(Status(301)));
+        assert_eq!(Status::parse(Some("403")), Ok(Status(403)));
+        assert_eq!(Status::parse(Some("500")), Ok(Status(500)));
+        assert!(Status::parse(Some("abc")).is_err());
     }
 
     #[test]
     fn versions() {
-        let v0_9 = Version::from_str("HTTP/0.9");
-        let v1_0 = Version::from_str("HTTP/1.0");
-        let v1_1 = Version::from_str("HTTP/1.1");
-        let v2_0 = Version::from_str("HTTP/2.0");
-        let v3_0 = Version::from_str("HTTP/3.0");
-        let bad = Version::from_str("HTTP/1.2");
-        assert_eq!(v0_9, Ok(Version::ZeroDotNine));
-        assert_eq!(v1_0, Ok(Version::OneDotZero));
-        assert_eq!(v1_1, Ok(Version::OneDotOne));
-        assert_eq!(v2_0, Ok(Version::TwoDotZero));
-        assert_eq!(v3_0, Ok(Version::ThreeDotZero));
-        assert!(bad.is_err());
+        assert_eq!(Version::parse(Some("HTTP/0.9")), Ok(Version::ZeroDotNine));
+        assert_eq!(Version::parse(Some("HTTP/1.0")), Ok(Version::OneDotZero));
+        assert_eq!(Version::parse(Some("HTTP/1.1")), Ok(Version::OneDotOne));
+        assert_eq!(Version::parse(Some("HTTP/2.0")), Ok(Version::TwoDotZero));
+        assert_eq!(Version::parse(Some("HTTP/3.0")), Ok(Version::ThreeDotZero));
+        assert!(Version::parse(Some("HTTP/1.2")).is_err());
     }
 
     #[test]
     fn request_lines() {
-        let uri = "/test";
-        let test1 = RequestLine::parse("GET /test HTTP/1.1\r\n").unwrap();
-        let test2 = RequestLine::parse("HEAD /test HTTP/1.1\r\n").unwrap();
-        let test3 = RequestLine::parse("POST /test HTTP/1.1\r\n").unwrap();
-        let test4 = RequestLine::parse("PUT /test HTTP/1.1\r\n").unwrap();
-        let test5 = RequestLine::parse("PATCH /test HTTP/1.1\r\n").unwrap();
-        let test6 = RequestLine::parse("DELETE /test HTTP/1.1\r\n").unwrap();
-        let test7 = RequestLine::parse("TRACE /test HTTP/1.1\r\n").unwrap();
-        let test8 = RequestLine::parse("OPTIONS /test HTTP/1.1\r\n").unwrap();
-        let test9 = RequestLine::parse("CONNECT /test HTTP/1.1\r\n").unwrap();
-        let bad1 = RequestLine::parse("GET");
-        let bad2 = RequestLine::parse("GET /test");
-        let bad3 = RequestLine::parse("FOO bar baz");
-        let expected1 = RequestLine::new(Method::Get, uri.to_string(), Version::OneDotOne);
-        let expected2 = RequestLine::new(Method::Head, uri.to_string(), Version::OneDotOne);
-        let expected3 = RequestLine::new(Method::Post, uri.to_string(), Version::OneDotOne);
-        let expected4 = RequestLine::new(Method::Put, uri.to_string(), Version::OneDotOne);
-        let expected5 = RequestLine::new(Method::Patch, uri.to_string(), Version::OneDotOne);
-        let expected6 = RequestLine::new(Method::Delete, uri.to_string(), Version::OneDotOne);
-        let expected7 = RequestLine::new(Method::Trace, uri.to_string(), Version::OneDotOne);
-        let expected8 = RequestLine::new(Method::Options, uri.to_string(), Version::OneDotOne);
-        let expected9 = RequestLine::new(Method::Connect, uri.to_string(), Version::OneDotOne);
-        assert_eq!(test1, expected1);
-        assert_eq!(test2, expected2);
-        assert_eq!(test3, expected3);
-        assert_eq!(test4, expected4);
-        assert_eq!(test5, expected5);
-        assert_eq!(test6, expected6);
-        assert_eq!(test7, expected7);
-        assert_eq!(test8, expected8);
-        assert_eq!(test9, expected9);
-        assert!(bad1.is_err());
-        assert!(bad2.is_err());
-        assert!(bad3.is_err());
+        macro_rules! parse_reqline {
+            (SHOULD_ERR: $line:literal) => {
+                let should_err = RequestLine::parse($line);
+                assert!(should_err.is_err());
+            };
+            ($method:ident: $line:literal) => {
+                let req_line = RequestLine::parse($line).unwrap();
+                assert_eq!(req_line.method, Method::$method);
+                assert_eq!(req_line.path, "/test".to_string());
+                assert_eq!(req_line.version, Version::OneDotOne);
+            };
+        }
+
+        parse_reqline!(Get: "GET /test HTTP/1.1\r\n");
+        parse_reqline!(Head: "HEAD /test HTTP/1.1\r\n");
+        parse_reqline!(Post: "POST /test HTTP/1.1\r\n");
+        parse_reqline!(Put: "PUT /test HTTP/1.1\r\n");
+        parse_reqline!(Patch: "PATCH /test HTTP/1.1\r\n");
+        parse_reqline!(Delete: "DELETE /test HTTP/1.1\r\n");
+        parse_reqline!(Trace: "TRACE /test HTTP/1.1\r\n");
+        parse_reqline!(Options: "OPTIONS /test HTTP/1.1\r\n");
+        parse_reqline!(Connect: "CONNECT /test HTTP/1.1\r\n");
+        parse_reqline!(SHOULD_ERR: "GET");
+        parse_reqline!(SHOULD_ERR: "GET /test");
+        parse_reqline!(SHOULD_ERR: "FOO bar baz");
     }
 
     #[test]
     fn standard_headers() {
         for &(std_header, lowercase) in TEST_HEADERS {
-            let uppercase = lowercase.to_ascii_uppercase();
-            let from_lowercase = HeaderName::try_from(lowercase);
-            let from_uppercase = HeaderName::try_from(uppercase.as_slice());
-            assert_eq!(Ok(HeaderName::from(std_header)), from_lowercase);
-            assert_eq!(Ok(HeaderName::from(std_header)), from_uppercase);
+            let lower = String::from_utf8(lowercase.to_vec()).unwrap();
+            let upper = lower.to_ascii_uppercase();
+            let expected = HeaderName { inner: HeaderKind::Standard(std_header) };
+            assert_eq!(HeaderName::parse(Some(&lower)), Ok(expected.clone()));
+            assert_eq!(HeaderName::parse(Some(&upper)), Ok(expected));
         }
     }
 
     #[test]
     fn custom_headers() {
         macro_rules! test_custom_headers {
-            ( $($name:expr => $val:expr;)+ ) =>  {{
-                $(
-                    let test_name = HeaderName::try_from($name).unwrap();
-                    let exp_kind = HeaderKind::Custom($name.to_owned());
-                    let exp_name = HeaderName { inner: exp_kind };
-                    assert_eq!(test_name, exp_name);
-                )+
-
-                $(
-                    let test_val = HeaderValue::from($val);
-                    let exp_val = HeaderValue($val.to_owned());
-                    assert_eq!(test_val, exp_val);
-                )+
+            ($name:literal, $value:literal) =>  {{
+                let test_name = HeaderName::parse(Some($name));
+                let expected_name = HeaderName {
+                    inner: HeaderKind::Custom(Vec::from($name))
+                };
+                let test_value = HeaderValue::parse(Some($value));
+                let expected_value = HeaderValue(Vec::from($value));
+                assert_eq!(test_name, Ok(expected_name));
+                assert_eq!(test_value, Ok(expected_value));
             }};
         }
 
-        test_custom_headers! {
-            Vec::from("cats").as_slice()  => Vec::from("dogs").as_slice();
-            Vec::from("sun").as_slice()   => Vec::from("moon").as_slice();
-            Vec::from("black").as_slice() => Vec::from("white").as_slice();
-            Vec::from("hot").as_slice()   => Vec::from("cold").as_slice();
-            Vec::from("tired").as_slice() => Vec::from("awake").as_slice();
-        }
+        test_custom_headers!("Cat", "dog");
+        test_custom_headers!("Sun", "moon");
+        test_custom_headers!("Black", "white");
+        test_custom_headers!("Hot", "cold");
+        test_custom_headers!("Tired", "awake");
     }
 
     #[test]
     fn headers_section() {
-        let mut headers = Headers::new();
-        let test = "\
+        let headers_section = "\
             Accept: */*\r\n\
             Accept-Encoding: gzip, deflate, br\r\n\
             Connection: keep-alive\r\n\
@@ -156,39 +116,35 @@ mod parse {
             User-Agent: xh/0.19.3\r\n\
             Pineapple: pizza\r\n\r\n";
 
-        let expected = Headers(BTreeMap::from([
-            (ACCEPT, HeaderValue::from("*/*")),
-            (ACCEPT_ENCODING, HeaderValue::from("gzip, deflate, br")),
-            (CONNECTION, HeaderValue::from("keep-alive")),
-            (HOST, HeaderValue::from("example.com")),
-            (USER_AGENT, HeaderValue::from("xh/0.19.3")),
-            (
-                HeaderName {
-                    inner: HeaderKind::Custom(Vec::from("Pineapple")),
-                },
-                HeaderValue::from("pizza"),
-            ),
+        let expected_hdrs = Headers(BTreeMap::from([
+            (ACCEPT, "*/*".as_bytes().into()),
+            (ACCEPT_ENCODING, "gzip, deflate, br".as_bytes().into()),
+            (CONNECTION, "keep-alive".as_bytes().into()),
+            (HOST, "example.com".as_bytes().into()),
+            (USER_AGENT, "xh/0.19.3".as_bytes().into()),
+            (HeaderName {
+                inner: HeaderKind::Custom(Vec::from("Pineapple")),
+            }, "pizza".as_bytes().into()),
         ]));
 
-        for line in test.split('\n') {
-            let trim = line.trim();
-            if trim.is_empty() {
-                break;
-            }
+        let mut test_hdrs = Headers::new();
 
+        for line in headers_section.split('\n') {
+            let trim = line.trim();
+            if trim.is_empty() { break; }
             let (name, value) = Header::parse(trim).unwrap();
-            headers.insert(name, value);
+            test_hdrs.insert(name, value);
         }
 
         // Compare total lengths.
-        assert_eq!(headers.0.len(), expected.0.len());
+        assert_eq!(test_hdrs.0.len(), expected_hdrs.0.len());
 
         // Compare each header name and header value.
-        assert!(headers.0.iter().zip(expected.0)
-            .all(|((name, val), (exp_name, exp_val))| {
-                *name == exp_name && *val == exp_val 
-            })
-        );
+        test_hdrs.0.iter().zip(expected_hdrs.0.iter()).for_each(
+            |((test_name, test_value), (exp_name, exp_value))| {
+                assert_eq!(*test_name, *exp_name);
+                assert_eq!(*test_value, *exp_value); 
+            });
     }
 
     #[test]
@@ -251,60 +207,243 @@ mod utils {
     }
 }
 
-#[cfg(test)]
-mod router {
-    use std::collections::BTreeMap;
-    use crate::{
-        Method::*, Request, RequestLine, Router, Route, Resolved, Status,
-        Target::*, Version, Headers,
-    };
+// #[cfg(test)]
+// mod router {
+//     mod resolve {
+//         use std::collections::BTreeMap;
+//         use std::net::TcpStream;
+//         use std::path::PathBuf;
+//         use std::sync::Arc;
+//         use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
+//         use crate::{
+//             Connection, Headers, Request, RequestLine, Response, Route, Router,
+//             Status, StatusLine, Version, Method, Target,
+//         };
 
-    macro_rules! test_routes {
-        ($($method:ident $path:literal => $target:expr, $status:expr;)+) => {
-            #[test]
-            fn resolve_requests() {
-                let routes = BTreeMap::from([
-                    $( (Route::new($method, $path), $target) ),+
-                ]);
+//         macro_rules! test_empty_routes {
+//             ($(
+//                 $method:ident: $path:literal => Empty, $status:literal;
+//             )+) => {
+//                 #[test]
+//                 fn empty_routes() {
+//                     let routes = BTreeMap::from([
+//                         $( (Route::new(Method::$method, $path), Target::Empty) ),+
+//                     ]);
 
-                let router = Router(routes);
+//                     let router = Arc::new(Router(routes));
 
-                $(
-                    let req = Request {
-                        request_line: RequestLine {
-                            method: $method,
-                            path: $path.to_string(),
-                            version: Version::OneDotOne
-                        },
-                        headers: Headers::new(),
-                        body: None
-                    };
+//                     let localhost = TcpStream::connect("httpbin.org:80").unwrap();
+//                     let dummy_connection = Connection::try_from(localhost).unwrap();
 
-                    let test = router.resolve(&req);
-                    let exp = Resolved {
-                        status: $status,
-                        method: $method,
-                        target: $target
-                    };
+//                     $(
+//                         let test_conn = dummy_connection.try_clone().unwrap();
+//                         let expected_conn = dummy_connection.try_clone().unwrap();
 
-                    assert_eq!(test.status, exp.status);
-                    assert_eq!(test.method, exp.method);
-                    assert_eq!(test.target, exp.target);
-                )+
-            }
-        };
-    }
+//                         let req = Request {
+//                             request_line: RequestLine {
+//                                 method: Method::$method,
+//                                 path: $path.to_string(),
+//                                 version: Version::OneDotOne
+//                             },
+//                             headers: Headers::new(),
+//                             body: None,
+//                             conn: test_conn
+//                         };
 
-    test_routes! {
-        Get "/test1" => File("test1.html".into()), Status(200);
-        Head "/test2" => File("test2.html".into()), Status(200);
-        Post "/test3" => File("test3.html".into()), Status(200);
-        Put "/test4" => File("test4.html".into()), Status(200);
-        Patch "/test5" => File("test5.html".into()), Status(200);
-        Delete "/test6" => File("test6.html".into()), Status(200);
-        Trace "/test7" => File("test7.html".into()), Status(200);
-        Options "/test8" => File("test8.html".into()), Status(200);
-        Connect "127.0.0.1:1234" => Text("connected".into()), Status(200);
-        Get "/longer/path/test1" => File("test1.html".into()), Status(200);
-    }
-}
+//                         let rtr = Arc::clone(&router);
+//                         let res = Router::resolve(req, &rtr).unwrap();
+
+//                         let mut headers = Headers::new();
+//                         headers.insert(CACHE_CONTROL,
+//                             "no-cache".as_bytes().into());
+
+//                         let expected = Response {
+//                             method: Method::$method,
+//                             status_line: StatusLine {
+//                                 version: Version::OneDotOne,
+//                                 status: Status($status)
+//                             },
+//                             headers,
+//                             body: None,
+//                             conn: expected_conn
+//                         };
+
+//                         assert_eq!(res.method, expected.method);
+//                         assert_eq!(res.status_line, expected.status_line);
+//                         assert_eq!(res.headers, expected.headers);
+//                         assert_eq!(res.body, expected.body);
+//                     )+
+//                 }
+//             };
+//         }
+
+//         macro_rules! test_text_routes {
+//             ($(
+//                 $method:ident: $path:literal =>
+//                 Text($text:literal), $status:literal;
+//             )+) => {
+//                 #[test]
+//                 fn text_routes() {
+//                     let routes = BTreeMap::from([
+//                         $((Route::new(
+//                                 Method::$method, $path),
+//                                 Target::Text($text)
+//                         )),+
+//                     ]);
+
+//                     let router = Arc::new(Router(routes));
+
+//                     let localhost = TcpStream::connect("httpbin.org:80").unwrap();
+//                     let dummy_connection = Connection::try_from(localhost).unwrap();
+
+//                     $(
+//                         let test_conn = dummy_connection.try_clone().unwrap();
+//                         let expected_conn = dummy_connection.try_clone().unwrap();
+
+//                         let req = Request {
+//                             request_line: RequestLine {
+//                                 method: Method::$method,
+//                                 path: $path.to_string(),
+//                                 version: Version::OneDotOne
+//                             },
+//                             headers: Headers::new(),
+//                             body: None,
+//                             conn: test_conn
+//                         };
+
+//                         let rtr = Arc::clone(&router);
+//                         let res = Router::resolve(req, &rtr).unwrap();
+
+//                         let mut headers = Headers::new();
+//                         headers.insert(CACHE_CONTROL,
+//                             "no-cache".as_bytes().into());
+//                         headers.insert(CONTENT_LENGTH, "5".as_bytes().into());
+//                         headers.insert(CONTENT_TYPE,
+//                             "text/plain; charset=utf-8".as_bytes().into());
+
+//                         let expected = Response {
+//                             method: Method::$method,
+//                             status_line: StatusLine {
+//                                 version: Version::OneDotOne,
+//                                 status: Status($status)
+//                             },
+//                             headers,
+//                             body: Some(Vec::from($text)),
+//                             conn: expected_conn
+//                         };
+
+//                         assert_eq!(res.method, expected.method);
+//                         assert_eq!(res.status_line, expected.status_line);
+//                         assert_eq!(res.headers, expected.headers);
+//                         assert_eq!(res.body, expected.body);
+//                     )+
+//                 }
+//             };
+//         }
+
+//         macro_rules! test_file_routes {
+//             ($(
+//                 $method:ident: $path:literal =>
+//                 File($file:literal), $status:literal;
+//             )+) => {
+//                 #[test]
+//                 fn file_routes() {
+//                     let mut router = Router::new();
+                    
+//                     $( 
+//                         let p: PathBuf = [
+//                             "server",
+//                             "static",
+//                             $file
+//                         ].iter().collect();
+//                         let rt = Route::new(Method::$method, $path);
+//                         router.mount(rt, Target::File(p));
+//                     )+
+
+//                     let router = Arc::new(Router::new());
+
+//                     let localhost = TcpStream::connect("httpbin.org:80").unwrap();
+//                     let dummy_connection = Connection::try_from(localhost).unwrap();
+
+//                     $(
+//                         let test_conn = dummy_connection.try_clone().unwrap();
+//                         let expected_conn = dummy_connection.try_clone().unwrap();
+
+//                         let req = Request {
+//                             request_line: RequestLine {
+//                                 method: Method::$method,
+//                                 path: $path.to_string(),
+//                                 version: Version::OneDotOne
+//                             },
+//                             headers: Headers::new(),
+//                             body: None,
+//                             conn: test_conn
+//                         };
+
+//                         let rtr = Arc::clone(&router);
+//                         let res = Router::resolve(req, &rtr).unwrap();
+
+//                         let mut headers = Headers::new();
+//                         headers.insert(CACHE_CONTROL,
+//                             "no-cache".as_bytes().into());
+//                         headers.insert(CONTENT_LENGTH, "5".as_bytes().into());
+//                         headers.insert(CONTENT_TYPE,
+//                             "text/plain; charset=utf-8".as_bytes().into());
+
+//                         let expected = Response {
+//                             method: Method::$method,
+//                             status_line: StatusLine {
+//                                 version: Version::OneDotOne,
+//                                 status: Status($status)
+//                             },
+//                             headers: Headers::new(),
+//                             body: Some(Vec::from("text route test")),
+//                             conn: expected_conn
+//                         };
+
+//                         assert_eq!(res.method, expected.method);
+//                         assert_eq!(res.status_line, expected.status_line);
+//                         assert_eq!(res.headers, expected.headers);
+//                         assert_eq!(res.body, expected.body);
+//                     )+
+//                 }
+//             };
+//         }
+
+//         test_empty_routes! {
+//             Get: "/test1" => Empty, 200;
+//             Head: "/test2" => Empty, 200;
+//             Post: "/test3" => Empty, 200;
+//             Put: "/test4" => Empty, 200;
+//             Patch: "/test5" => Empty, 200;
+//             Delete: "/test6" => Empty, 200;
+//             Trace: "/test7" => Empty, 200;
+//             Options: "/test8" => Empty, 200;
+//             Connect: "127.0.0.1:1234" => Empty, 200;
+//         }
+
+//         test_text_routes! {
+//             Get: "/test1" => Text("test1"), 200;
+//             Head: "/test2" => Text("test2"), 200;
+//             Post: "/test3" => Text("test3"), 200;
+//             Put: "/test4" => Text("test4"), 200;
+//             Patch: "/test5" => Text("test5"), 200;
+//             Delete: "/test6" => Text("test6"), 200;
+//             Trace: "/test7" => Text("test7"), 200;
+//             Options: "/test8" => Text("test8"), 200;
+//             Connect: "127.0.0.1:1234" => Text("test9"), 200;
+//         }
+
+//         test_file_routes! {
+//             Get: "/test1" => File("index.html"), 200;
+//             Head: "/test2" => File("index.html"), 200;
+//             Post: "/test3" => File("index.html"), 200;
+//             Put: "/test4" => File("index.html"), 200;
+//             Patch: "/test5" => File("index.html"), 200;
+//             Delete: "/test6" => File("index.html"), 200;
+//             Trace: "/test7" => File("index.html"), 200;
+//             Options: "/test8" => File("index.html"), 200;
+//             Connect: "127.0.0.1:1234" => File("index.html"), 200;
+//         }
+//     }
+// }

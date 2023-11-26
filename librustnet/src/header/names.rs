@@ -1,10 +1,10 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::str;
+use std::str::{self, FromStr};
 
 use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HeaderName {
     pub inner: HeaderKind,
 }
@@ -15,11 +15,11 @@ impl Display for HeaderName {
     }
 }
 
-//impl Debug for HeaderName {
-//    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-//		Debug::fmt(&self.to_titlecase(), f)
-//	}
-//}
+impl Debug for HeaderName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		Debug::fmt(&self.to_titlecase(), f)
+	}
+}
 
 impl From<StandardHeader> for HeaderName {
     fn from(std: StandardHeader) -> Self {
@@ -28,9 +28,17 @@ impl From<StandardHeader> for HeaderName {
     }
 }
 
-impl From<&str> for HeaderName {
-    fn from(s: &str) -> Self {
-        Self { inner: s.into() }
+impl FromStr for HeaderName {
+    type Err = NetError;
+
+    fn from_str(s: &str) -> NetResult<Self> {
+        let inner = StandardHeader::from_bytes(s.as_bytes())
+            .map_or_else(
+                || HeaderKind::Custom(Vec::from(s.trim())),
+                |std_header| HeaderKind::Standard(std_header)
+            );
+
+        Ok(Self { inner })
     }
 }
 
@@ -85,6 +93,13 @@ impl HeaderName {
 
 		title
     }
+
+    /// Parses an optional string slice into a `HeaderName`
+    pub fn parse(maybe_name: Option<&str>) -> NetResult<Self> {
+        maybe_name
+            .ok_or(ParseErrorKind::Header.into())
+            .and_then(|name| Self::from_str(name))
+    }
 }
 
 /// Header name representation.
@@ -92,15 +107,6 @@ impl HeaderName {
 pub enum HeaderKind {
     Standard(StandardHeader),
     Custom(Vec<u8>),
-}
-
-impl From<&str> for HeaderKind {
-    fn from(s: &str) -> Self {
-        StandardHeader::from_bytes(s.as_bytes()).map_or_else(
-            || Self::Custom(Vec::from(s)),
-            Self::Standard
-        )
-    }
 }
 
 impl TryFrom<&[u8]> for HeaderKind {

@@ -7,15 +7,15 @@ use librustnet::consts::{
 };
 
 fn main() {
-    let mut expected: BTreeMap<u16, Headers> = BTreeMap::new();
+    let mut expected = BTreeMap::<u16, Headers>::new();
 
     let default_headers = Headers(BTreeMap::from([
-        (ACCESS_CONTROL_ALLOW_CREDENTIALS, "true".into()),
-        (ACCESS_CONTROL_ALLOW_ORIGIN, "*".into()),
-        (SERVER, "gunicorn/19.9.0".into()),
-        (CONNECTION, "keep-alive".into()),
-        (CONTENT_LENGTH, "0".into()),
-        (CONTENT_TYPE, "text/html; charset=utf-8".into())
+        (ACCESS_CONTROL_ALLOW_CREDENTIALS, "true".as_bytes().into()),
+        (ACCESS_CONTROL_ALLOW_ORIGIN, "*".as_bytes().into()),
+        (SERVER, "gunicorn/19.9.0".as_bytes().into()),
+        (CONNECTION, "keep-alive".as_bytes().into()),
+        (CONTENT_LENGTH, "0".as_bytes().into()),
+        (CONTENT_TYPE, "text/html; charset=utf-8".as_bytes().into())
     ]));
 
     let status_codes: [u16; 94] = [

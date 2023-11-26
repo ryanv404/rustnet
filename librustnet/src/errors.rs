@@ -79,6 +79,18 @@ impl From<IoError> for NetError {
     }
 }
 
+impl From<IoErrorKind> for NetError {
+    #[allow(clippy::match_same_arms)]
+    fn from(kind: IoErrorKind) -> Self {
+        match kind {
+            IoErrorKind::UnexpectedEof => Self::ReadError(kind),
+            IoErrorKind::WouldBlock => Self::ReadError(kind),
+            IoErrorKind::WriteZero => Self::WriteError(kind),
+            kind => Self::IoError(kind),
+        }
+    }
+}
+
 impl From<NetError> for IoError {
     #[allow(clippy::match_same_arms)]
     fn from(err: NetError) -> Self {

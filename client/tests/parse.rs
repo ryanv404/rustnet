@@ -5,39 +5,41 @@ macro_rules! get_responses_by_status_code {
             #[test]
             fn $name() {
                 $(
-                    let mut client = Client::new()
+                    let mut client = Client::builder()
                         .addr("httpbin.org:80")
                         .path(concat!("/status/", $code))
                         .send()
                         .unwrap();
+
                     let res = client.recv().unwrap();
+
                     assert_eq!(res.status_line.version, Version::OneDotOne);
                     assert_eq!(res.status_line.status, Status($code));
                     assert_eq!(
                         res.get_header(&ACCESS_CONTROL_ALLOW_CREDENTIALS),
-                        Some(&HeaderValue::from("true"))
+                        Some(&HeaderValue(Vec::from("true")))
                     );
                     assert_eq!(
                         res.get_header(&ACCESS_CONTROL_ALLOW_ORIGIN),
-                        Some(&HeaderValue::from("*"))
+                        Some(&HeaderValue(Vec::from("*")))
                     );
                     assert_eq!(
                         res.get_header(&SERVER),
-                        Some(&HeaderValue::from("gunicorn/19.9.0"))
+                        Some(&HeaderValue(Vec::from("gunicorn/19.9.0")))
                     );
                     assert_eq!(
                         res.get_header(&CONNECTION),
-                        Some(&HeaderValue::from("keep-alive"))
+                        Some(&HeaderValue(Vec::from("keep-alive")))
                     );
                     if !matches!($code, 100..=200) {
                         assert_eq!(
                             res.get_header(&CONTENT_LENGTH),
-                            Some(&HeaderValue::from("0"))
+                            Some(&HeaderValue(Vec::from("0")))
                         );
                     }
                     assert_eq!(
                         res.get_header(&CONTENT_TYPE),
-                        Some(&HeaderValue::from("text/html; charset=utf-8"))
+                        Some(&HeaderValue(Vec::from("text/html; charset=utf-8")))
                     );
                     assert!(res.body().is_none());
                 )+

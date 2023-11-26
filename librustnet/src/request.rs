@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufRead, ErrorKind as IoErrorKind};
+use std::io::{BufRead, ErrorKind as IoErrorKind, Read};
 use std::str;
 use std::string::ToString;
 
 use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS};
 use crate::{
-    Client, Header, HeaderName, HeaderValue, Headers, Method, Connection,
-    NetError, NetResult, ParseErrorKind, Route, Version,
+    Connection, Header, HeaderName, HeaderValue, Headers, Method,
+    NetError, NetReader, NetResult, ParseErrorKind, Route, Version,
 };
 
 /// Represents the first line of an HTTP request.
@@ -64,26 +64,17 @@ impl RequestLine {
         self.version
     }
 
-    /// Parses a string slice into a URI path, a `Method`, and a `Version`
-    /// returning a `RequestLine` object.
+    /// Parses a string slice into a `RequestLine` object.
     pub fn parse(line: &str) -> NetResult<Self> {
-        let trimmed = line.trim();
+        let mut tokens = line.trim_start().splitn(3, ' ');
 
-        if trimmed.is_empty() {
-            return Err(ParseErrorKind::RequestLine)?;
-        }
+        let method = Method::parse(tokens.next())?;
 
-        let mut tokens = trimmed.splitn(3, ' ').map(str::trim);
+        let path = tokens.next()
+            .and_then(|s| Some(s.to_string()))
+            .ok_or(ParseErrorKind::RequestLine)?;
 
-        let (Some(method), Some(path), Some(version)) = (
-            tokens.next(), tokens.next(), tokens.next()
-        ) else {
-            return Err(ParseErrorKind::RequestLine)?;
-        };
-
-        let method = method.parse()?;
-        let path = path.to_string();
-        let version = version.parse()?;
+        let version = Version::parse(tokens.next())?;
 
         Ok(Self { method, path, version })
     }
@@ -94,6 +85,7 @@ pub struct Request {
     pub request_line: RequestLine,
     pub headers: Headers,
     pub body: Option<Vec<u8>>,
+    pub conn: Connection,
 }
 
 impl Display for Request {
@@ -138,18 +130,17 @@ impl TryFrom<Connection> for Request {
 
     fn try_from(mut conn: Connection) -> NetResult<Self> {
         // Reads an HTTP request and parses it into a `Request` object.
-        let mut header_num = 0;
         let mut line = String::new();
-        let mut headers = Headers::new();
 
         // Parse the request line.
         let request_line = match conn.reader.read_line(&mut line) {
             Err(e) => return Err(NetError::ReadError(e.kind())),
-            Ok(0) => {
-                return Err(NetError::ReadError(IoErrorKind::UnexpectedEof));
-            },
+            Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
             Ok(_) => RequestLine::parse(&line)?,
         };
+
+        let mut header_num = 0;
+        let mut headers = Headers::new();
 
         // Parse the request headers.
         while header_num <= MAX_HEADERS {
@@ -157,9 +148,7 @@ impl TryFrom<Connection> for Request {
 
             match conn.reader.read_line(&mut line) {
                 Err(e) => return Err(NetError::ReadError(e.kind())),
-                Ok(0) => {
-                    return Err(NetError::ReadError(IoErrorKind::UnexpectedEof));
-                },
+                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
                 Ok(_) => {
                     let trimmed = line.trim();
 
@@ -169,6 +158,7 @@ impl TryFrom<Connection> for Request {
 
                     let (hdr_name, hdr_value) = Header::parse(trimmed)?;
                     headers.insert(hdr_name, hdr_value);
+
                     header_num += 1;
                 }
             }
@@ -177,31 +167,33 @@ impl TryFrom<Connection> for Request {
         // Parse the request body.
         let maybe_len = headers
             .get(&CONTENT_LENGTH)
-            .and_then(|len| {
-                let len_str = len.to_string();
-                len_str.parse::<usize>().ok()
-            });
+            .and_then(
+                |len| {
+                    let len_str = len.to_string();
+                    usize::from_str_radix(&len_str, 10).ok()
+                });
 
-        let maybe_type = headers.get(&CONTENT_TYPE)
+        let maybe_type = headers
+            .get(&CONTENT_TYPE)
             .map(ToString::to_string);
 
         let body = {
             if let (Some(ref ctype), Some(clen)) = (maybe_type, maybe_len) {
-                Client::parse_body(&mut conn.reader, clen, ctype.as_str())
+                Self::parse_body(&mut conn.reader, clen, ctype)
             } else {
                 None
             }
         };
 
-        Ok(Self { request_line, headers, body })
+        Ok(Self { request_line, headers, body, conn })
     }
 }
 
 impl Request {
     /// Returns the HTTP method.
     #[must_use]
-    pub const fn method(&self) -> &Method {
-        &self.request_line.method
+    pub const fn method(&self) -> Method {
+        self.request_line.method
     }
 
     /// Returns the URI path to the target resource.
@@ -218,8 +210,8 @@ impl Request {
 
     /// Returns the HTTP version.
     #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.request_line.version
+    pub const fn version(&self) -> Version {
+        self.request_line.version
     }
 
     /// Returns the request line as a String.
@@ -247,7 +239,7 @@ impl Request {
     }
 
 	/// Adds or updates a request header field line.
-    pub fn set_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn insert_header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
     }
 
@@ -291,5 +283,31 @@ impl Request {
         }
 
         String::new().into()
+    }
+
+    /// Uses header values to read the message body.
+    #[must_use]
+    pub fn parse_body(
+        reader: &mut NetReader,
+        len_val: usize,
+        type_val: &str
+    ) -> Option<Vec<u8>> {
+        let Ok(num_bytes) = u64::try_from(len_val) else {
+            return None;
+        };
+
+        if !type_val.contains("text") && !type_val.contains("application") {
+            return None;
+        }
+
+        let mut body = Vec::with_capacity(len_val);
+        let mut rdr = reader.take(num_bytes);
+
+        // TODO: handle chunked data and partial reads.
+        if rdr.read_to_end(&mut body).is_ok() && !body.is_empty() {
+            Some(body)
+        } else {
+            None
+        }
     }
 }

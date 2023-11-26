@@ -1,8 +1,11 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::Path;
+use std::str::FromStr;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+use crate::{NetError, NetResult, ParseErrorKind};
+
+#[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
 
 impl Display for HeaderValue {
@@ -11,15 +14,17 @@ impl Display for HeaderValue {
     }
 }
 
-//impl Debug for HeaderValue {
-//    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-//		Debug::fmt(&self.to_string(), f)
-//	}
-//}
+impl Debug for HeaderValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		Debug::fmt(&self.to_string(), f)
+	}
+}
 
-impl From<&str> for HeaderValue {
-    fn from(s: &str) -> Self {
-        Self(Vec::from(s))
+impl FromStr for HeaderValue {
+    type Err = NetError;
+
+    fn from_str(s: &str) -> NetResult<Self> {
+        Ok(Self(Vec::from(s.trim())))
     }
 }
 
@@ -87,5 +92,12 @@ impl HeaderValue {
                 }))
             },
         )
+    }
+
+    /// Parses an optional string slice into a `HeaderValue`
+    pub fn parse(maybe_value: Option<&str>) -> NetResult<Self> {
+        maybe_value
+            .ok_or(ParseErrorKind::Header.into())
+            .and_then(|value| Self::from_str(value))
     }
 }

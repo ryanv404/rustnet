@@ -100,7 +100,7 @@ fn main() -> io::Result<()> {
     };
 
     // Create an HTTP client and send a request.
-    let mut client = Client::new()
+    let mut client = Client::builder()
         .method(method_arg.unwrap_or(Method::Get))
         .addr(addr)
         .path(path)

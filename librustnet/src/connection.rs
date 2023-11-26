@@ -137,8 +137,8 @@ impl Connection {
 
     /// Returns the local client's socket address.
     #[must_use]
-    pub const fn local_addr(&self) -> &SocketAddr {
-        &self.local_addr
+    pub const fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 
     /// Returns the local client's IP address.
@@ -155,8 +155,8 @@ impl Connection {
 
     /// Returns the local client's socket address.
     #[must_use]
-    pub const fn remote_addr(&self) -> &SocketAddr {
-        &self.remote_addr
+    pub const fn remote_addr(&self) -> SocketAddr {
+        self.remote_addr
     }
 
     /// Returns the remote host's IP address.

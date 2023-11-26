@@ -1,8 +1,6 @@
 use std::borrow::ToOwned;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{
-    BufRead, Error as IoError, ErrorKind as IoErrorKind, Read, Write,
-};
+use std::io::{BufRead, ErrorKind as IoErrorKind, Read, Write};
 use std::io::Result as IoResult;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 
@@ -10,14 +8,16 @@ use crate::consts::{
     ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT,
 };
 use crate::{
-    Connection, HeaderName, HeaderValue, Headers, Method, NetResult, Request,
-    NetError, NetReader, RequestLine, Response, Version,
-    ParseErrorKind,
+    Connection, HeaderName, HeaderValue, Headers, Method, NetError, NetResult,
+    ParseErrorKind, RequestLine, Response, Request, Version,
 };
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ClientBuilder<A: ToSocketAddrs> {
+pub struct ClientBuilder<A>
+where
+    A: ToSocketAddrs
+{
     pub method: Method,
     pub ip: Option<String>,
     pub port: Option<u16>,
@@ -28,7 +28,10 @@ pub struct ClientBuilder<A: ToSocketAddrs> {
     pub body: Option<Vec<u8>>,
 }
 
-impl<A: ToSocketAddrs> Default for ClientBuilder<A> {
+impl<A> Default for ClientBuilder<A>
+where
+    A: ToSocketAddrs
+{
     fn default() -> Self {
         Self {
             method: Method::Get,
@@ -43,7 +46,10 @@ impl<A: ToSocketAddrs> Default for ClientBuilder<A> {
     }
 }
 
-impl<A: ToSocketAddrs> ClientBuilder<A> {
+impl<A> ClientBuilder<A>
+where
+    A: ToSocketAddrs
+{
 	/// Returns a new `ClientBuilder` instance.
 	#[must_use]
     pub fn new() -> Self {
@@ -51,44 +57,44 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
     }
 
 	/// Sets the HTTP method.
-    pub fn method(&mut self, method: Method) -> &mut Self {
+    pub fn method(mut self, method: Method) -> Self {
         self.method = method;
         self
     }
 
 	/// Sets the remote host's IP address.
-    pub fn ip(&mut self, ip: &str) -> &mut Self {
+    pub fn ip(mut self, ip: &str) -> Self {
         self.ip = Some(ip.to_string());
         self
     }
 
 	/// Sets the remote host's port.
-    pub fn port(&mut self, port: u16) -> &mut Self {
+    pub fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
 
 	/// Sets the socket address of the remote server.
-    pub fn addr(&mut self, addr: A) -> &mut Self {
+    pub fn addr(mut self, addr: A) -> Self {
         self.addr = Some(addr);
         self
     }
 
 	/// Sets the URI path to the target resource.
-    pub fn path(&mut self, path: &str) -> &mut Self {
+    pub fn path(mut self, path: &str) -> Self {
         self.path = Some(path.to_string());
         self
     }
 
 	/// Sets the protocol version.
-	pub fn version(&mut self, version: Version) -> &mut Self {
+	pub fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
 
     /// Sets a request header field line.
-    pub fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
-        self.headers.insert(name.into(), value.into());
+    pub fn insert_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers.insert(name, value);
         self
     }
 
@@ -100,53 +106,53 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 
 	/// Sets the request body and adds Content-Type and Content-Length
     /// headers.
-	pub fn body(&mut self, data: &[u8]) -> &mut Self {
+	pub fn body(mut self, data: &[u8]) -> Self {
 		if data.is_empty() {
             return self;
         }
 
         self.headers.insert(CONTENT_LENGTH, data.len().into());
-        self.headers.insert(CONTENT_TYPE, "text/plain".into());
-
+        self.headers.insert(CONTENT_TYPE, "text/plain".as_bytes().into());
         self.body = Some(data.to_vec());
         self
 	}
 
     /// Builds and returns a new `Client` instance.
-    pub fn build(&mut self) -> NetResult<Client> {
+    pub fn build(self) -> NetResult<Client> {
         let conn = {
 			if let Some(addr) = self.addr.as_ref() {
 				let stream = TcpStream::connect(addr)?;
                 Connection::try_from(stream)?
             } else if self.ip.is_some() && self.port.is_some() {
-				let addr = format!(
-                    "{}:{}",
-                    self.ip.as_ref().unwrap(),
-                    self.port.as_ref().unwrap()
-                );
+                let ip = self.ip.as_ref().unwrap();
+                let port = self.port.as_ref().unwrap();
 
+                let addr = format!("{ip}:{port}");
                 let stream = TcpStream::connect(addr)?;
+
                 Connection::try_from(stream)?
             } else {
-                return Err(IoError::from(IoErrorKind::InvalidInput).into());
+                return Err(IoErrorKind::InvalidInput.into());
             }
         };
 
-        let path = self.path.as_ref().map_or_else(
-            || String::from("/"),
-            ToOwned::to_owned
-        );
+        let path = self.path.as_ref()
+            .map_or_else(
+                || String::from("/"),
+                |s| ToOwned::to_owned(s)
+            );
 
         let request_line = RequestLine::new(self.method, path, self.version);
         let headers = self.headers.clone();
         let body = self.body.clone();
-        let req = Request { request_line, headers, body };
 
-        Ok(Client { conn, req })
+        let req = Request { request_line, headers, body, conn };
+
+        Ok(Client { req })
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
-    pub fn send(&mut self) -> IoResult<Client> {
+    pub fn send(self) -> IoResult<Client> {
         let mut client = self.build()?;
         client.send()?;
         Ok(client)
@@ -156,7 +162,6 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
 /// An HTTP client that can send and receive messages with a remote host.
 #[derive(Debug)]
 pub struct Client {
-    pub conn: Connection,
 	pub req: Request,
 }
 
@@ -168,61 +173,62 @@ impl Display for Client {
 
 impl Write for Client {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        self.conn.write(buf)
+        self.req.conn.write(buf)
     }
 
     fn flush(&mut self) -> IoResult<()> {
-        self.conn.flush()
+        self.req.conn.flush()
     }
 
     fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.conn.write_all(buf)
+        self.req.conn.write_all(buf)
     }
 }
 
 impl Read for Client {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        self.conn.read(buf)
+        self.req.conn.read(buf)
     }
 }
 
 impl BufRead for Client {
     fn fill_buf(&mut self) -> IoResult<&[u8]> {
-        self.conn.fill_buf()
+        self.req.conn.fill_buf()
     }
 
     fn consume(&mut self, amt: usize) {
-        self.conn.consume(amt);
+        self.req.conn.consume(amt);
     }
 }
 
 impl Client {
-    /// Sends a GET request to the provided URI, returning the `Client` and
-	/// the `Response`.
-    pub fn get(uri: &str) -> NetResult<(Self, Response, String)> {
+    /// Sends a GET request to the provided URI.
+    pub fn get(uri: &str) -> NetResult<(Self, Response)> {
 		let (addr, path) = Self::parse_uri(uri)?;
-        let mut client = ClientBuilder::new()
+
+        let mut client = Client::builder()
             .addr(&addr)
             .path(&path)
-            .build()?;
+            .send()?;
 
-        client.send()?;
         let res = client.recv()?;
 
-        Ok((client, res, addr))
+        Ok((client, res))
 	}
 
     /// Returns a new `ClientBuilder` instance.
     #[must_use]
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new<A: ToSocketAddrs>() -> ClientBuilder<A> {
+    pub fn builder<A>() -> ClientBuilder<A>
+    where
+        A: ToSocketAddrs
+    {
         ClientBuilder::new()
     }
     
 
     /// Returns the method.
     #[must_use]
-    pub const fn method(&self) -> &Method {
+    pub const fn method(&self) -> Method {
         self.req.method()
     }
 
@@ -234,7 +240,7 @@ impl Client {
 
     /// Returns the protocol version.
     #[must_use]
-    pub const fn version(&self) -> &Version {
+    pub const fn version(&self) -> Version {
         self.req.version()
     }
 
@@ -257,8 +263,8 @@ impl Client {
     }
 
 	/// Adds or modifies the header field represented by `HeaderName`.
-    pub fn set_header(&mut self, name: HeaderName, val: HeaderValue) {
-        self.req.set_header(name, val);
+    pub fn insert_header(&mut self, name: HeaderName, val: HeaderValue) {
+        self.req.insert_header(name, val);
     }
 
     /// Returns a formatted string of all of the request headers.
@@ -291,8 +297,8 @@ impl Client {
 
     /// Returns the `SocketAddr` of the remote connection.
     #[must_use]
-    pub const fn remote_addr(&self) -> &SocketAddr {
-        &self.conn.remote_addr
+    pub const fn remote_addr(&self) -> SocketAddr {
+        self.req.conn.remote_addr
     }
 
     /// Returns the `IpAddr` of the remote connection.
@@ -309,8 +315,8 @@ impl Client {
 
     /// Returns the `SocketAddr` of the local connection.
     #[must_use]
-    pub const fn local_addr(&self) -> &SocketAddr {
-        &self.conn.local_addr
+    pub const fn local_addr(&self) -> SocketAddr {
+        self.req.conn.local_addr
     }
 
     /// Returns the `IpAddr` of the local connection.
@@ -336,58 +342,27 @@ impl Client {
         self.include_default_headers();
 
         // The request line.
-		self.conn.writer.write_all(self.request_line().as_bytes())?;
-		self.conn.writer.write_all(b"\r\n")?;
+		self.req.conn.write_all(self.request_line().as_bytes())?;
+		self.req.conn.write_all(b"\r\n")?;
 
 		// The request headers.
         for (name, value) in &self.req.headers.0 {
             let header = format!("{name}: {value}\r\n");
-            self.conn.writer.write_all(header.as_bytes())?;
+            self.req.conn.write_all(header.as_bytes())?;
 		}
 
 		// End of the headers section.
-		self.conn.writer.write_all(b"\r\n")?;
+		self.req.conn.write_all(b"\r\n")?;
 
 		// The request message body, if present.
 		if let Some(body) = self.req.body.as_ref() {
 			if !body.is_empty() {
-				self.conn.writer.write_all(body)?;
+				self.req.conn.write_all(body)?;
 			}
 		}
 
-		self.conn.writer.flush()?;
+		self.req.conn.flush()?;
         Ok(())
-    }
-
-    /// Reads and parses the message body based on the Content-Type and
-    /// Content-Length headers values.
-    #[must_use]
-    pub fn parse_body(
-        reader: &mut NetReader,
-        len_val: usize,
-        type_val: &str
-    ) -> Option<Vec<u8>> {
-        if len_val == 0 {
-            return None;
-        }
-
-        let Ok(num_bytes) = u64::try_from(len_val) else {
-            return None;
-        };
-
-        if !type_val.contains("text") && !type_val.contains("application") {
-            return None;
-        }
-
-        let mut body = Vec::with_capacity(len_val);
-        let mut rdr = reader.take(num_bytes);
-
-        // TODO: handle chunked data and partial reads.
-        if rdr.read_to_end(&mut body).is_ok() && !body.is_empty() {
-            Some(body)
-        } else {
-            None
-        }
     }
 
     /// Parses a string slice into a host address and a URI path.
@@ -459,6 +434,6 @@ impl Client {
 
     /// Receives an HTTP response from the remote host.
     pub fn recv(&mut self) -> NetResult<Response> {
-        Response::recv(self.conn.try_clone()?, *self.req.method())
+        Response::recv(self.req.conn.try_clone()?, self.req.method())
     }
 }
