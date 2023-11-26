@@ -46,13 +46,13 @@ impl Route {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Router(pub BTreeMap<Route, Target>);
 
 impl Router {
     #[must_use]
     pub fn new() -> Self {
-        Self(BTreeMap::<Route, Target>::new())
+        Self::default()
     }
 
     pub fn mount(&mut self, route: Route, target: Target) {
@@ -64,27 +64,29 @@ impl Router {
         self.0.get(route)
     }
 
+    /// Returns true if there is an entry associated with `Route`.
     #[must_use]
     pub fn route_exists(&self, route: &Route) -> bool {
         self.0.contains_key(route)
     }
 
-    /// True if the `Router` contains no entries.
+    /// Returns true if the `Router` contains no entries.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Returns the target resource for error 404 responses.
     #[must_use]
     pub fn get_error_page(&self) -> &Target {
         let route = Route::new(Method::Get, "__error");
         self.get_target(&route).unwrap_or(&Target::Empty)
     }
 
-    #[must_use]
+    /// Resolves a `Request` into a `Response` based on the provided `Router`.
     pub fn resolve(
-        req: Request,
-        router: &Arc<Router>,
+        req: &Request,
+        router: &Arc<Self>,
     ) -> NetResult<Response> {
         if router.is_empty() {
             let res = Self::make_response(
@@ -155,7 +157,7 @@ impl Router {
         status: Status,
         method: Method,
         target: &Target,
-        req: Request,
+        req: &Request,
     ) -> NetResult<Response> {
         let status_line = StatusLine::new(Version::OneDotOne, status);
         let headers = Headers::new();
@@ -180,11 +182,11 @@ impl Router {
                 res.headers.insert(CONTENT_LENGTH, content.len().into());
                 res.headers.insert(CACHE_CONTROL, Vec::from("max-age=604800").into());
 
-                res.body = Some(content)
+                res.body = Some(content);
             },
             Target::Handler(handler) => {
                 // Call handler to update the response.
-                (handler.lock().unwrap())(&req, &mut res);
+                (handler.lock().unwrap())(req, &mut res);
 
                 if res.body.is_some() {
                     res.headers.insert(CACHE_CONTROL, Vec::from("no-cache").into());
@@ -231,13 +233,14 @@ impl Debug for Target {
         match self {
             Self::Empty => write!(f, "Target::Empty"),
             Self::File(ref path) => write!(f, "Target::File({})", path.display()),
-            Self::Text(ref s) => write!(f, "Target::Text({s})"),
+            Self::Text(s) => write!(f, "Target::Text({s})"),
             Self::Handler(_) => write!(f, "Target::Handler(...)"),
         }
     }
 }
 
 impl PartialEq for Target {
+    #[allow(clippy::match_like_matches_macro)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Empty, Self::Empty) => true,
@@ -252,32 +255,38 @@ impl PartialEq for Target {
 impl Eq for Target {}
 
 impl Target {
+    /// Returns a default `Target` instance.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns true if the URI target type is empty.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    /// Returns true if the URI target type is text.
     #[must_use]
     pub const fn is_text(&self) -> bool {
         matches!(self, Self::Text(_))
     }
 
+    /// Returns true if the URI target type is a file.
     #[must_use]
     pub const fn is_file(&self) -> bool {
         matches!(self, Self::File(_))
     }
 
+    /// Returns true if the URI target type is handler function.
     #[must_use]
-    pub fn is_handler(&self) -> bool {
+    pub const fn is_handler(&self) -> bool {
         matches!(self, Self::Handler(_))
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
     }
 }
 
+/// A respresentation of the body content type.
 #[derive(Clone, Debug)]
 pub enum Body {
     Empty,
@@ -293,6 +302,7 @@ impl Default for Body {
 }
 
 impl PartialEq for Body {
+    #[allow(clippy::match_like_matches_macro)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Empty, Self::Empty) => true,
@@ -307,23 +317,33 @@ impl PartialEq for Body {
 impl Eq for Body {}
 
 impl Body {
-    pub fn new() -> Self {
+    /// Returns a default `Body` instance.
+    #[must_use]
+    pub const fn new() -> Self {
         Self::Empty
     }
 
-    pub fn is_empty(&self) -> bool {
+    /// Returns true if the body type is empty.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
     }
 
-    pub fn is_bytes(&self) -> bool {
+    /// Returns true if the body type is bytes.
+    #[must_use]
+    pub const fn is_bytes(&self) -> bool {
         matches!(self, Self::Bytes(_))
     }
 
-    pub fn is_text(&self) -> bool {
+    /// Returns true if the body type is text.
+    #[must_use]
+    pub const fn is_text(&self) -> bool {
         matches!(self, Self::Text(_))
     }
 
-    pub fn is_file(&self) -> bool {
+    /// Returns true if the body type is a file.
+    #[must_use]
+    pub const fn is_file(&self) -> bool {
         matches!(self, Self::File(_))
     }
 }

@@ -38,24 +38,28 @@ impl ResponseBuilder {
     }
 
     /// Sets the protocol version.
-    pub fn version(mut self, version: Version) -> Self {
+    #[must_use]
+    pub const fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
 
     /// Sets the HTTP response status.
-    pub fn status(mut self, status: Status) -> Self {
+    #[must_use]
+    pub const fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self
     }
 
     /// Sets the HTTP request method.
-    pub fn method(mut self, method: Method) -> Self {
+    #[must_use]
+    pub const fn method(mut self, method: Method) -> Self {
         self.method = Some(method);
         self
     }
 
     /// Adds a new header or updates the header value if it is already present.
+    #[must_use]
     pub fn insert_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
@@ -68,6 +72,7 @@ impl ResponseBuilder {
     }
 
     /// Sets the content of the response body.
+    #[must_use]
     pub fn body(mut self, data: &[u8]) -> Self {
         self.headers.insert(CONTENT_LENGTH, data.len().into());
         self.headers.insert(CONTENT_TYPE, Vec::from("text/plain").into());
@@ -434,7 +439,7 @@ impl Response {
             .and_then(
                 |len| {
                     let len_str = len.to_string();
-                    usize::from_str_radix(&len_str, 10).ok()
+                    len_str.parse::<usize>().ok()
                 });
 
         let maybe_type = headers

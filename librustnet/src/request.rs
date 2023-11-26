@@ -6,8 +6,8 @@ use std::string::ToString;
 
 use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS};
 use crate::{
-    Connection, Header, HeaderName, HeaderValue, Headers, Method,
-    NetError, NetReader, NetResult, ParseErrorKind, Route, Version,
+    Connection, Header, HeaderName, HeaderValue, Headers, Method, NetError, 
+    NetReader, NetResult, ParseErrorKind, Route, Version,
 };
 
 /// Represents the first line of an HTTP request.
@@ -71,8 +71,8 @@ impl RequestLine {
         let method = Method::parse(tokens.next())?;
 
         let path = tokens.next()
-            .and_then(|s| Some(s.to_string()))
-            .ok_or(ParseErrorKind::RequestLine)?;
+            .ok_or(ParseErrorKind::RequestLine)
+            .map(ToString::to_string)?;
 
         let version = Version::parse(tokens.next())?;
 
@@ -121,6 +121,7 @@ impl Debug for Request {
                 } else {
                     None
                 }))
+			.field("conn", &self.conn)
             .finish()
     }
 }
@@ -170,7 +171,7 @@ impl TryFrom<Connection> for Request {
             .and_then(
                 |len| {
                     let len_str = len.to_string();
-                    usize::from_str_radix(&len_str, 10).ok()
+                    len_str.parse::<usize>().ok()
                 });
 
         let maybe_type = headers

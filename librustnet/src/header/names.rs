@@ -35,8 +35,7 @@ impl FromStr for HeaderName {
         let inner = StandardHeader::from_bytes(s.as_bytes())
             .map_or_else(
                 || HeaderKind::Custom(Vec::from(s.trim())),
-                |std_header| HeaderKind::Standard(std_header)
-            );
+                HeaderKind::Standard);
 
         Ok(Self { inner })
     }
@@ -97,8 +96,8 @@ impl HeaderName {
     /// Parses an optional string slice into a `HeaderName`
     pub fn parse(maybe_name: Option<&str>) -> NetResult<Self> {
         maybe_name
-            .ok_or(ParseErrorKind::Header.into())
-            .and_then(|name| Self::from_str(name))
+            .ok_or_else(|| ParseErrorKind::Header.into())
+            .and_then(Self::from_str)
     }
 }
 

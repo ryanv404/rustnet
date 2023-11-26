@@ -77,11 +77,11 @@ impl Method {
         }
     }
 
-    #[must_use]
+    /// Parses an optional string slice into a `Method`.
     pub fn parse(maybe_method: Option<&str>) -> NetResult<Self> {
         maybe_method
-            .ok_or(ParseErrorKind::Method.into())
-            .and_then(|s| Self::from_str(s))
+            .ok_or_else(|| ParseErrorKind::Version.into())
+            .and_then(Self::from_str)
     }
 }
 
@@ -105,8 +105,8 @@ impl FromStr for Status {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        u16::from_str_radix(s.trim(), 10)
-            .map(|code| Self(code))
+        s.trim().parse::<u16>()
+            .map(Self)
             .map_err(|_| ParseErrorKind::Status.into())
     }
 }
@@ -246,11 +246,11 @@ impl Status {
         self.0
     }
 
-    #[must_use]
+    /// Parses an optional string slice into a `Status`.
     pub fn parse(maybe_status: Option<&str>) -> NetResult<Self> {
         maybe_status
-            .ok_or(ParseErrorKind::Status.into())
-            .and_then(|s| Self::from_str(s))
+            .ok_or_else(|| ParseErrorKind::Version.into())
+            .and_then(Self::from_str)
     }
 }
 
@@ -338,10 +338,10 @@ impl Version {
         *self == Self::OneDotOne
     }
 
-    #[must_use]
+    /// Parses an optional string slice into a `Version`.
     pub fn parse(maybe_version: Option<&str>) -> NetResult<Self> {
         maybe_version
-            .ok_or(ParseErrorKind::Version.into())
-            .and_then(|s| Self::from_str(s))
+            .ok_or_else(|| ParseErrorKind::Version.into())
+            .and_then(Self::from_str)
     }
 }

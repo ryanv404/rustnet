@@ -211,7 +211,7 @@ fn show_help() {
             URI    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").\n    \
             DATA   Data to be sent in the request body (optional).\n\n\
         {GRN}Options:{CLR}\n    \
-            -h, --help       Displays this help message.\n    \
+            --help           Displays this help message.\n    \
             --client-tests   Use output style expected by client tests.\n    \
             --method METHOD  Use METHOD as the request method (default: \"GET\").\n    \
             --path PATH      Use PATH as the URI path (default: \"/\").\n    \

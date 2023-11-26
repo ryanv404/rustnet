@@ -57,42 +57,49 @@ where
     }
 
 	/// Sets the HTTP method.
-    pub fn method(mut self, method: Method) -> Self {
+    #[must_use]
+    pub const fn method(mut self, method: Method) -> Self {
         self.method = method;
         self
     }
 
 	/// Sets the remote host's IP address.
+    #[must_use]
     pub fn ip(mut self, ip: &str) -> Self {
         self.ip = Some(ip.to_string());
         self
     }
 
 	/// Sets the remote host's port.
-    pub fn port(mut self, port: u16) -> Self {
+    #[must_use]
+    pub const fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
 
 	/// Sets the socket address of the remote server.
+    #[must_use]
     pub fn addr(mut self, addr: A) -> Self {
         self.addr = Some(addr);
         self
     }
 
 	/// Sets the URI path to the target resource.
+    #[must_use]
     pub fn path(mut self, path: &str) -> Self {
         self.path = Some(path.to_string());
         self
     }
 
 	/// Sets the protocol version.
-	pub fn version(mut self, version: Version) -> Self {
+    #[must_use]
+	pub const fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
 
     /// Sets a request header field line.
+    #[must_use]
     pub fn insert_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
@@ -106,13 +113,14 @@ where
 
 	/// Sets the request body and adds Content-Type and Content-Length
     /// headers.
+    #[must_use]
 	pub fn body(mut self, data: &[u8]) -> Self {
 		if data.is_empty() {
             return self;
         }
 
         self.headers.insert(CONTENT_LENGTH, data.len().into());
-        self.headers.insert(CONTENT_TYPE, "text/plain".as_bytes().into());
+        self.headers.insert(CONTENT_TYPE, b"text/plain"[..].into());
         self.body = Some(data.to_vec());
         self
 	}
@@ -139,12 +147,11 @@ where
         let path = self.path.as_ref()
             .map_or_else(
                 || String::from("/"),
-                |s| ToOwned::to_owned(s)
-            );
+                ToOwned::to_owned);
 
         let request_line = RequestLine::new(self.method, path, self.version);
         let headers = self.headers.clone();
-        let body = self.body.clone();
+        let body = self.body;
 
         let req = Request { request_line, headers, body, conn };
 
@@ -206,7 +213,7 @@ impl Client {
     pub fn get(uri: &str) -> NetResult<(Self, Response)> {
 		let (addr, path) = Self::parse_uri(uri)?;
 
-        let mut client = Client::builder()
+        let mut client = Self::builder()
             .addr(&addr)
             .path(&path)
             .send()?;
@@ -276,16 +283,16 @@ impl Client {
     /// Adds default header values for Accept, Host, and User-Agent, not
     /// already set.
     pub fn include_default_headers(&mut self) {
-        if !self.req.headers.contains(&HOST) {
+        if !self.has_header(&HOST) {
             self.req.headers.insert_host(self.remote_ip(), self.remote_port());
         }
 
-        if !self.req.headers.contains(&USER_AGENT) {
+        if !self.has_header(&USER_AGENT) {
             self.req.headers.insert_user_agent();
         }
 
-        if !self.req.headers.contains(&ACCEPT) {
-            self.req.headers.insert_accept_all();
+        if !self.has_header(&ACCEPT) {
+            self.req.headers.insert_accept("*/*");
         }
     }
 

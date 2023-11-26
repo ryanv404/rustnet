@@ -1,3 +1,4 @@
+use std::convert::Into;
 use std::error::Error as StdError;
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -46,6 +47,7 @@ where
     A: ToSocketAddrs
 {
     /// Returns a builder object that is used to build a `Server`.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -67,7 +69,7 @@ where
 
         if let (Some(ip), Some(port)) = (self.ip, self.port) {
             let addr = format!("{ip}:{port}");
-            let listener = Listener::bind(&addr)?;
+            let listener = Listener::bind(addr)?;
 
             let server = Server {
                 router: Arc::new(self.router),
@@ -83,30 +85,35 @@ where
     }
 
     /// Sets the server's IP address.
-    pub fn ip(mut self, ip: IpAddr) -> Self {
+    #[must_use]
+    pub const fn ip(mut self, ip: IpAddr) -> Self {
         self.ip = Some(ip);
         self
     }
 
     /// Sets the server's port.
-    pub fn port(mut self, port: u16) -> Self {
+    #[must_use]
+    pub const fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
 
     /// Sets the server's socket address.
+    #[must_use]
     pub fn addr(mut self, addr: A) -> Self {
         self.addr = Some(addr);
         self
     }
 
     /// Configures handling of a server end-point.
+    #[must_use]
     pub fn route(self, uri_path: &str) -> Self {
         let _route = Route::new(Method::Get, uri_path);
         self
     }
 
     /// Configures handling of a GET request.
+    #[must_use]
     pub fn get<P>(mut self, uri_path: &str, file_path: P) -> Self
     where
         P: Into<PathBuf>
@@ -118,6 +125,7 @@ where
     }
 
     /// Configures handling of a GET request.
+    #[must_use]
     pub fn get_with_handler<F>(mut self, uri_path: &str, handler: F) -> Self
     where
         F: FnMut(&Request, &mut Response) + Send + Sync + 'static
@@ -129,6 +137,7 @@ where
     }
 
     /// Configures handling of a POST request.
+    #[must_use]
     pub fn post(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Post, uri_path);
         self.router.mount(route, Target::Empty);
@@ -136,6 +145,7 @@ where
     }
 
     /// Configures handling of a PUT request.
+    #[must_use]
     pub fn put(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Put, uri_path);
         self.router.mount(route, Target::Empty);
@@ -143,6 +153,7 @@ where
     }
 
     /// Configures handling of a PATCH request.
+    #[must_use]
     pub fn patch(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Patch, uri_path);
         self.router.mount(route, Target::Empty);
@@ -150,6 +161,7 @@ where
     }
 
     /// Configures handling of a DELETE request.
+    #[must_use]
     pub fn delete(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Delete, uri_path);
         self.router.mount(route, Target::Empty);
@@ -157,6 +169,7 @@ where
     }
 
     /// Configures handling of a TRACE request.
+    #[must_use]
     pub fn trace(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Trace, uri_path);
         self.router.mount(route, Target::Empty);
@@ -165,6 +178,7 @@ where
     }
 
     /// Configures handling of a CONNECT request.
+    #[must_use]
     pub fn connect(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Connect, uri_path);
         self.router.mount(route, Target::Empty);
@@ -173,6 +187,7 @@ where
     }
 
     /// Configures handling of an OPTIONS request.
+    #[must_use]
     pub fn options(mut self, uri_path: &str) -> Self {
         let route = Route::new(Method::Options, uri_path);
         self.router.mount(route, Target::Empty);
@@ -181,6 +196,7 @@ where
     }
 
     /// Sets the static file path to a favicon icon.
+    #[must_use]
     pub fn set_favicon<P>(mut self, file_path: P) -> Self
     where
         P: Into<PathBuf>
@@ -192,6 +208,7 @@ where
     }
 
     /// Sets the static file path to an HTML page returned by 404 responses.
+    #[must_use]
     pub fn set_error_page<P>(mut self, file_path: P) -> Self
     where
         P: Into<PathBuf>
@@ -232,14 +249,14 @@ impl Listener {
 
     /// Returns the server's socket address.
     pub fn local_addr(&self) -> NetResult<SocketAddr> {
-        self.inner.local_addr().map_err(|e| e.into())
+        self.inner.local_addr().map_err(Into::into)
     }
 
     /// Returns a `Connection` instance for each incoming connection.
     pub fn accept(&self) -> NetResult<Connection> {
         self.inner.accept()
             .and_then(Connection::try_from)
-            .map_err(|e| e.into())
+            .map_err(Into::into)
     }
 }
 
@@ -266,6 +283,7 @@ pub struct Server {
 
 impl Server {
     /// Returns a builder object that is used to build a `Server`.
+    #[must_use]
     pub fn builder<A>() -> ServerBuilder<A>
     where
         A: ToSocketAddrs
@@ -341,20 +359,17 @@ impl Server {
         do_logging: &Arc<AtomicBool>
     ) -> NetResult<()> {
         let req = Request::try_from(conn)?;
-        let method = req.request_line.method;
-        let path = req.request_line.path.clone();
-
-        let mut res = Router::resolve(req, router)?;
+        let mut res = Router::resolve(&req, router)?;
 
         if do_logging.load(Ordering::Relaxed) {
             let ip = res.remote_ip();
             let status = res.status_code();
-
+            let method = req.request_line.method;
+            let path = req.request_line.path;
             Self::log_with_status(ip, status, method, &path);
         }
 
         res.send()?;
-
         Ok(())
     }
 
@@ -367,13 +382,13 @@ impl Server {
     /// Returns the local IP address of the server.
     #[must_use]
     pub fn local_ip(&self) -> Option<IpAddr> {
-        self.local_addr().map_or(None, |sock| Some(sock.ip()))
+        self.local_addr().map(|sock| sock.ip())
     }
 
     /// Returns the local port of the server.
     #[must_use]
     pub fn local_port(&self) -> Option<u16> {
-        self.local_addr().map_or(None, |sock| Some(sock.port()))
+        self.local_addr().map(|sock| sock.port())
     }
 
     /// Logs the response status and request line.
@@ -399,21 +414,18 @@ impl Server {
     }
 
     /// Triggers graceful shutdown of the server.
-    pub fn shutdown(&self) {
-        Self::log_shutdown();
-
+    pub fn shutdown(&self) -> NetResult<()> {
         // Stops the listener thread's loop.
         self.keep_listening.store(false, Ordering::Relaxed);
 
         // Briefly connect to ourselves to unblock the listener thread.
-        self.local_addr()
-            .map(|addr| {
-                if let Ok(stream) = TcpStream::connect(addr) {
-                    stream.shutdown(Shutdown::Both).unwrap();
-                }
-            });
+        if let Some(addr) = self.local_addr() {
+            let _ = TcpStream::connect(addr).map(|stream|
+                stream.shutdown(Shutdown::Both));
+        }
 
         // Give the worker threads a bit of time to shutdown.
         thread::sleep(Duration::from_millis(200));
+        Ok(())
     }
 }

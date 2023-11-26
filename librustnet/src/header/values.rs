@@ -97,7 +97,7 @@ impl HeaderValue {
     /// Parses an optional string slice into a `HeaderValue`
     pub fn parse(maybe_value: Option<&str>) -> NetResult<Self> {
         maybe_value
-            .ok_or(ParseErrorKind::Header.into())
-            .and_then(|value| Self::from_str(value))
+            .ok_or_else(|| ParseErrorKind::Header.into())
+            .and_then(Self::from_str)
     }
 }
