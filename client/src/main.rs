@@ -1,6 +1,7 @@
 use std::{env, io};
 
-use librustnet::{Client, Method, Response, consts::DATE};
+use librustnet::{Client, Method};
+use librustnet::consts::DATE
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -54,7 +55,7 @@ fn main() -> io::Result<()> {
                         .as_ref()
                         .and_then(|m| {
                             let upper = m.to_ascii_uppercase();
-                            upper.parse::<Method>().ok()
+                            Method::parse(upper).ok()
                         });
 
                     if let Some(new_method) = maybe_method {
@@ -89,9 +90,10 @@ fn main() -> io::Result<()> {
 
     // Parse the URI argument.
     let (ref addr, ref path, ref body) = match Client::parse_uri(&uri) {
-        Ok((addr, path)) => {
+        Ok((addr, uri_path)) => {
             let body = args.next().unwrap_or_default();
-            (addr, path_arg.unwrap_or(path), body)
+            let uri_path = path_arg.unwrap_or(uri_path);
+            (addr, uri_path, body)
         },
         Err(_) => {
             eprintln!("{RED}Unable to parse the URI argument.{CLR}\n");
@@ -104,14 +106,10 @@ fn main() -> io::Result<()> {
         .method(method_arg.unwrap_or(Method::Get))
         .addr(addr)
         .path(path)
-        .body(body.as_bytes())
-        .send()?;
-
-    let mut req = client.req.take().unwrap();        
-    let mut conn_clone = req.conn.as_mut().unwrap().try_clone().unwrap();
+        .send_text(body)?;
 
     // Receive the response from the server.
-    client.recv(&mut conn_clone)?;
+    client.recv()?;
 
     // Ignore Date headers in tests.
     if testing_client || testing_server {
@@ -119,44 +117,37 @@ fn main() -> io::Result<()> {
         client.res.as_mut().map(|res| res.headers.remove(&DATE));
     }
 
-    let req = client.req.take().unwrap();        
-    let res = client.res.take().unwrap();        
-
     if testing_client {
-        println!(
-            "{}\n{}\n\n{}\n{}",
-            req.request_line(),
-            req.headers_to_string().trim_end(),
-            res.status_line(),
-            res.headers_to_string().trim_end()
-        );
+        client.req.as_ref()
+            .map(|req| println!("{}\n{}\n\n",
+                req.request_line(),
+                req.headers_to_string().trim_end()));
+        client.res.as_ref()
+            .map(|res| println!("{}\n{}",
+                res.status_line(),
+                res.headers_to_string().trim_end()));
     } else if testing_server {
-        let res_body = res.body.to_string();
-        let res_body = res_body.trim_end();
-
-        if res.body.is_empty() {
-            println!(
-                "{}\n{}",
-                res.status_line(),
-                res.headers_to_string().trim_end()
-            );
-        } else {
-            println!(
-                "{}\n{}\n\n{}",
-                res.status_line(),
-                res.headers_to_string().trim_end(),
-                res_body.trim_end()
-            );
-        }
+        client.res.as_ref()
+            .map(|res| if res.body.is_empty() {
+                println!("{}\n{}",
+                    res.status_line(),
+                    res.headers_to_string().trim_end());
+            } else {
+                println!("{}\n{}\n\n{}",
+                    res.status_line(),
+                    res.headers_to_string().trim_end(),
+                    res.body.to_string().trim_end());
+            });
     } else {
-        print_output(&mut client, &res);
+        print_output(&mut client);
     }
 
     Ok(())
 }
 
-fn print_output(client: &mut Client, res: &Response) {
+fn print_output(client: &mut Client) {
     let req = client.req.take().unwrap();
+    let res = client.res.take().unwrap();
     let req_body = req.body.to_string();
     let res_body = res.body.to_string();
     let res_color = if res.status_code() >= 400 {

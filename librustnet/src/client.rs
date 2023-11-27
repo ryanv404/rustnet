@@ -1,10 +1,8 @@
-use std::borrow::ToOwned;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::ErrorKind as IoErrorKind;
-use std::io::Result as IoResult;
 use std::net::{TcpStream, ToSocketAddrs};
 
-use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE};
+use crate::consts::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
 use crate::{
     Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
     NetResult, ParseErrorKind, RequestLine, Response, Request, Version,
@@ -109,58 +107,161 @@ where
         self.headers.contains(name)
     }
 
-	/// Sets the request body and adds Content-Type and Content-Length
-    /// headers.
-    #[must_use]
-	pub fn body(mut self, data: &[u8]) -> Self {
-		if data.is_empty() {
-            return self;
+	/// Sets the request body, Content-Type header, and Content-Length header.
+	pub fn body(mut self, body: Body, content_type: &str) -> Self {
+        if body.is_empty() {
+            self.headers.insert_content_length(0);
+            self.body = Body::Empty;
+        } else {
+            self.body = body;
+            self.headers.insert_content_length(self.body.len());
+            self.headers.insert(CONTENT_TYPE, content_type.as_bytes().into());
         }
 
-        self.headers.insert(CONTENT_LENGTH, data.len().into());
-        self.headers.insert(CONTENT_TYPE, b"text/plain"[..].into());
-        self.body = Body::Text(String::from_utf8_lossy(data).to_string());
+        self
+	}
+
+	/// Sets a text request body and sets the Content-Type and Content-Length
+	/// headers.
+    #[must_use]
+	pub fn text(mut self, text: &str) -> Self {
+        if text.is_empty() {
+            self.headers.insert_content_length(0);
+            self.body = Body::Empty;
+        } else {
+            self.body = Body::Text(text.into());
+            self.headers.insert_content_length(self.body.len());
+            if let Some(body_type) = self.body.as_content_type() {
+                self.headers.insert(CONTENT_TYPE, body_type)
+            }
+        }
+
+        self
+	}
+
+	/// Sets a HTML request body and sets the Content-Type and Content-Length
+	/// headers.
+    #[must_use]
+	pub fn html(mut self, html: &str) -> Self {
+        if html.is_empty() {
+            self.headers.insert_content_length(0);
+            self.body = Body::Empty;
+        } else {
+            self.body = Body::Html(html.into());
+            self.headers.insert_content_length(self.body.len());
+            if let Some(body_type) = self.body.as_content_type() {
+                self.headers.insert(CONTENT_TYPE, body_type)
+            }
+        }
+
+        self
+	}
+
+	/// Sets a JSON request body and sets the Content-Type and Content-Length
+	/// headers.
+    #[must_use]
+	pub fn json(mut self, json: &str) -> Self {
+        if json.is_empty() {
+            self.headers.insert_content_length(0);
+            self.body = Body::Empty;
+        } else {
+            self.body = Body::Json(json.into());
+            self.headers.insert_content_length(self.body.len());
+            if let Some(body_type) = self.body.as_content_type() {
+                self.headers.insert(CONTENT_TYPE, body_type)
+            }
+        }
+
+        self
+	}
+
+	/// Sets a request body comprised of bytes and sets the Content-Type and
+	/// Content-Length headers.
+    #[must_use]
+	pub fn bytes(mut self, bytes: &[u8]) -> Self {
+        if bytes.is_empty() {
+            self.headers.insert_content_length(0);
+            self.body = Body::Empty;
+        } else {
+            self.body = Body::Bytes(bytes.to_vec());
+            self.headers.insert_content_length(self.body.len());
+            if let Some(body_type) = self.body.as_content_type() {
+                self.headers.insert(CONTENT_TYPE, body_type)
+            }
+        }
+
         self
 	}
 
     /// Builds and returns a new `Client` instance.
-    pub fn build(self) -> NetResult<Client> {
-        let conn = {
-			if let Some(addr) = self.addr.as_ref() {
-				let stream = TcpStream::connect(addr)?;
-                Connection::try_from(stream)?
-            } else if self.ip.is_some() && self.port.is_some() {
-                let ip = self.ip.as_ref().unwrap();
-                let port = self.port.as_ref().unwrap();
-
-                let addr = format!("{ip}:{port}");
-                let stream = TcpStream::connect(addr)?;
-
-                Connection::try_from(stream)?
-            } else {
-                return Err(IoErrorKind::InvalidInput.into());
-            }
+    pub fn build(mut self) -> NetResult<Client> {
+        let stream = match self.addr.as_ref() {
+            Some(addr) => TcpStream::connect(addr)?,
+            None => match (self.ip.as_ref(), self.port.as_ref()) {
+                (Some(ip), Some(port)) => TcpStream::connect((ip.as_str(), *port))?,
+                (_, _) => return Err(IoErrorKind::InvalidInput.into()),
+            },
         };
 
+        let conn = Connection::try_from(stream)?;
+
+        if !self.headers.contains(&ACCEPT) {
+            self.headers.insert_accept("*/*");
+        }
+
+        if !self.headers.contains(&CONTENT_LENGTH) {
+            self.headers.insert_content_length(self.body.len());
+        }
+
+        if !self.headers.contains(&CONTENT_TYPE) && !self.body.is_empty() {
+            self.headers.insert_content_type("text/plain");
+        }
+
+        if !self.headers.contains(&HOST) {
+            self.headers.insert_host(conn.remote_ip(), conn.remote_port());
+        }
+
+        if !self.headers.contains(&USER_AGENT) {
+            self.headers.insert_user_agent();
+        }
+
         let path = self.path.as_ref()
-            .map_or_else(
-                || String::from("/"),
-                ToOwned::to_owned);
+            .map_or_else(|| String::from("/"), |path| path.to_string());
 
-        let request_line = RequestLine::new(self.method, path, self.version);
-        let headers = self.headers.clone();
-        let body = self.body;
-        let conn = Some(conn);
+        let req = Some(Request {
+            request_line: RequestLine::new(self.method, path, self.version),
+            headers: self.headers,
+            body: self.body,
+            conn: Some(conn)
+        });
 
-        let req = Some(Request { request_line, headers, body, conn });
-        let res = None;
-
-        Ok(Client { req, res })
+        Ok(Client { req, res: None })
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
-    pub fn send(self) -> IoResult<Client> {
+    pub fn send(self) -> NetResult<Client> {
         let mut client = self.build()?;
+        client.send()?;
+        Ok(client)
+    }
+
+    /// Sends an HTTP request with a text body.
+    pub fn send_text(self, text: &str) -> NetResult<Client> {
+        let mut client = self.text(text).build()?;
+        client.send()?;
+        Ok(client)
+    }
+
+    /// Sends an HTTP request with an HTML body.
+    pub fn send_html(self, html: &str) -> NetResult<Client> {
+        let mut client = self.html(html).build()?;
+        client.send()?;
+        Ok(client)
+    }
+
+    /// Sends an HTTP request with a JSON body.
+    pub fn send_json(self, json: &str) -> NetResult<Client> {
+        let mut client = self.json(json).build()?;
         client.send()?;
         Ok(client)
     }
@@ -205,7 +306,7 @@ impl Client {
         if let Some((scheme, rest)) = uri.split_once("://") {
             // If "://" is present, we expect a URI like "http://httpbin.org".
             if scheme.is_empty() || rest.is_empty() {
-                return Err(ParseErrorKind::Uri.into());
+                return Err(ParseErrorKind::Path.into());
             }
 
             match scheme {
@@ -238,11 +339,11 @@ impl Client {
                     },
                 },
                 "https" => Err(NetError::HttpsNotImplemented),
-                _ => Err(ParseErrorKind::Uri)?,
+                _ => Err(ParseErrorKind::Path)?,
             }
         } else if let Some((addr, path)) = uri.split_once('/') {
             if addr.is_empty() {
-                return Err(ParseErrorKind::Uri)?;
+                return Err(ParseErrorKind::Path)?;
             }
 
             let addr = if addr.contains(':') {
@@ -267,17 +368,27 @@ impl Client {
 
     /// Sends an HTTP request to a remote host.
     pub fn send(&mut self) -> NetResult<()> {
-        self.req
-            .as_mut()
-            .ok_or_else(|| IoErrorKind::NotConnected.into())
-            .and_then(|req| req.send())
+        let Some(req) = self.req.as_mut() else {
+            return Err(IoErrorKind::NotConnected.into());
+        };
+
+        req.send()?;
+        Ok(())
     }
 
     /// Receives an HTTP response from the remote host.
-    pub fn recv(&mut self, conn: &mut Connection) -> NetResult<()> {
-        Response::recv(conn).and_then(|res| {
-            self.res = Some(res);
-            Ok(())
-        })
+    pub fn recv(&mut self) -> NetResult<()> {
+        let Some(req) = self.req.as_mut() else {
+            return Err(IoErrorKind::NotConnected.into());
+        };
+
+        let Some(conn) = req.conn.as_mut() else {
+            return Err(IoErrorKind::NotConnected.into());
+        };
+
+        let cloned_conn = conn.try_clone()?;
+        self.res = Some(Response::recv(cloned_conn.reader)?);
+
+        Ok(())
     }
 }

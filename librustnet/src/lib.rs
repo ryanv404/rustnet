@@ -26,7 +26,6 @@ pub mod request;
 pub mod response;
 pub mod router;
 pub mod server;
-pub mod threadpool;
 pub mod util;
 
 pub use client::{Client, ClientBuilder};
@@ -37,8 +36,7 @@ pub use http::{Method, Status, Version};
 pub use request::{Request, RequestLine};
 pub use response::{Response, StatusLine};
 pub use router::{Body, Route, Router, Target};
-pub use server::{Server, ServerBuilder, ServerHandle};
-pub use threadpool::{ThreadPool, Worker};
+pub use server::{Server, ServerBuilder, ServerHandle, Task, ThreadPool, Worker};
 pub use util::{trim_whitespace_bytes, get_datetime};
 
 pub mod consts {

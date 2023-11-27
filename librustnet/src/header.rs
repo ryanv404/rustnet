@@ -88,30 +88,29 @@ impl Headers {
 
     /// Inserts a Host header with the value "ip:port".
     pub fn insert_host(&mut self, ip: IpAddr, port: u16) {
-        let host = format!("{ip}:{port}");
-        self.insert(HOST, host.into());
+        self.insert(HOST, format!("{ip}:{port}").into());
     }
 
     /// Inserts the default User-Agent header.
     pub fn insert_user_agent(&mut self) {
         let agent = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
-        self.insert(USER_AGENT, Vec::from(agent).into());
+        self.insert(USER_AGENT, agent.as_bytes().into());
     }
 
     /// Inserts an Accept header with the given value.
     pub fn insert_accept(&mut self, value: &str) {
-        self.insert(ACCEPT, Vec::from(value).into());
+        self.insert(ACCEPT, value.as_bytes().into());
     }
 
     /// Inserts the default Server header.
     pub fn insert_server(&mut self) {
         let server = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
-        self.insert(SERVER, Vec::from(server).into());
+        self.insert(SERVER, server.as_bytes().into());
     }
 
     /// Inserts a Connection header with a value of "keep-alive".
     pub fn insert_connection(&mut self, value: &str) {
-        self.insert(CONNECTION, Vec::from(value).into());
+        self.insert(CONNECTION, value.as_bytes().into());
     }
 
     /// Inserts a Content-Length header with the given value.
@@ -121,12 +120,12 @@ impl Headers {
 
     /// Inserts a Content-Type header with the given value.
     pub fn insert_content_type(&mut self, value: &str) {
-        self.insert(CONTENT_TYPE, Vec::from(value).into());
+        self.insert(CONTENT_TYPE, value.as_bytes().into());
     }
 
     /// Inserts a Cache-Control header with the given value.
     pub fn insert_cache_control(&mut self, value: &str) {
-        self.insert(CACHE_CONTROL, Vec::from(value).into());
+        self.insert(CACHE_CONTROL, value.as_bytes().into());
     }
 
     pub fn update_headers_by_status_code(&mut self, code: u16) {

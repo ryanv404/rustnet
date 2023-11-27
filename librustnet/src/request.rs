@@ -4,7 +4,7 @@ use std::str;
 use std::string::ToString;
 
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method,
+    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetReader,
     NetResult, ParseErrorKind, Route, Version,
 };
 
@@ -192,15 +192,16 @@ impl Request {
 
     /// Sends an HTTP request to a remote server.
     pub fn send(&mut self) -> NetResult<()> {
-        let Some(mut conn) = self.conn.take() else {
+        let Some(conn) = self.conn.as_mut() else {
             return Err(IoErrorKind::NotConnected.into());
         };
 
-        conn.send_request(self)
+        let mut writer = conn.writer.try_clone()?;
+        writer.send_request(self)
     }
 
     /// Receives an HTTP request from the remote client.
-    pub fn recv(conn: &mut Connection) -> NetResult<Request> {
-        conn.recv_request()
+    pub fn recv(mut reader: NetReader) -> NetResult<Request> {
+        reader.recv_request()
     }
 }

@@ -1,13 +1,10 @@
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::consts::CONTENT_TYPE;
 use crate::{
-    HeaderName, HeaderValue, Method, NetError, NetReader, NetResult,
-    ParseErrorKind, Request, Response,
+    HeaderValue, Method, NetResult, Request, Response,
 };
 
 /// Represents an endpoint defined by an HTTP method and a URI path.
@@ -82,17 +79,14 @@ impl Router {
     }
 
     /// Resolves a `Request` into a `Response` based on the provided `Router`.
-    pub fn resolve(
-        req: &mut Request,
-        router: &Arc<Self>,
-    ) -> NetResult<Response> {
-        if router.is_empty() {
+    pub fn resolve(&self, req: &mut Request) -> NetResult<Response> {
+        if self.is_empty() {
             let mut target = Target::Text("This server has no routes configured.");
             return Response::new(502, &mut target, req);
         }
 
         let method = req.method();
-        let mut maybe_target = router.get(&req.route());
+        let mut maybe_target = self.get(&req.route());
 
         match (maybe_target.as_mut(), method) {
             (Some(target), Method::Get) => {
@@ -127,10 +121,10 @@ impl Router {
                 // but does exist as for a GET request.
                 let route = Route::Get(req.request_line.path.clone());
 
-                let (code, mut target) = router.get(&route).map_or_else(
+                let (code, mut target) = self.get(&route).map_or_else(
                     || {
                         // No route exists for a GET request either.
-                        (404, router.error_handler())
+                        (404, self.error_handler())
                     },
                     |target| {
                         // GET route exists so send it as a HEAD response.
@@ -142,7 +136,7 @@ impl Router {
             },
             (None, _) => {
                 // Handle routes that do not exist.
-                Response::new(404, &mut router.error_handler(), req)
+                Response::new(404, &mut self.error_handler(), req)
             },
         }
     }
@@ -151,15 +145,16 @@ impl Router {
 /// Target resources used by server end-points.
 pub enum Target {
     Empty,
-    File(PathBuf),
-    Favicon(PathBuf),
-    Html(&'static str),
     Text(&'static str),
+    Html(&'static str),
     Json(&'static str),
     Xml(&'static str),
+    Bytes(Vec<u8>),
+    File(PathBuf),
+    Favicon(PathBuf),
     Fn(Box<dyn Fn(&Request, &Response) + Send + Sync>),
     FnMut(Arc<Mutex<dyn FnMut(&Request, &mut Response) + Send + Sync>>),
-    FnOnce(Box<dyn FnOnce() -> Body + Send + Sync>),
+    FnOnce(Box<dyn FnOnce() + Send + Sync>),
 }
 
 impl Default for Target {
@@ -168,19 +163,50 @@ impl Default for Target {
     }
 }
 
+impl Display for Target {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Empty => Ok(()),
+            Self::Text(ref s) => write!(f, "{s}"),
+            Self::Html(ref s) => write!(f, "{s}"),
+            Self::Json(ref s) => write!(f, "{s}"),
+            Self::Xml(ref s) => write!(f, "{s}"),
+            Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
+            Self::File(_) => write!(f, "File {{ ... }}"),
+            Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
+            Self::Fn(_) => write!(f, "Fn {{ ... }}"),
+            Self::FnMut(_) => write!(f, "FnMut {{ ... }}"),
+            Self::FnOnce(_) => write!(f, "FnOnce {{ ... }}"),
+        }
+    }
+}
+
 impl Debug for Target {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Empty => write!(f, "Target::Empty"),
-            Self::File(ref path) => write!(f, "Target::File({})", path.display()),
-            Self::Favicon(ref path) => write!(f, "Target::Favicon({})", path.display()),
-            Self::Html(s) => write!(f, "Target::Html({s})"),
-            Self::Text(s) => write!(f, "Target::Text({s})"),
-            Self::Json(s) => write!(f, "Target::Json({s})"),
-            Self::Xml(s) => write!(f, "Target::Xml({s})"),
-            Self::Fn(_) => write!(f, "Target::Fn(Fn(&Request, &Response))"),
-            Self::FnMut(_) => write!(f, "Target::FnMut(FnMut(&Request, &mut Response))"),
-            Self::FnOnce(_) => write!(f, "Target::FnOnce(FnOnce() -> Body)"),
+            Self::Empty => f.debug_tuple("Empty").finish(),
+            Self::Text(ref s) => f.debug_tuple("Text").field(s).finish(),
+            Self::Html(ref s) => f.debug_tuple("Html").field(s).finish(),
+            Self::Json(ref s) => f.debug_tuple("Json").field(s).finish(),
+            Self::Xml(ref s) => f.debug_tuple("Xml").field(s).finish(),
+            Self::Bytes(ref buf) => {
+                f.debug_tuple("Bytes").field(buf).finish()
+            },
+            Self::File(ref path) => {
+                f.debug_tuple("File").field(path).finish()
+            },
+            Self::Favicon(ref path) => {
+                f.debug_tuple("Favicon").field(path).finish()
+            },
+            Self::Fn(_) => {
+                f.debug_tuple("Fn closure").field(&"{ ... }").finish()
+            },
+            Self::FnMut(_) => {
+                f.debug_tuple("FnMut closure").field(&"{ ... }").finish()
+            },
+            Self::FnOnce(_) => {
+                f.debug_tuple("FnOnce closure").field(&"{ ... }").finish()
+            },
         }
     }
 }
@@ -189,16 +215,17 @@ impl PartialEq for Target {
     #[allow(clippy::match_like_matches_macro)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Empty, Self::Empty) => true,
-            (Self::File(_), Self::File(_)) => true,
-            (Self::Html(_), Self::Html(_)) => true,
-            (Self::Favicon(_), Self::Favicon(_)) => true,
-            (Self::Text(_), Self::Text(_)) => true,
-            (Self::Json(_), Self::Json(_)) => true,
-            (Self::Xml(_), Self::Xml(_)) => true,
-            (Self::Fn(_), Self::Fn(_)) => true,
-            (Self::FnMut(_), Self::FnMut(_)) => true,
-            (Self::FnOnce(_), Self::FnOnce(_)) => true,
+            (Self::Empty, Self::Empty)
+                | (Self::Text(_), Self::Text(_))
+                | (Self::Html(_), Self::Html(_))
+                | (Self::Json(_), Self::Json(_))
+                | (Self::Xml(_), Self::Xml(_))
+                | (Self::Bytes(_), Self::Bytes(_))
+                | (Self::File(_), Self::File(_))
+                | (Self::Favicon(_), Self::Favicon(_))
+                | (Self::Fn(_), Self::Fn(_))
+                | (Self::FnMut(_), Self::FnMut(_))
+                | (Self::FnOnce(_), Self::FnOnce(_)) => true,
             _ => false,
         }
     }
@@ -219,54 +246,52 @@ impl Target {
         matches!(self, Self::Empty)
     }
 
-    /// Returns true if the URI target type is text.
+    /// Returns true if the URI target type is a function.
     #[must_use]
-    pub const fn is_text(&self) -> bool {
-        matches!(self, Self::Text(_))
-    }
-
-    /// Returns true if the URI target type is a file.
-    #[must_use]
-    pub const fn is_file(&self) -> bool {
-        matches!(self, Self::File(_))
-    }
-
-    /// Returns true if the URI target type is HTML.
-    #[must_use]
-    pub const fn is_html(&self) -> bool {
-        matches!(self, Self::Html(_))
-    }
-
-    /// Returns true if the URI target type is JSON.
-    #[must_use]
-    pub const fn is_json(&self) -> bool {
-        matches!(self, Self::Json(_))
-    }
-
-    /// Returns true if the URI target type is XML.
-    #[must_use]
-    pub const fn is_xml(&self) -> bool {
-        matches!(self, Self::Xml(_))
-    }
-
-    /// Returns true if the URI target type is handler function.
-    #[must_use]
-    pub const fn is_handler(&self) -> bool {
+    pub const fn is_function_handler(&self) -> bool {
         matches!(self, Self::Fn(_) | Self::FnMut(_) | Self::FnOnce(_))
+    }
+
+    /// Returns true if the URI target is a String.
+    #[must_use]
+    pub const fn is_string(&self) -> bool {
+        matches!(self,
+            Self::Text(_) | Self::Html(_) | Self::Json(_) | Self::Xml(_))
+    }
+
+    /// Returns true if the URI target is a file path.
+    #[must_use]
+    pub const fn is_file_path(&self) -> bool {
+        matches!(self, Self::File(_) | Self::Favicon(_))
+    }
+
+    /// Returns a Content-Type `HeaderValue` based on the `Target` variant.
+    #[must_use]
+    pub fn as_content_type(&self) -> Option<HeaderValue> {
+        match self {
+            Self::Text(_) => Some(b"text/plain; charset=utf-8"[..].into()),
+            Self::Html(_) => Some(b"text/html; charset=utf-8"[..].into()),
+            Self::Json(_) => Some(b"application/json"[..].into()),
+            Self::Xml(_) => Some(b"application/xml"[..].into()),
+            Self::Bytes(_) => Some(b"application/octet-stream"[..].into()),
+            Self::File(ref path) => Some(HeaderValue::infer_content_type(path)),
+            Self::Favicon(ref path) => Some(HeaderValue::infer_content_type(path)),
+            _ => None,
+        }
     }
 }
 
 /// A respresentation of the body content type.
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Hash)]
 pub enum Body {
     Empty,
     Text(String),
     Html(String),
     Json(String),
     Xml(String),
-    File(PathBuf),
-    Favicon(Vec<u8>),
+    Image(Vec<u8>),
     Bytes(Vec<u8>),
+    Favicon(Vec<u8>),
 }
 
 impl Default for Body {
@@ -283,9 +308,30 @@ impl Display for Body {
             Self::Html(ref s) => write!(f, "{s}"),
             Self::Json(ref s) => write!(f, "{s}"),
             Self::Xml(ref s) => write!(f, "{s}"),
-            Self::File(_) => Ok(()),
-            Self::Favicon(_) => Ok(()),
-            Self::Bytes(_) => Ok(()),
+            Self::Image(_) => write!(f, "Image {{ ... }}"),
+            Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
+            Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
+        }
+    }
+}
+
+impl Debug for Body {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Empty => f.debug_tuple("Empty").finish(),
+            Self::Text(ref s) => f.debug_tuple("Text").field(s).finish(),
+            Self::Html(ref s) => f.debug_tuple("Html").field(s).finish(),
+            Self::Json(ref s) => f.debug_tuple("Json").field(s).finish(),
+            Self::Xml(ref s) => f.debug_tuple("Xml").field(s).finish(),
+            Self::Image(_) => {
+                f.debug_tuple("Image").field(&"{ ... }").finish()
+            },
+            Self::Bytes(_) => {
+                f.debug_tuple("Bytes").field(&"{ ... }").finish()
+            },
+            Self::Favicon(_) => {
+                f.debug_tuple("Favicon").field(&"{ ... }").finish()
+            },
         }
     }
 }
@@ -299,9 +345,9 @@ impl PartialEq for Body {
             (Self::Html(_), Self::Html(_)) => true,
             (Self::Json(_), Self::Json(_)) => true,
             (Self::Xml(_), Self::Xml(_)) => true,
-            (Self::File(_), Self::File(_)) => true,
-            (Self::Favicon(_), Self::Favicon(_)) => true,
+            (Self::Image(_), Self::Image(_)) => true,
             (Self::Bytes(_), Self::Bytes(_)) => true,
+            (Self::Favicon(_), Self::Favicon(_)) => true,
             _ => false,
         }
     }
@@ -322,124 +368,51 @@ impl Body {
         matches!(self, Self::Empty)
     }
 
-    /// Returns true if the body is bytes.
+
+    /// Returns true if the URI target is a String.
+    #[must_use]
+    pub const fn is_string(&self) -> bool {
+        matches!(self,
+            Self::Text(_) | Self::Html(_) | Self::Json(_) | Self::Xml(_))
+    }
+
+    /// Returns true if the URI target is a vector of bytes.
     #[must_use]
     pub const fn is_bytes(&self) -> bool {
-        matches!(self, Self::Bytes(_))
+        matches!(self, Self::Image(_) | Self::Bytes(_) | Self::Favicon(_))
     }
 
-    /// Returns true if the body type is text.
+    /// Returns a Content-Type `HeaderValue` based on the `Body` variant.
     #[must_use]
-    pub const fn is_text(&self) -> bool {
-        matches!(self, Self::Text(_))
-    }
-
-    /// Returns true if the body type is HTML.
-    #[must_use]
-    pub const fn is_html(&self) -> bool {
-        matches!(self, Self::Html(_))
-    }
-
-    /// Returns true if the body type is JSON.
-    #[must_use]
-    pub const fn is_json(&self) -> bool {
-        matches!(self, Self::Json(_))
-    }
-
-    /// Returns true if the body type is XML.
-    #[must_use]
-    pub const fn is_xml(&self) -> bool {
-        matches!(self, Self::Xml(_))
-    }
-
-    /// Returns true if the body is a path to a local file.
-    #[must_use]
-    pub const fn is_file(&self) -> bool {
-        matches!(self, Self::File(_))
-    }
-
-    /// Returns true if the body is a favicon.
-    #[must_use]
-    pub const fn is_favicon(&self) -> bool {
-        matches!(self, Self::Favicon(_))
-    }
-
-    /// Returns a Content-Type `HeaderName`and `HeaderValue` based on the
-    /// `Body` variant.
-    #[must_use]
-    pub fn as_content_type(&self) -> Option<(HeaderName, HeaderValue)> {
-        let value: HeaderValue = match self {
-            Self::Empty => return None,
-            Self::Text(_) => b"text/plain; charset=utf-8"[..].into(),
-            Self::Html(_) => b"text/html; charset=utf-8"[..].into(),
-            Self::Json(_) => b"application/json"[..].into(),
-            Self::Xml(_) => b"application/xml"[..].into(),
-            Self::File(_) => return None,
-            Self::Favicon(_) => b"image/x-icon"[..].into(),
-            Self::Bytes(_) => return None,
-        };
-
-        Some((CONTENT_TYPE, value))
-    }
-
-    /// Returns true if the body is safe to print to the terminal.
-    #[must_use]
-    pub const fn is_printable(&self) -> bool {
+    pub fn as_content_type(&self) -> Option<HeaderValue> {
         match self {
-            Self::Text(_) | Self::Html(_) | Self::Json(_) 
-                | Self::Xml(_) => true,
-            Self::Empty | Self::Favicon(_) | Self::Bytes(_) 
-                | Self::File(_) => false,
+            Self::Empty => None,
+            Self::Text(_) => Some(b"text/plain; charset=utf-8"[..].into()),
+            Self::Html(_) => Some(b"text/html; charset=utf-8"[..].into()),
+            Self::Json(_) => Some(b"application/json"[..].into()),
+            Self::Xml(_) => Some(b"application/xml"[..].into()),
+            Self::Image(_) => Some(b"image"[..].into()),
+            Self::Bytes(_) => Some(b"application/octet-stream"[..].into()),
+            Self::Favicon(_) => Some(b"image/x-icon"[..].into()),
         }
     }
 
-    /// Uses header values to read and parse the message body.
+    /// Returns true if the body is safe/desireable to print to the terminal.
     #[must_use]
-    pub fn parse(
-        reader: &mut NetReader,
-        len_val: usize,
-        type_val: &str
-    ) -> NetResult<Body> {
-        let Ok(num_bytes) = u64::try_from(len_val) else {
-            return Err(ParseErrorKind::Body.into());
-        };
-
-        let mut buf = Vec::with_capacity(len_val);
-        let mut rdr = reader.take(num_bytes);
-
-        // TODO: handle chunked data and partial reads.
-        match rdr.read_to_end(&mut buf) {
-            Ok(_) => {
-                let body = match type_val {
-                    s if s.is_empty() => Self::Empty,
-                    s if s.contains("text/plain") => {
-                        let str = String::from_utf8_lossy(&buf).to_string();
-                        Self::Text(str)
-                    },
-                    s if s.contains("text/html") => {
-                        let str = String::from_utf8_lossy(&buf).to_string();
-                        Self::Html(str)
-                    },
-                    s if s.contains("application/json") => {
-                        let str = String::from_utf8_lossy(&buf).to_string();
-                        Self::Json(str)
-                    },
-                    s if s.contains("application/xml") => {
-                        let str = String::from_utf8_lossy(&buf).to_string();
-                        Self::Xml(str)
-                    },
-                    s if s.contains("image/x-icon") => {
-                        Self::Favicon(buf)
-                    },
-                    _ => Self::Bytes(buf),
-                };
-
-                Ok(body)
-            },
-            Err(e) => Err(NetError::ReadError(e.kind())),
+    pub const fn should_print(&self) -> bool {
+        match self {
+            Self::Text(_)
+                | Self::Html(_)
+                | Self::Json(_) 
+                | Self::Xml(_) => true,
+            Self::Favicon(_)
+                | Self::Bytes(_) 
+                | Self::Image(_)
+                | Self::Empty => false,
         }
     }
 
+    /// Returns the body data as a bytes slice.
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Empty => &b""[..],
@@ -447,12 +420,13 @@ impl Body {
             Self::Html(ref s) => s.as_bytes(),
             Self::Json(ref s) => s.as_bytes(),
             Self::Xml(ref s) => s.as_bytes(),
-            Self::File(_) => &b""[..],
-            Self::Favicon(ref buf) => buf.as_slice(),
+            Self::Image(ref buf) => buf.as_slice(),
             Self::Bytes(ref buf) => buf.as_slice(),
+            Self::Favicon(ref buf) => buf.as_slice(),
         }
     }
 
+    /// Returns the size of the body data as number of bytes.
     pub fn len(&self) -> usize {
         match self {
             Self::Empty => 0,
@@ -460,9 +434,9 @@ impl Body {
             Self::Html(ref s) => s.len(),
             Self::Json(ref s) => s.len(),
             Self::Xml(ref s) => s.len(),
-            Self::File(_) => 0,
-            Self::Favicon(ref buf) => buf.len(),
+            Self::Image(ref buf) => buf.len(),
             Self::Bytes(ref buf) => buf.len(),
+            Self::Favicon(ref buf) => buf.len(),
         }
     }
 }

@@ -5,28 +5,26 @@ use std::result::Result as StdResult;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParseErrorKind {
-    Uri,
+    Path,
     Method,
     Version,
     Status,
     RequestLine,
     StatusLine,
     Header,
-    NonUtf8Header,
     Body,
 }
 
 impl Display for ParseErrorKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Uri => f.write_str("URI parsing failed"),
+            Self::Path => f.write_str("URI path parsing failed"),
             Self::Method => f.write_str("HTTP method parsing failed"),
             Self::Version => f.write_str("HTTP version parsing failed"),
             Self::Status => f.write_str("HTTP status parsing failed"),
             Self::RequestLine => f.write_str("request line parsing failed"),
             Self::StatusLine => f.write_str("status line parsing failed"),
             Self::Header => f.write_str("header parsing failed"),
-            Self::NonUtf8Header => f.write_str("header name is not UTF-8 encoded"),
             Self::Body => f.write_str("body parsing failed"),
         }
     }

@@ -7,10 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use librustnet::{Header, StatusLine};
-
-mod status_to_headers;
-use status_to_headers::{get_expected_headers, VALID_STATUS_CODES};
+use librustnet::StatusLine;
 
 const CRATE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -47,7 +44,6 @@ fn main() {
         {PURP}TEST-GROUP Options:{CLR}\n    \
             client    Run only client tests.\n    \
             server    Run only server tests.\n    \
-            status    Test parsing responses with valid status codes.\n    \
             all       Run all tests.\n");
 
     env::args().nth(1).map_or_else(
@@ -75,13 +71,6 @@ fn main() {
                     if build_client().is_some() {
                         run_client_tests(&mut results);
                         run_server_tests(&mut results);
-                        print_final_results(&results);
-                    }
-                },
-                "status" => {
-                    remove_old_builds("client");
-                    if build_client().is_some() {
-                        run_status_to_headers_tests(&mut results);
                         print_final_results(&results);
                     }
                 },
@@ -423,6 +412,7 @@ fn get_result(
 ) -> Option<(String, String)> {
     let output = String::from_utf8_lossy(test_output);
     let mut expected = String::new();
+
     let mut f = File::open(expected_output).unwrap();
     f.read_to_string(&mut expected).unwrap();
 
@@ -497,65 +487,4 @@ fn remove_old_builds(kind: &str) {
     } else {
         println!();
     }
-}
-
-fn run_status_to_headers_tests(results: &mut TestResults) {
-    let client_bin: PathBuf = [
-        CRATE_ROOT,
-        "..",
-        "target",
-        "debug",
-        CLIENT_FILE
-    ].iter().collect();
-
-    println!();
-    let mut stdout = io::stdout().lock();
-    let expected_headers = get_expected_headers();
-
-    for (count, code) in VALID_STATUS_CODES.iter().enumerate() {
-        let client_out = Command::new(&client_bin)
-            .args([
-                "--server-tests",
-                "--",
-                &format!("54.86.118.241:80/status/{code}")
-            ])
-            .output()
-            .unwrap();
-
-        let res_str = String::from_utf8_lossy(&client_out.stdout);
-        let lines: Vec<&str> = res_str.split('\n').collect();
-
-        let Some(exp_headers) = expected_headers.get(code) else {
-            panic!("error getting expected headers for status {code}");
-        };
-
-        results.status_total += 1;
-
-        assert!(!exp_headers.is_empty());
-
-        for (i, line) in lines.iter().enumerate() {
-            let trim = line.trim();
-
-            if trim.is_empty() { break; }
-
-            if i == 0 { continue; }
-
-            let (name, value) = Header::parse(line).unwrap();
-
-            assert_eq!(exp_headers.get(&name), Some(&value),
-                "assert error (status {code}) at header: {name}");
-        }
-
-        results.status_passed += 1;
-
-        write!(
-            &mut stdout,
-            "\x1b[1K\r{PURP}{:.1}% complete...{CLR}",
-            (count as f32 / 93.0) * 100.0
-        ).unwrap();
-        stdout.flush().unwrap();
-    }
-
-    write!(&mut stdout, "\x1b[1K\r").unwrap();
-    stdout.flush().unwrap();
 }

@@ -6,7 +6,7 @@ use std::string::ToString;
 
 use crate::consts::{CONNECTION, CONTENT_TYPE};
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method,
+    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetReader,
     NetResult, Request, Status, Target, Version,
 };
 
@@ -130,22 +130,22 @@ impl Response {
             Target::Text(s) => {
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("text/plain; charset=utf-8");
-                res.body = Body::Text(s.to_string());
+                res.body = Body::Text((*s).into());
             },
             Target::Html(s) => {
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("text/html; charset=utf-8");
-                res.body = Body::Html(s.to_string());
+                res.body = Body::Html((*s).into());
             },
             Target::Json(s) => {
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("application/json");
-                res.body = Body::Json(s.to_string());
+                res.body = Body::Json((*s).into());
             },
             Target::Xml(s) => {
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("application/xml");
-                res.body = Body::Xml(s.to_string());
+                res.body = Body::Xml((*s).into());
             },
             Target::File(ref fpath) => {
                 let content = fs::read(fpath)?;
@@ -330,15 +330,16 @@ impl Response {
 
     /// Sends an HTTP response to a remote client.
     pub fn send(&mut self) -> NetResult<()> {
-        let Some(mut conn) = self.conn.take() else {
+        let Some(conn) = self.conn.as_mut() else {
             return Err(IoErrorKind::NotConnected.into());
         };
 
-        conn.send_response(self)
+        let mut writer = conn.writer.try_clone()?;
+        writer.send_response(self)
     }
 
     /// Receives an HTTP response from a remote server.
-    pub fn recv(conn: &mut Connection) -> NetResult<Response> {
-        conn.recv_response()
+    pub fn recv(mut reader: NetReader) -> NetResult<Response> {
+        reader.recv_response()
     }
 }

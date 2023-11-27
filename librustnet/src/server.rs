@@ -3,15 +3,16 @@ use std::error::Error as StdError;
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
     Method, NetError, NetResult, Connection, Request, Response, Route,
-    Router, Target, ThreadPool,
+    Router, Target,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -255,8 +256,8 @@ impl Listener {
     /// Returns a `Connection` instance for each incoming connection.
     pub fn accept(&self) -> NetResult<Connection> {
         self.inner.accept()
-            .and_then(Connection::try_from)
-            .map_err(Into::into)
+            .map_err(|e| NetError::ReadError(e.kind()))
+            .and_then(|(stream, addr)|Connection::try_from((stream, addr)))
     }
 }
 
@@ -354,19 +355,21 @@ impl Server {
 
     /// Handles a request from a remote connection.
     pub fn respond(
-        mut conn: Connection,
+        conn: Connection,
         router: &Arc<Router>,
         do_logging: &Arc<AtomicBool>
     ) -> NetResult<()> {
-        let mut req = Connection::recv_request(&mut conn)?;
-        let mut res = Router::resolve(&mut req, router)?;
+        let reader = conn.reader.try_clone()?;
+        let mut req = Request::recv(reader)?;
+        let mut res = router.resolve(&mut req)?;
 
         if do_logging.load(Ordering::Relaxed) {
-            let path = req.path();
-            let ip = res.remote_ip();
-            let method = req.method();
-            let status = res.status_code();
-            Self::log_with_status(ip, status, method, path);
+            Self::log_with_status(
+                res.remote_ip(),
+                res.status_code(),
+                req.method(),
+                req.path()
+            );
         }
 
         res.send()?;
@@ -435,5 +438,74 @@ impl Server {
         // Give the worker threads a bit of time to shutdown.
         thread::sleep(Duration::from_millis(200));
         Ok(())
+    }
+}
+
+pub type Task = Box<dyn FnOnce() + Send + 'static>;
+
+pub struct Worker {
+    _id: usize,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl Worker {
+    /// Spawns a worker thread that receives tasks and executes them.
+    fn new(_id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
+        let handle = thread::spawn(move || {
+            while let Ok(job) = receiver.lock().unwrap().recv() {
+                job();
+            }
+        });
+
+        Self { _id, handle: Some(handle) }
+    }
+}
+
+pub struct ThreadPool {
+    workers: Vec<Worker>,
+    sender: Option<Sender<Task>>,
+}
+
+impl ThreadPool {
+    /// Create a new `ThreadPool` with the given number of worker threads.
+    #[must_use]
+    pub fn new(size: usize) -> Self {
+        assert!(size > 0);
+
+        let mut workers = Vec::with_capacity(size);
+        let (tx, rx) = channel();
+
+        let sender = Some(tx);
+        let receiver = Arc::new(Mutex::new(rx));
+
+        for id in 0..size {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+
+        Self { workers, sender }
+    }
+
+    /// Sends a `Task` to a worker thread for executon.
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Box::new(f))
+            .unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+
+        for worker in &mut self.workers {
+            if let Some(handle) = worker.handle.take() {
+                handle.join().unwrap();
+            }
+        }
     }
 }
