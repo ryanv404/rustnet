@@ -1,13 +1,11 @@
-use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufRead, ErrorKind as IoErrorKind, Read};
+use std::io::ErrorKind as IoErrorKind;
 use std::str;
 use std::string::ToString;
 
-use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS};
 use crate::{
-    Connection, Header, HeaderName, HeaderValue, Headers, Method, NetError, 
-    NetReader, NetResult, ParseErrorKind, Route, Version,
+    Body, Connection, HeaderName, HeaderValue, Headers, Method,
+    NetResult, ParseErrorKind, Route, Version,
 };
 
 /// Represents the first line of an HTTP request.
@@ -84,8 +82,8 @@ impl RequestLine {
 pub struct Request {
     pub request_line: RequestLine,
     pub headers: Headers,
-    pub body: Option<Vec<u8>>,
-    pub conn: Connection,
+    pub body: Body,
+    pub conn: Option<Connection>,
 }
 
 impl Display for Request {
@@ -98,13 +96,10 @@ impl Display for Request {
 			writeln!(f, "{name}: {value}")?;
 		}
 
-		// The request message body, if present.
-		if let Some(body) = self.body.as_ref() {
-			if !body.is_empty() && self.body_is_printable() {
-				let body = String::from_utf8_lossy(body);
-				write!(f, "\n{body}")?;
-			}
-		}
+        // The request body.
+        if !self.body.is_empty() {
+            writeln!(f, "{}", &self.body)?;
+        }
 
 		Ok(())
     }
@@ -115,78 +110,9 @@ impl Debug for Request {
 		f.debug_struct("Request")
 			.field("request_line", &self.request_line)
 			.field("headers", &self.headers)
-            .field("body", &self.body.as_ref().and_then(
-                |body| if self.body_is_printable() {
-                    Some(body)
-                } else {
-                    None
-                }))
+            .field("body", &self.body)
 			.field("conn", &self.conn)
             .finish()
-    }
-}
-
-impl TryFrom<Connection> for Request {
-    type Error = NetError;
-
-    fn try_from(mut conn: Connection) -> NetResult<Self> {
-        // Reads an HTTP request and parses it into a `Request` object.
-        let mut line = String::new();
-
-        // Parse the request line.
-        let request_line = match conn.reader.read_line(&mut line) {
-            Err(e) => return Err(NetError::ReadError(e.kind())),
-            Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
-            Ok(_) => RequestLine::parse(&line)?,
-        };
-
-        let mut header_num = 0;
-        let mut headers = Headers::new();
-
-        // Parse the request headers.
-        while header_num <= MAX_HEADERS {
-            line.clear();
-
-            match conn.reader.read_line(&mut line) {
-                Err(e) => return Err(NetError::ReadError(e.kind())),
-                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
-                Ok(_) => {
-                    let trimmed = line.trim();
-
-                    if trimmed.is_empty() {
-                        break;
-                    }
-
-                    let (hdr_name, hdr_value) = Header::parse(trimmed)?;
-                    headers.insert(hdr_name, hdr_value);
-
-                    header_num += 1;
-                }
-            }
-        }
-
-        // Parse the request body.
-        let maybe_len = headers
-            .get(&CONTENT_LENGTH)
-            .and_then(
-                |len| {
-                    let len_str = len.to_string();
-                    len_str.parse::<usize>().ok()
-                });
-
-        let maybe_type = headers
-            .get(&CONTENT_TYPE)
-            .map(ToString::to_string);
-
-        let body = {
-            if let (Some(ref ctype), Some(clen)) = (maybe_type, maybe_len) {
-                Self::parse_body(&mut conn.reader, clen, ctype)
-            } else {
-                None
-            }
-        };
-
-        Ok(Self { request_line, headers, body, conn })
     }
 }
 
@@ -258,57 +184,23 @@ impl Request {
         }
     }
 
-	/// Returns true if the body has a text/* or application/* Content-Type header.
-    #[must_use]
-    pub fn body_is_printable(&self) -> bool {
-        self.headers.get(&CONTENT_TYPE).map_or(false,
-            |val| {
-                let body_type = val.to_string();
-                body_type.contains("text") || body_type.contains("application")
-            })
-    }
-
 	/// Returns a reference to the request body, if present.
 	#[must_use]
-	pub const fn body(&self) -> Option<&Vec<u8>> {
-		self.body.as_ref()
+	pub const fn body(&self) -> &Body {
+		&self.body
 	}
 
-	/// Returns the request body as a copy-on-write string.
-    #[must_use]
-    pub fn body_to_string(&self) -> Cow<'_, str> {
-        if let Some(body) = self.body.as_ref() {
-            if !body.is_empty() && self.body_is_printable() {
-                return String::from_utf8_lossy(body);
-            }
-        }
-
-        String::new().into()
-    }
-
-    /// Uses header values to read the message body.
-    #[must_use]
-    pub fn parse_body(
-        reader: &mut NetReader,
-        len_val: usize,
-        type_val: &str
-    ) -> Option<Vec<u8>> {
-        let Ok(num_bytes) = u64::try_from(len_val) else {
-            return None;
+    /// Sends an HTTP request to a remote server.
+    pub fn send(&mut self) -> NetResult<()> {
+        let Some(mut conn) = self.conn.take() else {
+            return Err(IoErrorKind::NotConnected.into());
         };
 
-        if !type_val.contains("text") && !type_val.contains("application") {
-            return None;
-        }
+        conn.send_request(self)
+    }
 
-        let mut body = Vec::with_capacity(len_val);
-        let mut rdr = reader.take(num_bytes);
-
-        // TODO: handle chunked data and partial reads.
-        if rdr.read_to_end(&mut body).is_ok() && !body.is_empty() {
-            Some(body)
-        } else {
-            None
-        }
+    /// Receives an HTTP request from the remote client.
+    pub fn recv(conn: &mut Connection) -> NetResult<Request> {
+        conn.recv_request()
     }
 }

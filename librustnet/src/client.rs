@@ -1,19 +1,17 @@
 use std::borrow::ToOwned;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{BufRead, ErrorKind as IoErrorKind, Read, Write};
+use std::io::ErrorKind as IoErrorKind;
 use std::io::Result as IoResult;
-use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{TcpStream, ToSocketAddrs};
 
-use crate::consts::{
-    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT,
-};
+use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE};
 use crate::{
-    Connection, HeaderName, HeaderValue, Headers, Method, NetError, NetResult,
-    ParseErrorKind, RequestLine, Response, Request, Version,
+    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
+    NetResult, ParseErrorKind, RequestLine, Response, Request, Version,
 };
 
 /// An HTTP request builder object.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ClientBuilder<A>
 where
     A: ToSocketAddrs
@@ -25,7 +23,7 @@ where
     pub path: Option<String>,
     pub version: Version,
     pub headers: Headers,
-    pub body: Option<Vec<u8>>,
+    pub body: Body,
 }
 
 impl<A> Default for ClientBuilder<A>
@@ -41,7 +39,7 @@ where
             path: None,
             version: Version::OneDotOne,
             headers: Headers::new(),
-            body: None,
+            body: Body::Empty,
         }
     }
 }
@@ -121,7 +119,7 @@ where
 
         self.headers.insert(CONTENT_LENGTH, data.len().into());
         self.headers.insert(CONTENT_TYPE, b"text/plain"[..].into());
-        self.body = Some(data.to_vec());
+        self.body = Body::Text(String::from_utf8_lossy(data).to_string());
         self
 	}
 
@@ -152,10 +150,12 @@ where
         let request_line = RequestLine::new(self.method, path, self.version);
         let headers = self.headers.clone();
         let body = self.body;
+        let conn = Some(conn);
 
-        let req = Request { request_line, headers, body, conn };
+        let req = Some(Request { request_line, headers, body, conn });
+        let res = None;
 
-        Ok(Client { req })
+        Ok(Client { req, res })
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
@@ -166,63 +166,28 @@ where
     }
 }
 
-/// An HTTP client that can send and receive messages with a remote host.
+/// An HTTP client that can send and receive messages with a remote server.
 #[derive(Debug)]
 pub struct Client {
-	pub req: Request,
+	pub req: Option<Request>,
+	pub res: Option<Response>,
 }
 
 impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		self.req.fmt(f)
+        if let Some(req) = self.req.as_ref() {
+            req.fmt(f)?;
+        }
+
+        if let Some(res) = self.res.as_ref() {
+            res.fmt(f)?;
+        }
+
+        Ok(())
 	}
-}
-
-impl Write for Client {
-    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        self.req.conn.write(buf)
-    }
-
-    fn flush(&mut self) -> IoResult<()> {
-        self.req.conn.flush()
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.req.conn.write_all(buf)
-    }
-}
-
-impl Read for Client {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        self.req.conn.read(buf)
-    }
-}
-
-impl BufRead for Client {
-    fn fill_buf(&mut self) -> IoResult<&[u8]> {
-        self.req.conn.fill_buf()
-    }
-
-    fn consume(&mut self, amt: usize) {
-        self.req.conn.consume(amt);
-    }
 }
 
 impl Client {
-    /// Sends a GET request to the provided URI.
-    pub fn get(uri: &str) -> NetResult<(Self, Response)> {
-		let (addr, path) = Self::parse_uri(uri)?;
-
-        let mut client = Self::builder()
-            .addr(&addr)
-            .path(&path)
-            .send()?;
-
-        let res = client.recv()?;
-
-        Ok((client, res))
-	}
-
     /// Returns a new `ClientBuilder` instance.
     #[must_use]
     pub fn builder<A>() -> ClientBuilder<A>
@@ -232,145 +197,6 @@ impl Client {
         ClientBuilder::new()
     }
     
-
-    /// Returns the method.
-    #[must_use]
-    pub const fn method(&self) -> Method {
-        self.req.method()
-    }
-
-	/// Returns the URI path to the target resource.
-    #[must_use]
-    pub fn path(&self) -> &str {
-        self.req.path()
-    }
-
-    /// Returns the protocol version.
-    #[must_use]
-    pub const fn version(&self) -> Version {
-        self.req.version()
-    }
-
-    /// Returns a reference to the request headers.
-    #[must_use]
-    pub const fn headers(&self) -> &Headers {
-        self.req.headers()
-    }
-
-	/// Returns true if the header is present.
-    #[must_use]
-    pub fn has_header(&self, name: &HeaderName) -> bool {
-        self.req.has_header(name)
-    }
-
-    /// Returns the header value for the given `HeaderName`, if present.
-    #[must_use]
-    pub fn get_header(&self, name: &HeaderName) -> Option<&HeaderValue> {
-        self.req.get_header(name)
-    }
-
-	/// Adds or modifies the header field represented by `HeaderName`.
-    pub fn insert_header(&mut self, name: HeaderName, val: HeaderValue) {
-        self.req.insert_header(name, val);
-    }
-
-    /// Returns a formatted string of all of the request headers.
-    #[must_use]
-    pub fn headers_to_string(&self) -> String {
-        self.req.headers_to_string()
-    }
-
-    /// Adds default header values for Accept, Host, and User-Agent, not
-    /// already set.
-    pub fn include_default_headers(&mut self) {
-        if !self.has_header(&HOST) {
-            self.req.headers.insert_host(self.remote_ip(), self.remote_port());
-        }
-
-        if !self.has_header(&USER_AGENT) {
-            self.req.headers.insert_user_agent();
-        }
-
-        if !self.has_header(&ACCEPT) {
-            self.req.headers.insert_accept("*/*");
-        }
-    }
-
-    /// Returns a reference to the request body, if present.
-    #[must_use]
-    pub const fn body(&self) -> Option<&Vec<u8>> {
-        self.req.body()
-    }
-
-    /// Returns the `SocketAddr` of the remote connection.
-    #[must_use]
-    pub const fn remote_addr(&self) -> SocketAddr {
-        self.req.conn.remote_addr
-    }
-
-    /// Returns the `IpAddr` of the remote connection.
-    #[must_use]
-    pub const fn remote_ip(&self) -> IpAddr {
-        self.remote_addr().ip()
-    }
-
-    /// Returns the port being used by the remote connection.
-    #[must_use]
-    pub const fn remote_port(&self) -> u16 {
-        self.remote_addr().port()
-    }
-
-    /// Returns the `SocketAddr` of the local connection.
-    #[must_use]
-    pub const fn local_addr(&self) -> SocketAddr {
-        self.req.conn.local_addr
-    }
-
-    /// Returns the `IpAddr` of the local connection.
-    #[must_use]
-    pub const fn local_ip(&self) -> IpAddr {
-        self.local_addr().ip()
-    }
-
-    /// Returns the port being used by the local connection.
-    #[must_use]
-    pub const fn local_port(&self) -> u16 {
-        self.local_addr().port()
-    }
-
-    /// Returns the request line as a String.
-    #[must_use]
-    pub fn request_line(&self) -> String {
-		self.req.request_line()
-    }
-
-    /// Writes an HTTP request to a remote host.
-    pub fn send(&mut self) -> NetResult<()> {
-        self.include_default_headers();
-
-        // The request line.
-		self.req.conn.write_all(self.request_line().as_bytes())?;
-		self.req.conn.write_all(b"\r\n")?;
-
-		// The request headers.
-        for (name, value) in &self.req.headers.0 {
-            let header = format!("{name}: {value}\r\n");
-            self.req.conn.write_all(header.as_bytes())?;
-		}
-
-		// End of the headers section.
-		self.req.conn.write_all(b"\r\n")?;
-
-		// The request message body, if present.
-		if let Some(body) = self.req.body.as_ref() {
-			if !body.is_empty() {
-				self.req.conn.write_all(body)?;
-			}
-		}
-
-		self.req.conn.flush()?;
-        Ok(())
-    }
 
     /// Parses a string slice into a host address and a URI path.
     pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
@@ -439,8 +265,19 @@ impl Client {
         }
     }
 
+    /// Sends an HTTP request to a remote host.
+    pub fn send(&mut self) -> NetResult<()> {
+        self.req
+            .as_mut()
+            .ok_or_else(|| IoErrorKind::NotConnected.into())
+            .and_then(|req| req.send())
+    }
+
     /// Receives an HTTP response from the remote host.
-    pub fn recv(&mut self) -> NetResult<Response> {
-        Response::recv(self.req.conn.try_clone()?, self.req.method())
+    pub fn recv(&mut self, conn: &mut Connection) -> NetResult<()> {
+        Response::recv(conn).and_then(|res| {
+            self.res = Some(res);
+            Ok(())
+        })
     }
 }

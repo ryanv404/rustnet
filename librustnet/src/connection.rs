@@ -1,8 +1,16 @@
-use std::io::{BufRead, BufReader, BufWriter, Error as IoError, Read, Result as IoResult, Write};
+use std::io::{
+    BufRead, BufReader, BufWriter, Error as IoError, ErrorKind as IoErrorKind,
+    Read, Result as IoResult, Write,
+};
 use std::net::{IpAddr, SocketAddr, TcpStream};
 
-use crate::NetResult;
-use crate::consts::{READER_BUFSIZE, WRITER_BUFSIZE};
+use crate::consts::{
+    CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS, READER_BUFSIZE, WRITER_BUFSIZE,
+};
+use crate::{
+    Body, Header, Headers, NetError, NetResult, Request, RequestLine, Response,
+    StatusLine,
+};
 
 #[derive(Debug)]
 pub struct NetReader(pub BufReader<TcpStream>);
@@ -175,5 +183,185 @@ impl Connection {
     pub fn try_clone(&self) -> NetResult<Self> {
         let stream = self.reader.0.get_ref().try_clone()?;
         Ok(Self::try_from(stream)?)
+    }
+
+    /// Sends an HTTP request to a remote server.
+    pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
+        req.headers.insert_accept("*/*");
+        req.headers.insert_user_agent();
+        req.headers.insert_host(self.remote_ip(), self.remote_port());
+
+        // The request line.
+        self.write_all(req.request_line().as_bytes())?;
+        self.write_all(b"\r\n")?;
+
+        // The request headers.
+        for (name, value) in &req.headers.0 {
+            let header = format!("{name}: {value}\r\n");
+            self.write_all(header.as_bytes())?;
+        }
+
+        // End of the headers section.
+        self.write_all(b"\r\n")?;
+
+        // The request message body.
+        if !req.body.is_empty() {
+            self.write_all(req.body.as_bytes())?;
+        }
+
+        self.flush()?;
+        Ok(())
+    }
+
+    /// Sends an HTTP response to a remote client.
+    pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
+        res.headers.insert_server();
+
+        // Status line.
+        write!(&mut self.writer, "{}\r\n", res.status_line)?;
+
+        // Response headers.
+        for (name, value) in &res.headers.0 {
+            write!(&mut self.writer, "{name}: {value}\r\n")?;
+        }
+
+        // Mark the end of the headers section.
+        self.writer.write_all(b"\r\n")?;
+
+        // Response body.
+        if !res.body.is_empty() {
+            self.write_all(res.body.as_bytes())?;
+        }
+
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    /// Reads an HTTP response from a remote server.
+    pub fn recv_response(&mut self) -> NetResult<Response> {
+        let mut line = String::new();
+
+        let status_line = match self.read_line(&mut line) {
+            Err(e) => return Err(NetError::ReadError(e.kind())),
+            Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
+            Ok(_) => StatusLine::parse(&line)?,
+        };
+
+        let mut num_headers = 0;
+        let mut headers = Headers::new();
+
+        while num_headers <= MAX_HEADERS {
+            line.clear();
+
+            match self.read_line(&mut line) {
+                Err(e) => return Err(NetError::ReadError(e.kind())),
+                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
+                Ok(_) => {
+                    let trimmed = line.trim();
+
+                    if trimmed.is_empty() {
+                        break;
+                    }
+
+                    let (name, value) = Header::parse(trimmed)?;
+                    headers.insert(name, value);
+
+                    num_headers += 1;
+                }
+            }
+        }
+
+        // Parse the response body.
+        let maybe_len = headers
+            .get(&CONTENT_LENGTH)
+            .and_then(
+                |len| {
+                    let len_str = len.to_string();
+                    len_str.trim().parse::<usize>().ok()
+                });
+
+        let maybe_type = headers
+            .get(&CONTENT_TYPE)
+            .map(ToString::to_string);
+
+        let body = match (maybe_type, maybe_len) {
+            (Some(ref ctype), Some(clen)) => {
+                Body::parse(&mut self.reader, clen, ctype.trim())?
+            },
+            _ => Body::Empty,
+        };
+
+        let conn = Some(self.try_clone()?);
+
+        Ok(Response {
+            status_line,
+            headers,
+            body,
+            conn
+        })
+    }
+
+    /// Reads an HTTP request from a remote client.
+    pub fn recv_request(&mut self) -> NetResult<Request> {
+        let mut line = String::new();
+
+        let request_line = match self.read_line(&mut line) {
+            Err(e) => return Err(NetError::ReadError(e.kind())),
+            Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
+            Ok(_) => RequestLine::parse(&line)?,
+        };
+
+        let mut num_headers = 0;
+        let mut headers = Headers::new();
+
+        while num_headers <= MAX_HEADERS {
+            line.clear();
+
+            match self.read_line(&mut line) {
+                Err(e) => return Err(NetError::ReadError(e.kind())),
+                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
+                Ok(_) => {
+                    let trimmed = line.trim();
+
+                    if trimmed.is_empty() {
+                        break;
+                    }
+
+                    let (name, value) = Header::parse(trimmed)?;
+                    headers.insert(name, value);
+
+                    num_headers += 1;
+                }
+            }
+        }
+
+        // Parse the response body.
+        let maybe_len = headers
+            .get(&CONTENT_LENGTH)
+            .and_then(
+                |len| {
+                    let len_str = len.to_string();
+                    len_str.trim().parse::<usize>().ok()
+                });
+
+        let maybe_type = headers
+            .get(&CONTENT_TYPE)
+            .map(ToString::to_string);
+
+        let body = match (maybe_type, maybe_len) {
+            (Some(ref ctype), Some(clen)) => {
+                Body::parse(&mut self.reader, clen, ctype.trim())?
+            },
+            _ => Body::Empty,
+        };
+
+        let conn = Some(self.try_clone()?);
+
+        Ok(Request {
+            request_line,
+            headers,
+            body,
+            conn
+        })
     }
 }

@@ -107,28 +107,34 @@ fn main() -> io::Result<()> {
         .body(body.as_bytes())
         .send()?;
 
+    let mut req = client.req.take().unwrap();        
+    let mut conn_clone = req.conn.as_mut().unwrap().try_clone().unwrap();
+
     // Receive the response from the server.
-    let mut res = client.recv()?;
+    client.recv(&mut conn_clone)?;
 
     // Ignore Date headers in tests.
     if testing_client || testing_server {
-        client.req.headers.remove(&DATE);
-        res.headers.remove(&DATE);
+        client.req.as_mut().map(|req| req.headers.remove(&DATE));
+        client.res.as_mut().map(|res| res.headers.remove(&DATE));
     }
 
+    let req = client.req.take().unwrap();        
+    let res = client.res.take().unwrap();        
+
     if testing_client {
-		println!(
+        println!(
             "{}\n{}\n\n{}\n{}",
-            client.request_line(),
-            client.headers_to_string().trim_end(),
+            req.request_line(),
+            req.headers_to_string().trim_end(),
             res.status_line(),
             res.headers_to_string().trim_end()
         );
     } else if testing_server {
-        let res_body = res.body_to_string();
+        let res_body = res.body.to_string();
         let res_body = res_body.trim_end();
 
-        if res_body.is_empty() {
+        if res.body.is_empty() {
             println!(
                 "{}\n{}",
                 res.status_line(),
@@ -143,15 +149,16 @@ fn main() -> io::Result<()> {
             );
         }
     } else {
-        print_output(&client, &res);
+        print_output(&mut client, &res);
     }
 
     Ok(())
 }
 
-fn print_output(client: &Client, res: &Response) {
-    let req_body = client.req.body_to_string();
-    let res_body = res.body_to_string();
+fn print_output(client: &mut Client, res: &Response) {
+    let req = client.req.take().unwrap();
+    let req_body = req.body.to_string();
+    let res_body = res.body.to_string();
     let res_color = if res.status_code() >= 400 {
         RED
     } else {
@@ -162,8 +169,8 @@ fn print_output(client: &Client, res: &Response) {
         (0, 0) => {
             println!(
                 "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n",
-                client.request_line(),
-                client.headers_to_string().trim_end(),
+                req.request_line(),
+                req.headers_to_string().trim_end(),
                 res.status_line(),
                 res.headers_to_string().trim_end()
             );
@@ -171,8 +178,8 @@ fn print_output(client: &Client, res: &Response) {
         (_, 0) => {
             println!(
                 "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n",
-                client.request_line(),
-                client.headers_to_string().trim_end(),
+                req.request_line(),
+                req.headers_to_string().trim_end(),
                 req_body.trim_end(),
                 res.status_line(),
                 res.headers_to_string().trim_end()
@@ -181,8 +188,8 @@ fn print_output(client: &Client, res: &Response) {
         (0, _) => {
             println!(
                 "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
-                client.request_line(),
-                client.headers_to_string().trim_end(),
+                req.request_line(),
+                req.headers_to_string().trim_end(),
                 res.status_line(),
                 res.headers_to_string().trim_end(),
                 res_body.trim_end()
@@ -191,8 +198,8 @@ fn print_output(client: &Client, res: &Response) {
         (_, _) => {
             println!(
                 "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
-                client.request_line(),
-                client.headers_to_string().trim_end(),
+                req.request_line(),
+                req.headers_to_string().trim_end(),
                 req_body.trim_end(),
                 res.status_line(),
                 res.headers_to_string().trim_end(),

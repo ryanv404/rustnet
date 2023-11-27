@@ -11,37 +11,45 @@ macro_rules! get_responses_by_status_code {
                         .send()
                         .unwrap();
 
-                    let res = client.recv().unwrap();
+                    let req = client.req.as_mut().unwrap();
+                    let mut cloned_conn = req.conn
+                        .as_mut()
+                        .unwrap()
+                        .try_clone()
+                        .unwrap();
+
+                    client.recv(&mut cloned_conn).unwrap();
+                    let res = client.res.take().unwrap();
 
                     assert_eq!(res.status_line.version, Version::OneDotOne);
                     assert_eq!(res.status_line.status, Status($code));
                     assert_eq!(
-                        res.get_header(&ACCESS_CONTROL_ALLOW_CREDENTIALS),
+                        res.headers.get(&ACCESS_CONTROL_ALLOW_CREDENTIALS),
                         Some(&HeaderValue(Vec::from("true")))
                     );
                     assert_eq!(
-                        res.get_header(&ACCESS_CONTROL_ALLOW_ORIGIN),
+                        res.headers.get(&ACCESS_CONTROL_ALLOW_ORIGIN),
                         Some(&HeaderValue(Vec::from("*")))
                     );
                     assert_eq!(
-                        res.get_header(&SERVER),
+                        res.headers.get(&SERVER),
                         Some(&HeaderValue(Vec::from("gunicorn/19.9.0")))
                     );
                     assert_eq!(
-                        res.get_header(&CONNECTION),
+                        res.headers.get(&CONNECTION),
                         Some(&HeaderValue(Vec::from("keep-alive")))
                     );
                     if !matches!($code, 100..=200) {
                         assert_eq!(
-                            res.get_header(&CONTENT_LENGTH),
+                            res.headers.get(&CONTENT_LENGTH),
                             Some(&HeaderValue(Vec::from("0")))
                         );
                     }
                     assert_eq!(
-                        res.get_header(&CONTENT_TYPE),
+                        res.headers.get(&CONTENT_TYPE),
                         Some(&HeaderValue(Vec::from("text/html; charset=utf-8")))
                     );
-                    assert!(res.body().is_none());
+                    assert!(res.body().is_empty());
                 )+
             }
         )+

@@ -377,7 +377,7 @@ impl<'a> Browser<'a> {
 
     fn is_connection_open(&self) -> bool {
         self.response.as_ref().map_or(false, |res| {
-            !res.has_close_connection_header()
+            !res.has_closed_connection_header()
         })
     }
 }

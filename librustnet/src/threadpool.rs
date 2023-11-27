@@ -1,10 +1,6 @@
-use std::{
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
-};
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 
 type Task = Box<dyn FnOnce() + Send + 'static>;
 
@@ -18,17 +14,11 @@ impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(job) = receiver.lock().unwrap().recv() {
-                //println!("Worker {id} got a job; executing.");
                 job();
             }
-
-            //println!("Worker {id} disconnected; shutting down.");
         });
 
-        Self {
-            id,
-            handle: Some(handle),
-        }
+        Self { id, handle: Some(handle) }
     }
 }
 
@@ -61,7 +51,11 @@ impl ThreadPool {
         F: FnOnce() + Send + 'static,
     {
         // Send a boxed closure to the channel.
-        self.sender.as_ref().unwrap().send(Box::new(f)).unwrap();
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Box::new(f))
+            .unwrap();
     }
 }
 

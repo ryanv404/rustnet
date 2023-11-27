@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetError, NetResult, Connection, Request, Response, Route, Router,
-    Target, ThreadPool,
+    Method, NetError, NetResult, Connection, Request, Response, Route,
+    Router, Target, ThreadPool,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -53,7 +53,7 @@ where
     }
 
     /// Builds and returns a `Server` instance.
-    pub fn build(self) -> NetResult<Server> {
+    pub fn start(self) -> NetResult<ServerHandle> {
         if let Some(addr) = self.addr.as_ref() {
             let listener = Listener::bind(addr)?;
 
@@ -64,7 +64,7 @@ where
                 keep_listening: Arc::new(AtomicBool::new(false))
             };
 
-            return Ok(server);
+            return server.start();
         }
 
         if let (Some(ip), Some(port)) = (self.ip, self.port) {
@@ -78,7 +78,7 @@ where
                 keep_listening: Arc::new(AtomicBool::new(false))
             };
 
-            return Ok(server);
+            return server.start();
         }
 
         Err(NetError::IoError(IoErrorKind::InvalidInput))
@@ -131,7 +131,7 @@ where
         F: FnMut(&Request, &mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Get, uri_path);
-        let target = Target::Handler(Arc::new(Mutex::new(handler)));
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
         self.router.mount(route, target);
         self
     }
@@ -197,7 +197,7 @@ where
 
     /// Sets the static file path to a favicon icon.
     #[must_use]
-    pub fn set_favicon<P>(mut self, file_path: P) -> Self
+    pub fn favicon<P>(mut self, file_path: P) -> Self
     where
         P: Into<PathBuf>
     {
@@ -209,7 +209,7 @@ where
 
     /// Sets the static file path to an HTML page returned by 404 responses.
     #[must_use]
-    pub fn set_error_page<P>(mut self, file_path: P) -> Self
+    pub fn error_page<P>(mut self, file_path: P) -> Self
     where
         P: Into<PathBuf>
     {
@@ -220,8 +220,8 @@ where
     }
 
     /// Enables logging of request lines and status codes to stdout.
-    pub fn enable_logging(&mut self) {
-        self.do_logging = true;
+    pub fn logging(&mut self, do_log: bool) {
+        self.do_logging = do_log;
     }
 }
 
@@ -314,7 +314,7 @@ impl Server {
         let keep_listening = Arc::clone(&self.keep_listening);
 
         if do_logging.load(Ordering::Relaxed) {
-            Self::log_start_up(&listener.local_addr()?);
+            Self::log_start_up(listener.local_addr()?);
         }
 
         self.keep_listening.store(true, Ordering::Relaxed);
@@ -354,19 +354,19 @@ impl Server {
 
     /// Handles a request from a remote connection.
     pub fn respond(
-        conn: Connection,
+        mut conn: Connection,
         router: &Arc<Router>,
         do_logging: &Arc<AtomicBool>
     ) -> NetResult<()> {
-        let req = Request::try_from(conn)?;
-        let mut res = Router::resolve(&req, router)?;
+        let mut req = Connection::recv_request(&mut conn)?;
+        let mut res = Router::resolve(&mut req, router)?;
 
         if do_logging.load(Ordering::Relaxed) {
+            let path = req.path();
             let ip = res.remote_ip();
+            let method = req.method();
             let status = res.status_code();
-            let method = req.request_line.method;
-            let path = req.request_line.path;
-            Self::log_with_status(ip, status, method, &path);
+            Self::log_with_status(ip, status, method, path);
         }
 
         res.send()?;
@@ -392,8 +392,16 @@ impl Server {
     }
 
     /// Logs the response status and request line.
-    pub fn log_with_status(ip: IpAddr, status: u16, method: Method, path: &str) {
-        println!("[{ip}|{status}] {method} {path}");
+    pub fn log_with_status(
+        maybe_ip: Option<IpAddr>,
+        status: u16,
+        method: Method,
+        path: &str
+    ) {
+        match maybe_ip {
+            Some(ip) => println!("[{ip}|{status}] {method} {path}"),
+            None => println!("[?|{status}] {method} {path}"),
+        }
     }
 
     /// Logs a non-terminating server error.
@@ -402,7 +410,7 @@ impl Server {
     }
 
     /// Logs a server start up message to stdout.
-    pub fn log_start_up(addr: &SocketAddr) {
+    pub fn log_start_up(addr: SocketAddr) {
         let ip = addr.ip();
         let port = addr.port();
         eprintln!("[SERVER] Listening on {ip} at port {port}.");
