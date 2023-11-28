@@ -6,8 +6,8 @@ use std::string::ToString;
 
 use crate::consts::{CONNECTION, CONTENT_TYPE};
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetReader,
-    NetResult, Request, Status, Target, Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetReader, NetResult, 
+    NetWriter, Request, Route, Router, Status, Target, Version,
 };
 
 /// Represents the status line of an HTTP response.
@@ -77,7 +77,7 @@ pub struct Response {
     pub status_line: StatusLine,
     pub headers: Headers,
     pub body: Body,
-    pub conn: Option<Connection>,
+    pub writer: Option<NetWriter>,
 }
 
 impl Display for Response {
@@ -102,26 +102,90 @@ impl Display for Response {
 impl Debug for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		f.debug_struct("Response")
-            .field("conn", &self.conn)
-			.field("status_line", &self.status_line)
-			.field("headers", &self.headers)
+            .field("status_line", &self.status_line)
+            .field("headers", &self.headers)
             .field("body", &self.body)
+            .field("writer", &self.writer)
 			.finish()
 	}
 }
 
 impl Response {
+    /// Resolves a `Request` into a `Response` based on the provided `Router`.
+    pub fn from_request(
+        request: &mut Request,
+        router: &Router
+    ) -> NetResult<Self> {
+        if router.is_empty() {
+            let msg = "This server has no routes configured.";
+            let mut target = Target::Text(msg);
+            return Self::new(502, &mut target, request);
+        }
+
+        let method = request.method();
+        let mut resolved_route = router.resolve(&request.route());
+
+        match (resolved_route.as_mut(), method) {
+            (Some(target), Method::Get) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Head) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Post) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Put) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Patch) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Delete) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Trace) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Options) => {
+                Self::new(200, target, request)
+            },
+            (Some(target), Method::Connect) => {
+                Self::new(200, target, request)
+            },
+            (None, Method::Head) => {
+                // Handle a HEAD request for a route that does not exist
+                // but does exist as for a GET request.
+                let route = Route::Get(request.request_line.path.clone());
+
+                match router.resolve(&route) {
+                    // GET route exists so send it as a HEAD response.
+                    Some(target) => Self::new(200, target, request),
+                    // No route exists for a GET request either.
+                    None => Self::new(404, router.error_handler(), request),
+                }
+            },
+            // Handle routes that do not exist.
+            (None, _) => Self::new(404, &mut router.error_handler(), request),
+        }
+    }
+
     /// Returns a new `Response` object.
     pub fn new(
         code: u16,
         target: &Target,
         req: &mut Request
     ) -> NetResult<Self> {
+        let writer = req.reader
+            .as_ref()
+            .and_then(|reader| NetWriter::try_from(reader).ok())
+            .ok_or_else(|| IoErrorKind::NotConnected)?;
+
         let mut res = Self {
             status_line: StatusLine::new(Version::OneDotOne, Status(code)),
             headers: Headers::new(),
             body: Body::Empty,
-            conn: req.conn.take()
+            writer: Some(writer)
         };
 
         res.headers.insert_cache_control("no-cache");
@@ -223,7 +287,9 @@ impl Response {
     /// Returns the `SocketAddr` of the remote half of the connection.
     #[must_use]
     pub fn remote_addr(&self) -> Option<SocketAddr> {
-        self.conn.as_ref().map(|sock| sock.remote_addr)
+        self.writer
+            .as_ref()
+            .and_then(|writer| writer.0.get_ref().peer_addr().ok())
     }
 
     /// Returns the `IpAddr` of the remote half of the connection.
@@ -241,7 +307,9 @@ impl Response {
     /// Returns the `SocketAddr` of the local half of the connection.
     #[must_use]
     pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.conn.as_ref().map(|sock| sock.local_addr)
+        self.writer
+            .as_ref()
+            .and_then(|writer| writer.0.get_ref().local_addr().ok())
     }
 
     /// Returns the `IpAddr` of the local half of the  connection.
@@ -330,11 +398,11 @@ impl Response {
 
     /// Sends an HTTP response to a remote client.
     pub fn send(&mut self) -> NetResult<()> {
-        let Some(conn) = self.conn.as_mut() else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
+        let mut writer = self.writer
+            .as_ref()
+            .and_then(|writer| writer.try_clone().ok())
+            .ok_or_else(|| IoErrorKind::NotConnected)?;
 
-        let mut writer = conn.writer.try_clone()?;
         writer.send_response(self)
     }
 

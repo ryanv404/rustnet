@@ -4,7 +4,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 
 use crate::consts::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
     NetResult, ParseErrorKind, RequestLine, Response, Request, Version,
 };
 
@@ -203,7 +203,7 @@ where
             },
         };
 
-        let conn = Connection::try_from(stream)?;
+        let reader = NetReader::from(stream);
 
         if !self.headers.contains(&ACCEPT) {
             self.headers.insert_accept("*/*");
@@ -218,7 +218,8 @@ where
         }
 
         if !self.headers.contains(&HOST) {
-            self.headers.insert_host(conn.remote_ip(), conn.remote_port());
+            let remote = reader.0.get_ref().peer_addr()?;
+            self.headers.insert_host(remote.ip(), remote.port());
         }
 
         if !self.headers.contains(&USER_AGENT) {
@@ -232,7 +233,7 @@ where
             request_line: RequestLine::new(self.method, path, self.version),
             headers: self.headers,
             body: self.body,
-            conn: Some(conn)
+            reader: Some(reader)
         });
 
         Ok(Client { req, res: None })
@@ -368,26 +369,24 @@ impl Client {
 
     /// Sends an HTTP request to a remote host.
     pub fn send(&mut self) -> NetResult<()> {
-        let Some(req) = self.req.as_mut() else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
+        self.req
+            .as_mut()
+            .map(|req| req.send().ok())
+            .ok_or_else(|| IoErrorKind::NotConnected)?;
 
-        req.send()?;
         Ok(())
     }
 
     /// Receives an HTTP response from the remote host.
     pub fn recv(&mut self) -> NetResult<()> {
-        let Some(req) = self.req.as_mut() else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
+        let reader = self.req
+            .as_ref()
+            .and_then(|req| req.reader
+                .as_ref()
+                .and_then(|reader| reader.try_clone().ok()))
+            .ok_or_else(|| IoErrorKind::NotConnected)?;
 
-        let Some(conn) = req.conn.as_mut() else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
-
-        let cloned_conn = conn.try_clone()?;
-        self.res = Some(Response::recv(cloned_conn.reader)?);
+        self.res = Some(Response::recv(reader)?);
 
         Ok(())
     }

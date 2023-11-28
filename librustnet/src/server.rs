@@ -2,7 +2,6 @@ use std::convert::Into;
 use std::error::Error as StdError;
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -11,8 +10,7 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetError, NetResult, Connection, Request, Response, Route,
-    Router, Target,
+    Method, NetError, NetReader, NetResult, Request, Response, Router,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -21,11 +19,10 @@ pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs
 {
-    pub addr: Option<A>,
     pub ip: Option<IpAddr>,
     pub port: Option<u16>,
-    pub router: Router,
-    pub do_logging: bool,
+    pub addr: Option<A>,
+    pub router: Option<Router>,
 }
 
 impl<A> Default for ServerBuilder<A>
@@ -34,11 +31,10 @@ where
 {
     fn default() -> Self {
         Self {
-            addr: None,
             ip: None,
             port: None,
-            router: Router::new(),
-            do_logging: false,
+            addr: None,
+            router: None,
         }
     }
 }
@@ -51,38 +47,6 @@ where
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Builds and returns a `Server` instance.
-    pub fn start(self) -> NetResult<ServerHandle> {
-        if let Some(addr) = self.addr.as_ref() {
-            let listener = Listener::bind(addr)?;
-
-            let server = Server {
-                router: Arc::new(self.router),
-                listener: Arc::new(listener),
-                do_logging: Arc::new(AtomicBool::new(self.do_logging)),
-                keep_listening: Arc::new(AtomicBool::new(false))
-            };
-
-            return server.start();
-        }
-
-        if let (Some(ip), Some(port)) = (self.ip, self.port) {
-            let addr = format!("{ip}:{port}");
-            let listener = Listener::bind(addr)?;
-
-            let server = Server {
-                router: Arc::new(self.router),
-                listener: Arc::new(listener),
-                do_logging: Arc::new(AtomicBool::new(self.do_logging)),
-                keep_listening: Arc::new(AtomicBool::new(false))
-            };
-
-            return server.start();
-        }
-
-        Err(NetError::IoError(IoErrorKind::InvalidInput))
     }
 
     /// Sets the server's IP address.
@@ -106,123 +70,43 @@ where
         self
     }
 
-    /// Configures handling of a server end-point.
+    /// Sets the router for the server.
     #[must_use]
-    pub fn route(self, uri_path: &str) -> Self {
-        let _route = Route::new(Method::Get, uri_path);
+    pub fn router(mut self, router: Router) -> Self {
+        self.router = Some(router);
         self
     }
 
-    /// Configures handling of a GET request.
-    #[must_use]
-    pub fn get<P>(mut self, uri_path: &str, file_path: P) -> Self
-    where
-        P: Into<PathBuf>
-    {
-        let route = Route::new(Method::Get, uri_path);
-        let target = Target::File(file_path.into());
-        self.router.mount(route, target);
-        self
+    /// Builds and returns a `Server` instance.
+    pub fn build(mut self) -> NetResult<Server> {
+        let router = self.router.take().unwrap_or_default();
+
+        let listener = self.addr
+            .as_ref()
+            .and_then(|addr| {
+                match Listener::bind(addr) {
+                    Ok(listener) => Some(listener),
+                    Err(_) => match (self.ip, self.port) {
+                        (Some(ip), Some(port)) => {
+                            Listener::bind_ip_port(ip, port).ok()
+                        },
+                        (_, _) => None
+                    }
+                }
+            })
+            .ok_or_else(|| IoErrorKind::InvalidInput)?;
+
+        Ok(Server {
+            router: Arc::new(router),
+            listener: Arc::new(listener),
+            keep_listening: Arc::new(AtomicBool::new(false))
+        })
     }
 
-    /// Configures handling of a GET request.
-    #[must_use]
-    pub fn get_with_handler<F>(mut self, uri_path: &str, handler: F) -> Self
-    where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
-    {
-        let route = Route::new(Method::Get, uri_path);
-        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
-        self.router.mount(route, target);
-        self
-    }
-
-    /// Configures handling of a POST request.
-    #[must_use]
-    pub fn post(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Post, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-    }
-
-    /// Configures handling of a PUT request.
-    #[must_use]
-    pub fn put(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Put, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-    }
-
-    /// Configures handling of a PATCH request.
-    #[must_use]
-    pub fn patch(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Patch, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-    }
-
-    /// Configures handling of a DELETE request.
-    #[must_use]
-    pub fn delete(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Delete, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-    }
-
-    /// Configures handling of a TRACE request.
-    #[must_use]
-    pub fn trace(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Trace, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-
-    }
-
-    /// Configures handling of a CONNECT request.
-    #[must_use]
-    pub fn connect(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Connect, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-
-    }
-
-    /// Configures handling of an OPTIONS request.
-    #[must_use]
-    pub fn options(mut self, uri_path: &str) -> Self {
-        let route = Route::new(Method::Options, uri_path);
-        self.router.mount(route, Target::Empty);
-        self
-
-    }
-
-    /// Sets the static file path to a favicon icon.
-    #[must_use]
-    pub fn favicon<P>(mut self, file_path: P) -> Self
-    where
-        P: Into<PathBuf>
-    {
-        let route = Route::new(Method::Get, "/favicon.ico");
-        let target = Target::File(file_path.into());
-        self.router.mount(route, target);
-        self
-    }
-
-    /// Sets the static file path to an HTML page returned by 404 responses.
-    #[must_use]
-    pub fn error_page<P>(mut self, file_path: P) -> Self
-    where
-        P: Into<PathBuf>
-    {
-        let route = Route::new(Method::Get, "__error");
-        let target = Target::File(file_path.into());
-        self.router.mount(route, target);
-        self
-    }
-
-    /// Enables logging of request lines and status codes to stdout.
-    pub fn logging(&mut self, do_log: bool) {
-        self.do_logging = do_log;
+    /// Builds and starts the server.
+    pub fn start(self) -> NetResult<()> {
+        let server = self.build()?;
+        server.start()
     }
 }
 
@@ -244,30 +128,32 @@ impl Listener {
     where
         A: ToSocketAddrs
     {
-        let inner = TcpListener::bind(addr)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: TcpListener::bind(addr)?
+        })
+    }
+
+    /// Bind the listener to the given socket address.
+    pub fn bind_ip_port(ip: IpAddr, port: u16) -> NetResult<Self> {
+        Ok(Self {
+            inner: TcpListener::bind((ip, port))?
+        })
     }
 
     /// Returns the server's socket address.
     pub fn local_addr(&self) -> NetResult<SocketAddr> {
-        self.inner.local_addr().map_err(Into::into)
+        self.inner
+            .local_addr()
+            .map_err(Into::into)
     }
 
-    /// Returns a `Connection` instance for each incoming connection.
-    pub fn accept(&self) -> NetResult<Connection> {
-        self.inner.accept()
+    /// Returns a `NetReader` instance for each incoming connection.
+    pub fn accept(&self) -> NetResult<NetReader> {
+        self.inner
+            .accept()
+            .and_then(|(stream, _)| Ok(NetReader::from(stream)))
             .map_err(|e| NetError::ReadError(e.kind()))
-            .and_then(|(stream, addr)|Connection::try_from((stream, addr)))
     }
-}
-
-/// A handle that is returned when a server starts.
-#[derive(Debug)]
-pub struct ServerHandle {
-    /// Handle for the server's listening thread.
-    pub thread: JoinHandle<()>,
-    /// Trigger for closing the server.
-    pub keep_listening: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -276,8 +162,6 @@ pub struct Server {
     pub router: Arc<Router>,
     /// The local socket on which the server listens.
     pub listener: Arc<Listener>,
-    /// Flag to enable logging of each connection to stdout.
-    pub do_logging: Arc<AtomicBool>,
     /// Trigger for closing the server.
     pub keep_listening: Arc<AtomicBool>,
 }
@@ -292,48 +176,47 @@ impl Server {
         ServerBuilder::default()
     }
 
+    /// Returns a new `Server` instance.
+    #[must_use]
+    pub fn new(router: Router, listener: Listener) -> Self {
+        Self {
+            router: Arc::new(router),
+            listener: Arc::new(listener),
+            keep_listening: Arc::new(AtomicBool::new(false))
+        }
+    }
+
     /// Returns a `Server` instance bound to the provided socket address.
-    pub fn http<A>(addr: A) -> NetResult<Self>
+    pub fn http<A>(addr: A) -> ServerBuilder<A>
     where
         A: ToSocketAddrs
     {
-        let listener = Listener::bind(addr)?;
-        
-        Ok(Self {
-            router: Arc::new(Router::new()),
-            listener: Arc::new(listener),
-            do_logging: Arc::new(AtomicBool::new(false)),
-            keep_listening: Arc::new(AtomicBool::new(false))
-        })
+        ServerBuilder::new().addr(addr)
     }
 
     /// Activates the server to start listening on its bound address.
-    pub fn start(self) -> NetResult<ServerHandle> {
+    pub fn start(self) -> NetResult<()> {
+        self.log_start_up()?;
+
         let router = Arc::clone(&self.router);
         let listener = Arc::clone(&self.listener);
-        let do_logging = Arc::clone(&self.do_logging);
         let keep_listening = Arc::clone(&self.keep_listening);
-
-        if do_logging.load(Ordering::Relaxed) {
-            Self::log_start_up(listener.local_addr()?);
-        }
-
-        self.keep_listening.store(true, Ordering::Relaxed);
 
         // Spawn listener thread.
         let handle = spawn(move || {
             // Create a thread pool to handle incoming requests.
             let pool = ThreadPool::new(NUM_WORKER_THREADS);
 
+            keep_listening.store(true, Ordering::Relaxed);
+
             while keep_listening.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok(conn) => {
-                        let rtr = Arc::clone(&router);
-                        let do_log = Arc::clone(&do_logging);
+                    Ok(reader) => {
+                        let task_rtr = Arc::clone(&router);
 
                         // Task an available worker thread with responding.
                         pool.execute(move || {
-                            if let Err(e) = Self::respond(conn, &rtr, &do_log) {
+                            if let Err(e) = Server::respond(reader, &task_rtr) {
                                 Self::log_error(&e);
                             }
                         });
@@ -342,35 +225,26 @@ impl Server {
                 }
             }
 
-            if do_logging.load(Ordering::Relaxed) {
-                Self::log_shutdown();
-            }
+            Self::log_shutdown();
         });
 
-        Ok(ServerHandle {
-            thread: handle,
-            keep_listening: self.keep_listening
-        })
+        // Wait for the server to finish.
+        handle.join().unwrap();
+
+        Ok(())
     }
 
     /// Handles a request from a remote connection.
-    pub fn respond(
-        conn: Connection,
-        router: &Arc<Router>,
-        do_logging: &Arc<AtomicBool>
-    ) -> NetResult<()> {
-        let reader = conn.reader.try_clone()?;
+    pub fn respond(reader: NetReader, router: &Arc<Router>) -> NetResult<()> {
         let mut req = Request::recv(reader)?;
-        let mut res = router.resolve(&mut req)?;
+        let mut res = Response::from_request(&mut req, router)?;
 
-        if do_logging.load(Ordering::Relaxed) {
-            Self::log_with_status(
-                res.remote_ip(),
-                res.status_code(),
-                req.method(),
-                req.path()
-            );
-        }
+        Self::log_with_status(
+            res.remote_ip(),
+            res.status_code(),
+            req.method(),
+            req.path()
+        );
 
         res.send()?;
         Ok(())
@@ -413,10 +287,12 @@ impl Server {
     }
 
     /// Logs a server start up message to stdout.
-    pub fn log_start_up(addr: SocketAddr) {
-        let ip = addr.ip();
-        let port = addr.port();
-        eprintln!("[SERVER] Listening on {ip} at port {port}.");
+    pub fn log_start_up(&self) -> NetResult<()> {
+        let local_addr = self.listener.local_addr()?;
+        let ip = local_addr.ip();
+        let port = local_addr.port();
+        println!("[SERVER] Listening on {ip}:{port}.");
+        Ok(())
     }
 
     /// Logs a server shutdown message to stdout.

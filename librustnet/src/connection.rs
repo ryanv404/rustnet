@@ -50,11 +50,9 @@ impl NetReader {
         let request_line = self.read_request_line()?;
         let headers = self.read_headers()?;
         let body = self.read_body(&headers)?;
+        let reader = Some(self.try_clone()?);
 
-        let stream = self.0.get_ref().try_clone()?;
-        let conn = Some(Connection::new(stream, None)?);
-
-        Ok(Request { request_line, headers, body, conn })
+        Ok(Request { request_line, headers, body, reader })
     }
 
     /// Reads an HTTP response from a remote server.
@@ -62,11 +60,9 @@ impl NetReader {
         let status_line = self.read_status_line()?;
         let headers = self.read_headers()?;
         let body = self.read_body(&headers)?;
+        let writer = Some(NetWriter::try_from(&*self)?);
 
-        let stream = self.0.get_ref().try_clone()?;
-        let conn = Some(Connection::new(stream, None)?);
-
-        Ok(Response { status_line, headers, body, conn })
+        Ok(Response { status_line, headers, body, writer })
     }
 
     pub fn read_request_line(&mut self) -> NetResult<RequestLine> {
@@ -120,8 +116,14 @@ impl NetReader {
     /// Reads and parses the message body based on the value of the
     /// Content-Length and Content-Type headers.
     pub fn read_body(&mut self, headers: &Headers) -> NetResult<Body> {
-        let body_len = headers
-            .get(&CONTENT_LENGTH)
+        let content_len = headers.get(&CONTENT_LENGTH);
+        let content_type = headers.get(&CONTENT_TYPE);
+
+        if content_len.is_none() || content_type.is_none() {
+            return Ok(Body::Empty);
+        }
+
+        let body_len = content_len
             .ok_or_else(|| NetError::ParseError(ParseErrorKind::Body))
             .map(|hdr_val| hdr_val.to_string())
             .and_then(|s| s.trim().parse::<usize>()
@@ -134,13 +136,12 @@ impl NetReader {
         let num_bytes = u64::try_from(body_len)
             .map_err(|_| NetError::ParseError(ParseErrorKind::Body))?;
 
-        let body_type = headers
-            .get(&CONTENT_TYPE)
+        let body_type = content_type
             .ok_or_else(|| NetError::ParseError(ParseErrorKind::Body))
             .map(|hdr_val| hdr_val.to_string())?;
 
         if body_type.is_empty() {
-            // Return error since body length is greater than zero.
+            // Return error since content length is greater than zero.
             return Err(NetError::ParseError(ParseErrorKind::Body));
         }
 
@@ -188,6 +189,16 @@ impl From<TcpStream> for NetWriter {
         Self(BufWriter::with_capacity(WRITER_BUFSIZE, stream))
     }
 }
+
+impl TryFrom<&NetReader> for NetWriter {
+    type Error = NetError;
+
+    fn try_from(reader: &NetReader) -> NetResult<Self> {
+        let stream = reader.0.get_ref().try_clone()?;
+        Ok(Self::from(stream))
+    }
+}
+
 
 impl Write for NetWriter {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {

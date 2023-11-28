@@ -1,7 +1,11 @@
 use std::{env, io};
 
 use librustnet::{Client, Method};
-use librustnet::consts::DATE
+use librustnet::consts::DATE;
+
+mod tui;
+#[allow(unused)]
+use tui::run_tui_browser;
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -55,7 +59,7 @@ fn main() -> io::Result<()> {
                         .as_ref()
                         .and_then(|m| {
                             let upper = m.to_ascii_uppercase();
-                            Method::parse(upper).ok()
+                            upper.parse::<Method>().ok()
                         });
 
                     if let Some(new_method) = maybe_method {

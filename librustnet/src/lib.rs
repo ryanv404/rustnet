@@ -35,8 +35,8 @@ pub use header::{Header, HeaderKind, HeaderName, Headers, HeaderValue};
 pub use http::{Method, Status, Version};
 pub use request::{Request, RequestLine};
 pub use response::{Response, StatusLine};
-pub use router::{Body, Route, Router, Target};
-pub use server::{Server, ServerBuilder, ServerHandle, Task, ThreadPool, Worker};
+pub use router::{Body, Route, RouteBuilder, Router, Target};
+pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
 pub use util::{trim_whitespace_bytes, get_datetime};
 
 pub mod consts {

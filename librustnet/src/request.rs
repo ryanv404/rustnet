@@ -4,8 +4,8 @@ use std::str;
 use std::string::ToString;
 
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetReader,
-    NetResult, ParseErrorKind, Route, Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetReader,
+    NetResult, NetWriter, ParseErrorKind, Route, Version,
 };
 
 /// Represents the first line of an HTTP request.
@@ -83,7 +83,7 @@ pub struct Request {
     pub request_line: RequestLine,
     pub headers: Headers,
     pub body: Body,
-    pub conn: Option<Connection>,
+    pub reader: Option<NetReader>,
 }
 
 impl Display for Request {
@@ -111,7 +111,7 @@ impl Debug for Request {
 			.field("request_line", &self.request_line)
 			.field("headers", &self.headers)
             .field("body", &self.body)
-			.field("conn", &self.conn)
+			.field("reader", &self.reader)
             .finish()
     }
 }
@@ -192,15 +192,15 @@ impl Request {
 
     /// Sends an HTTP request to a remote server.
     pub fn send(&mut self) -> NetResult<()> {
-        let Some(conn) = self.conn.as_mut() else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
+        let mut writer = self.reader
+            .as_ref()
+            .and_then(|reader| NetWriter::try_from(reader).ok())
+            .ok_or_else(|| IoErrorKind::NotConnected)?;
 
-        let mut writer = conn.writer.try_clone()?;
         writer.send_request(self)
     }
 
-    /// Receives an HTTP request from the remote client.
+    /// Receives an HTTP request from a remote client.
     pub fn recv(mut reader: NetReader) -> NetResult<Request> {
         reader.recv_request()
     }

@@ -3,9 +3,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::{
-    HeaderValue, Method, NetResult, Request, Response,
-};
+use crate::{HeaderValue, Method, Request, Response};
 
 /// Represents an endpoint defined by an HTTP method and a URI path.
 #[derive(Debug, Hash, PartialEq, Eq, Ord, PartialOrd)]
@@ -55,7 +53,7 @@ impl Router {
     }
 
     #[must_use]
-    pub fn get(&self, route: &Route) -> Option<&Target> {
+    pub fn resolve(&self, route: &Route) -> Option<&Target> {
         self.0.get(route)
     }
 
@@ -71,74 +69,239 @@ impl Router {
         self.0.is_empty()
     }
 
+    /// Configures handling of a route.
+    #[must_use]
+    pub fn route(self, uri_path: &str) -> RouteBuilder {
+        RouteBuilder::new(uri_path, self)
+    }
+
+    /// Configures handling of a GET request.
+    #[must_use]
+    pub fn get<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
+        let route = Route::new(Method::Get, uri_path);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
+        self
+    }
+
+    /// Configures handling of a GET request.
+    #[must_use]
+    pub fn get_with_handler<F>(mut self, uri_path: &str, handler: F) -> Self
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Get, uri_path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.mount(route, target);
+        self
+    }
+
+    /// Configures handling of a POST request.
+    #[must_use]
+    pub fn post(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Post, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Configures handling of a PUT request.
+    #[must_use]
+    pub fn put(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Put, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Configures handling of a PATCH request.
+    #[must_use]
+    pub fn patch(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Patch, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Configures handling of a DELETE request.
+    #[must_use]
+    pub fn delete(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Delete, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Configures handling of a TRACE request.
+    #[must_use]
+    pub fn trace(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Trace, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Configures handling of a CONNECT request.
+    #[must_use]
+    pub fn connect(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Connect, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Configures handling of an OPTIONS request.
+    #[must_use]
+    pub fn options(mut self, uri_path: &str) -> Self {
+        let route = Route::new(Method::Options, uri_path);
+        self.mount(route, Target::Empty);
+        self
+    }
+
+    /// Sets the static file path to a favicon icon.
+    #[must_use]
+    pub fn favicon<P>(mut self, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
+        let route = Route::new(Method::Get, "/favicon.ico");
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
+        self
+    }
+
+    /// Sets the static file path to an HTML page returned by 404 responses.
+    #[must_use]
+    pub fn error_404<P>(mut self, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
+        let route = Route::new(Method::Get, "__error");
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
+        self
+    }
+
     /// Returns the target resource for error 404 responses.
     #[must_use]
     pub fn error_handler(&self) -> &Target {
         let route = Route::Get("__error".to_string());
-        self.get(&route).unwrap_or(&Target::Empty)
+        self.resolve(&route).unwrap_or(&Target::Empty)
+    }
+}
+
+pub struct RouteBuilder {
+    path: String,
+    router: Router,
+}
+
+impl RouteBuilder {
+    /// Returns a new `RouteBuilder` instance.
+    #[must_use]
+    pub fn new(path: &str, router: Router) -> Self {
+        Self {
+            path: path.to_string(),
+            router
+        }
     }
 
-    /// Resolves a `Request` into a `Response` based on the provided `Router`.
-    pub fn resolve(&self, req: &mut Request) -> NetResult<Response> {
-        if self.is_empty() {
-            let mut target = Target::Text("This server has no routes configured.");
-            return Response::new(502, &mut target, req);
-        }
+    /// Configures handling of a GET request.
+    #[must_use]
+    pub fn get<F>(mut self, handler: F) -> Self
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Get, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
 
-        let method = req.method();
-        let mut maybe_target = self.get(&req.route());
+    /// Configures handling of a POST request.
+    #[must_use]
+    pub fn post<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Post, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
 
-        match (maybe_target.as_mut(), method) {
-            (Some(target), Method::Get) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Head) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Post) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Put) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Patch) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Delete) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Trace) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Options) => {
-                Response::new(200, target, req)
-            },
-            (Some(target), Method::Connect) => {
-                Response::new(200, target, req)
-            },
-            (None, Method::Head) => {
-                // Handle a HEAD request for a route that does not exist
-                // but does exist as for a GET request.
-                let route = Route::Get(req.request_line.path.clone());
+    /// Configures handling of a PUT request.
+    #[must_use]
+    pub fn put<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Put, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
 
-                let (code, mut target) = self.get(&route).map_or_else(
-                    || {
-                        // No route exists for a GET request either.
-                        (404, self.error_handler())
-                    },
-                    |target| {
-                        // GET route exists so send it as a HEAD response.
-                        (200, target)
-                    }
-                );
+    /// Configures handling of a PATCH request.
+    #[must_use]
+    pub fn patch<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Patch, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
 
-                Response::new(code, &mut target, req)
-            },
-            (None, _) => {
-                // Handle routes that do not exist.
-                Response::new(404, &mut self.error_handler(), req)
-            },
-        }
+    /// Configures handling of a DELETE request.
+    #[must_use]
+    pub fn delete<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Delete, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
+
+    /// Configures handling of a TRACE request.
+    #[must_use]
+    pub fn trace<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Trace, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
+
+    /// Configures handling of an OPTIONS request.
+    #[must_use]
+    pub fn options<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Options, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
+
+    /// Configures handling of a CONNECT request.
+    #[must_use]
+    pub fn connect<F>(mut self, handler: F) -> Self 
+    where
+        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+    {
+        let route = Route::new(Method::Connect, &self.path);
+        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        self.router.mount(route, target);
+        self
+    }
+
+    /// Returns the inner `Router`.
+    #[must_use]
+    pub fn apply(self) -> Router {
+        self.router
     }
 }
 
@@ -438,5 +601,10 @@ impl Body {
             Self::Bytes(ref buf) => buf.len(),
             Self::Favicon(ref buf) => buf.len(),
         }
+    }
+
+    /// Changes the body to a text type containing the provided string.
+    pub fn text(&mut self, text: &str) {
+        *self = Self::Text(text.to_string());
     }
 }
