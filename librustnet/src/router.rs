@@ -196,10 +196,7 @@ impl RouteBuilder {
     /// Returns a new `RouteBuilder` instance.
     #[must_use]
     pub fn new(path: &str, router: Router) -> Self {
-        Self {
-            path: path.to_string(),
-            router
-        }
+        Self { path: path.to_string(), router }
     }
 
     /// Configures handling of a GET request.
@@ -305,6 +302,9 @@ impl RouteBuilder {
     }
 }
 
+pub type FnHandler = dyn Fn(&Request, &Response) + Send + Sync + 'static;
+pub type FnMutHandler = dyn FnMut(&Request, &mut Response) + Send + Sync + 'static;
+
 /// Target resources used by server end-points.
 pub enum Target {
     Empty,
@@ -315,9 +315,8 @@ pub enum Target {
     Bytes(Vec<u8>),
     File(PathBuf),
     Favicon(PathBuf),
-    Fn(Box<dyn Fn(&Request, &Response) + Send + Sync>),
-    FnMut(Arc<Mutex<dyn FnMut(&Request, &mut Response) + Send + Sync>>),
-    FnOnce(Box<dyn FnOnce() + Send + Sync>),
+    Fn(Arc<FnHandler>),
+    FnMut(Arc<Mutex<FnMutHandler>>),
 }
 
 impl Default for Target {
@@ -330,16 +329,15 @@ impl Display for Target {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => Ok(()),
-            Self::Text(ref s) => write!(f, "{s}"),
-            Self::Html(ref s) => write!(f, "{s}"),
-            Self::Json(ref s) => write!(f, "{s}"),
-            Self::Xml(ref s) => write!(f, "{s}"),
+            Self::Text(s) => write!(f, "{s}"),
+            Self::Html(s) => write!(f, "{s}"),
+            Self::Json(s) => write!(f, "{s}"),
+            Self::Xml(s) => write!(f, "{s}"),
             Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
             Self::File(_) => write!(f, "File {{ ... }}"),
             Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
             Self::Fn(_) => write!(f, "Fn {{ ... }}"),
             Self::FnMut(_) => write!(f, "FnMut {{ ... }}"),
-            Self::FnOnce(_) => write!(f, "FnOnce {{ ... }}"),
         }
     }
 }
@@ -348,27 +346,24 @@ impl Debug for Target {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => f.debug_tuple("Empty").finish(),
-            Self::Text(ref s) => f.debug_tuple("Text").field(s).finish(),
-            Self::Html(ref s) => f.debug_tuple("Html").field(s).finish(),
-            Self::Json(ref s) => f.debug_tuple("Json").field(s).finish(),
-            Self::Xml(ref s) => f.debug_tuple("Xml").field(s).finish(),
+            Self::Text(s) => f.debug_tuple("Text").field(s).finish(),
+            Self::Html(s) => f.debug_tuple("Html").field(s).finish(),
+            Self::Json(s) => f.debug_tuple("Json").field(s).finish(),
+            Self::Xml(s) => f.debug_tuple("Xml").field(s).finish(),
             Self::Bytes(ref buf) => {
                 f.debug_tuple("Bytes").field(buf).finish()
             },
-            Self::File(ref path) => {
+            Self::File(path) => {
                 f.debug_tuple("File").field(path).finish()
             },
-            Self::Favicon(ref path) => {
+            Self::Favicon(path) => {
                 f.debug_tuple("Favicon").field(path).finish()
             },
             Self::Fn(_) => {
-                f.debug_tuple("Fn closure").field(&"{ ... }").finish()
+                f.debug_tuple("Fn").field(&"{ ... }").finish()
             },
             Self::FnMut(_) => {
-                f.debug_tuple("FnMut closure").field(&"{ ... }").finish()
-            },
-            Self::FnOnce(_) => {
-                f.debug_tuple("FnOnce closure").field(&"{ ... }").finish()
+                f.debug_tuple("FnMut").field(&"{ ... }").finish()
             },
         }
     }
@@ -378,17 +373,18 @@ impl PartialEq for Target {
     #[allow(clippy::match_like_matches_macro)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Empty, Self::Empty)
-                | (Self::Text(_), Self::Text(_))
-                | (Self::Html(_), Self::Html(_))
-                | (Self::Json(_), Self::Json(_))
-                | (Self::Xml(_), Self::Xml(_))
-                | (Self::Bytes(_), Self::Bytes(_))
-                | (Self::File(_), Self::File(_))
-                | (Self::Favicon(_), Self::Favicon(_))
-                | (Self::Fn(_), Self::Fn(_))
-                | (Self::FnMut(_), Self::FnMut(_))
-                | (Self::FnOnce(_), Self::FnOnce(_)) => true,
+            (Self::Empty, Self::Empty) => true,
+            (Self::Text(s1), Self::Text(s2)) => s1 == s2,
+            (Self::Html(s1), Self::Html(s2)) => s1 == s2,
+            (Self::Json(s1), Self::Json(s2)) => s1 == s2,
+            (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
+            (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
+                &buf1[..] == &buf2[..]
+            },
+            (Self::File(p1), Self::File(p2)) => p1 == p2,
+            (Self::Favicon(p1), Self::Favicon(p2)) => p1 == p2,
+            (Self::Fn(_), Self::Fn(_)) => true,
+            (Self::FnMut(_), Self::FnMut(_)) => true,
             _ => false,
         }
     }
@@ -412,7 +408,7 @@ impl Target {
     /// Returns true if the URI target type is a function.
     #[must_use]
     pub const fn is_function_handler(&self) -> bool {
-        matches!(self, Self::Fn(_) | Self::FnMut(_) | Self::FnOnce(_))
+        matches!(self, Self::Fn(_) | Self::FnMut(_))
     }
 
     /// Returns true if the URI target is a String.
@@ -437,8 +433,8 @@ impl Target {
             Self::Json(_) => Some(b"application/json"[..].into()),
             Self::Xml(_) => Some(b"application/xml"[..].into()),
             Self::Bytes(_) => Some(b"application/octet-stream"[..].into()),
-            Self::File(ref path) => Some(HeaderValue::infer_content_type(path)),
-            Self::Favicon(ref path) => Some(HeaderValue::infer_content_type(path)),
+            Self::File(path) => Some(HeaderValue::infer_content_type(path)),
+            Self::Favicon(path) => Some(HeaderValue::infer_content_type(path)),
             _ => None,
         }
     }
@@ -467,10 +463,10 @@ impl Display for Body {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => Ok(()),
-            Self::Text(ref s) => write!(f, "{s}"),
-            Self::Html(ref s) => write!(f, "{s}"),
-            Self::Json(ref s) => write!(f, "{s}"),
-            Self::Xml(ref s) => write!(f, "{s}"),
+            Self::Text(s) => write!(f, "{s}"),
+            Self::Html(s) => write!(f, "{s}"),
+            Self::Json(s) => write!(f, "{s}"),
+            Self::Xml(s) => write!(f, "{s}"),
             Self::Image(_) => write!(f, "Image {{ ... }}"),
             Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
             Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
@@ -504,13 +500,19 @@ impl PartialEq for Body {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Empty, Self::Empty) => true,
-            (Self::Text(_), Self::Text(_)) => true,
-            (Self::Html(_), Self::Html(_)) => true,
-            (Self::Json(_), Self::Json(_)) => true,
-            (Self::Xml(_), Self::Xml(_)) => true,
-            (Self::Image(_), Self::Image(_)) => true,
-            (Self::Bytes(_), Self::Bytes(_)) => true,
-            (Self::Favicon(_), Self::Favicon(_)) => true,
+            (Self::Text(s1), Self::Text(s2)) => s1 == s2,
+            (Self::Html(s1), Self::Html(s2)) => s1 == s2,
+            (Self::Json(s1), Self::Json(s2)) => s1 == s2,
+            (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
+            (Self::Image(ref buf1), Self::Image(ref buf2)) => {
+                &buf1[..] == &buf2[..]
+            },
+            (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
+                &buf1[..] == &buf2[..]
+            },
+            (Self::Favicon(ref buf1), Self::Favicon(ref buf2)) => {
+                &buf1[..] == &buf2[..]
+            },
             _ => false,
         }
     }
@@ -560,9 +562,9 @@ impl Body {
         }
     }
 
-    /// Returns true if the body is safe/desireable to print to the terminal.
+    /// Returns true if the body contains a alphanumeric data.
     #[must_use]
-    pub const fn should_print(&self) -> bool {
+    pub const fn is_alphanumeric(&self) -> bool {
         match self {
             Self::Text(_)
                 | Self::Html(_)
@@ -604,7 +606,9 @@ impl Body {
     }
 
     /// Changes the body to a text type containing the provided string.
-    pub fn text(&mut self, text: &str) {
-        *self = Self::Text(text.to_string());
+    pub fn send_text(&mut self, text: &str) {
+        if !text.is_empty() {
+            *self = Self::Text(text.to_string());
+        }
     }
 }

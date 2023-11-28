@@ -45,7 +45,7 @@ impl NetReader {
         Ok(Self::from(stream))
     }
 
-    /// Reads an HTTP request from a remote client.
+    /// Reads an HTTP request from the underlying `TcpStream`.
     pub fn recv_request(&mut self) -> NetResult<Request> {
         let request_line = self.read_request_line()?;
         let headers = self.read_headers()?;
@@ -55,7 +55,7 @@ impl NetReader {
         Ok(Request { request_line, headers, body, reader })
     }
 
-    /// Reads an HTTP response from a remote server.
+    /// Reads an HTTP response from the underlying `TcpStream`.
     pub fn recv_response(&mut self) -> NetResult<Response> {
         let status_line = self.read_status_line()?;
         let headers = self.read_headers()?;
@@ -65,8 +65,9 @@ impl NetReader {
         Ok(Response { status_line, headers, body, writer })
     }
 
+    /// Reads a request line from the underlying `TcpStream`.
     pub fn read_request_line(&mut self) -> NetResult<RequestLine> {
-        let mut line = String::with_capacity(200);
+        let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
             Err(e) => Err(NetError::ReadError(e.kind())),
@@ -75,8 +76,9 @@ impl NetReader {
         }
     }
 
+    /// Reads a response status line from the underlying `TcpStream`.
     pub fn read_status_line(&mut self) -> NetResult<StatusLine> {
-        let mut line = String::with_capacity(200);
+        let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
             Err(e) => Err(NetError::ReadError(e.kind())),
@@ -85,6 +87,7 @@ impl NetReader {
         }
     }
 
+    /// Reads request headers from the underlying `TcpStream`.
     pub fn read_headers(&mut self) -> NetResult<Headers> {
         let mut num_headers = 0;
         let mut headers = Headers::new();
@@ -199,7 +202,6 @@ impl TryFrom<&NetReader> for NetWriter {
     }
 }
 
-
 impl Write for NetWriter {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
         self.0.write(buf)
@@ -221,7 +223,7 @@ impl NetWriter {
         Ok(Self::from(stream))
     }
 
-    /// Sends an HTTP request to a remote server.
+    /// Writes an HTTP request to the underlying `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
         if !req.headers.contains(&ACCEPT) {
             req.headers.insert_accept("*/*");
@@ -240,11 +242,12 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &req.request_line).as_bytes())?;
         self.write_headers(&req.headers)?;
         self.write_body(&req.body)?;
+
         self.flush()?;
         Ok(())
     }
 
-    /// Sends an HTTP response to a remote client.
+    /// Writes an HTTP response to the underlying `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
         if !res.headers.contains(&SERVER) {
             res.headers.insert_server();
@@ -253,22 +256,24 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &res.status_line).as_bytes())?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
+
         self.flush()?;
         Ok(())
     }
 
+    /// Writes the response headers to the underlying `TcpStream`.
     pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
         if !headers.is_empty() {
             for (name, value) in headers.0.iter() {
                 self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
             }
-
-            self.write_all(b"\r\n")?;
         }
 
+        self.write_all(b"\r\n")?;
         Ok(())
     }
 
+    /// Writes the response body to the underlying `TcpStream`.
     pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
         if !body.is_empty() {
             self.write_all(body.as_bytes())?;

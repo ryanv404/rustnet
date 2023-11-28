@@ -207,243 +207,267 @@ mod utils {
     }
 }
 
-// #[cfg(test)]
-// mod router {
-//     mod resolve {
-//         use std::collections::BTreeMap;
-//         use std::net::TcpStream;
-//         use std::path::PathBuf;
-//         use std::sync::Arc;
-//         use crate::consts::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
-//         use crate::{
-//             Connection, Headers, Request, RequestLine, Response, Route, Router,
-//             Status, StatusLine, Version, Method, Target,
-//         };
+ #[cfg(test)]
+mod router {
+    mod resolve {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
 
-//         macro_rules! test_empty_routes {
-//             ($(
-//                 $method:ident: $path:literal => Empty, $status:literal;
-//             )+) => {
-//                 #[test]
-//                 fn empty_routes() {
-//                     let routes = BTreeMap::from([
-//                         $( (Route::new(Method::$method, $path), Target::Empty) ),+
-//                     ]);
+        use crate::{
+            Body, Headers, Request, RequestLine, Response, Route, Router,
+            Status, StatusLine, Version, Method, Target,
+        };
 
-//                     let router = Arc::new(Router(routes));
+        macro_rules! test_empty_routes {
+            (
+                $label:ident:
+                $(
+                    $method:ident $path:literal => $body:ident, $code:literal;
+                )+
+            ) => {
+                #[test]
+                fn $label() {
+                    let routes = BTreeMap::from([
+                        $( (Route::new(Method::$method, $path), Target::$body) ),+
+                    ]);
 
-//                     let localhost = TcpStream::connect("httpbin.org:80").unwrap();
-//                     let dummy_connection = Connection::try_from(localhost).unwrap();
+                    let router = Arc::new(Router(routes));
 
-//                     $(
-//                         let test_conn = dummy_connection.try_clone().unwrap();
-//                         let expected_conn = dummy_connection.try_clone().unwrap();
+                    $(
+                        let body = Body::$body;
 
-//                         let req = Request {
-//                             request_line: RequestLine {
-//                                 method: Method::$method,
-//                                 path: $path.to_string(),
-//                                 version: Version::OneDotOne
-//                             },
-//                             headers: Headers::new(),
-//                             body: None,
-//                             conn: test_conn
-//                         };
+                        let mut req = Request {
+                            request_line: RequestLine {
+                                method: Method::$method,
+                                path: $path.to_string(),
+                                version: Version::OneDotOne
+                            },
+                            headers: Headers::new(),
+                            body: body.clone(),
+                            reader: None
+                        };
 
-//                         let rtr = Arc::clone(&router);
-//                         let res = Router::resolve(req, &rtr).unwrap();
+                        let res = Response::from_request(&mut req, &router).unwrap();
 
-//                         let mut headers = Headers::new();
-//                         headers.insert(CACHE_CONTROL,
-//                             "no-cache".as_bytes().into());
+                        let mut expect = Response {
+                            status_line: StatusLine {
+                                version: Version::OneDotOne,
+                                status: Status($code)
+                            },
+                            headers: Headers::new(),
+                            body,
+                            writer: None
+                        };
 
-//                         let expected = Response {
-//                             method: Method::$method,
-//                             status_line: StatusLine {
-//                                 version: Version::OneDotOne,
-//                                 status: Status($status)
-//                             },
-//                             headers,
-//                             body: None,
-//                             conn: expected_conn
-//                         };
+                        expect.headers.insert_cache_control("no-cache");
 
-//                         assert_eq!(res.method, expected.method);
-//                         assert_eq!(res.status_line, expected.status_line);
-//                         assert_eq!(res.headers, expected.headers);
-//                         assert_eq!(res.body, expected.body);
-//                     )+
-//                 }
-//             };
-//         }
+                        assert_eq!(res.status_line, expect.status_line);
+                        assert_eq!(res.headers, expect.headers);
+                        assert_eq!(res.body, expect.body);
+                    )+
+                }
+            };
+        }
 
-//         macro_rules! test_text_routes {
-//             ($(
-//                 $method:ident: $path:literal =>
-//                 Text($text:literal), $status:literal;
-//             )+) => {
-//                 #[test]
-//                 fn text_routes() {
-//                     let routes = BTreeMap::from([
-//                         $((Route::new(
-//                                 Method::$method, $path),
-//                                 Target::Text($text)
-//                         )),+
-//                     ]);
+        macro_rules! test_routes {
+            (
+                $label:ident:
+                $(
+                    $method:ident $path:literal =>
+                    $body:ident($inner:expr), $code:literal;
+                )+
+            ) => {
+                #[test]
+                fn $label() {
+                    let routes = BTreeMap::from([
+                        $((Route::new(Method::$method, $path), Target::$body($inner))),+
+                    ]);
 
-//                     let router = Arc::new(Router(routes));
+                    let router = Arc::new(Router(routes));
 
-//                     let localhost = TcpStream::connect("httpbin.org:80").unwrap();
-//                     let dummy_connection = Connection::try_from(localhost).unwrap();
+                    $(
 
-//                     $(
-//                         let test_conn = dummy_connection.try_clone().unwrap();
-//                         let expected_conn = dummy_connection.try_clone().unwrap();
+                        let body = Body::$body(String::from($inner));
 
-//                         let req = Request {
-//                             request_line: RequestLine {
-//                                 method: Method::$method,
-//                                 path: $path.to_string(),
-//                                 version: Version::OneDotOne
-//                             },
-//                             headers: Headers::new(),
-//                             body: None,
-//                             conn: test_conn
-//                         };
+                        let mut req = Request {
+                            request_line: RequestLine {
+                                method: Method::$method,
+                                path: $path.to_string(),
+                                version: Version::OneDotOne
+                            },
+                            headers: Headers::new(),
+                            body: body.clone(),
+                            reader: None
+                        };
 
-//                         let rtr = Arc::clone(&router);
-//                         let res = Router::resolve(req, &rtr).unwrap();
+                        let res = Response::from_request(&mut req, &router).unwrap();
 
-//                         let mut headers = Headers::new();
-//                         headers.insert(CACHE_CONTROL,
-//                             "no-cache".as_bytes().into());
-//                         headers.insert(CONTENT_LENGTH, "5".as_bytes().into());
-//                         headers.insert(CONTENT_TYPE,
-//                             "text/plain; charset=utf-8".as_bytes().into());
+                        let mut expect = Response {
+                            status_line: StatusLine {
+                                version: Version::OneDotOne,
+                                status: Status($code)
+                            },
+                            headers: Headers::new(),
+                            body,
+                            writer: None
+                        };
 
-//                         let expected = Response {
-//                             method: Method::$method,
-//                             status_line: StatusLine {
-//                                 version: Version::OneDotOne,
-//                                 status: Status($status)
-//                             },
-//                             headers,
-//                             body: Some(Vec::from($text)),
-//                             conn: expected_conn
-//                         };
+                        expect.headers.insert_cache_control("no-cache");
+                        expect.headers.insert_content_length(expect.body.len());
 
-//                         assert_eq!(res.method, expected.method);
-//                         assert_eq!(res.status_line, expected.status_line);
-//                         assert_eq!(res.headers, expected.headers);
-//                         assert_eq!(res.body, expected.body);
-//                     )+
-//                 }
-//             };
-//         }
+                        match stringify!($label) {
+                            s if s.eq_ignore_ascii_case("text_routes") => {
+                                expect.headers.insert_content_type("text/plain; charset=utf-8");
+                            },
+                            s if s.eq_ignore_ascii_case("html_routes") => {
+                                expect.headers.insert_content_type("text/html; charset=utf-8");
+                            },
+                            s if s.eq_ignore_ascii_case("json_routes") => {
+                                expect.headers.insert_content_type("application/json");
+                            },
+                            s if s.eq_ignore_ascii_case("xml_routes") => {
+                                expect.headers.insert_content_type("application/xml");
+                            },
+                            s if s.eq_ignore_ascii_case("bytes_routes") => {
+                                expect.headers.insert_content_type("application/octet-stream");
+                            },
+                            _ => unreachable!(),
+                        }
 
-//         macro_rules! test_file_routes {
-//             ($(
-//                 $method:ident: $path:literal =>
-//                 File($file:literal), $status:literal;
-//             )+) => {
-//                 #[test]
-//                 fn file_routes() {
-//                     let mut router = Router::new();
-                    
-//                     $( 
-//                         let p: PathBuf = [
-//                             "server",
-//                             "static",
-//                             $file
-//                         ].iter().collect();
-//                         let rt = Route::new(Method::$method, $path);
-//                         router.mount(rt, Target::File(p));
-//                     )+
+                        if Method::$method == Method::Head {
+                            expect.body = Body::Empty;
+                        }
 
-//                     let router = Arc::new(Router::new());
+                        assert_eq!(res.status_line, expect.status_line);
+                        assert_eq!(res.headers, expect.headers);
+                        assert_eq!(res.body, expect.body);
+                    )+
+                }
+            };
+        }
 
-//                     let localhost = TcpStream::connect("httpbin.org:80").unwrap();
-//                     let dummy_connection = Connection::try_from(localhost).unwrap();
+        test_empty_routes! {
+            empty_routes:
+            Get "/empty1" => Empty, 200;
+            Head "/empty2" => Empty, 200;
+            Post "/empty3" => Empty, 201;
+            Put "/empty4" => Empty, 200;
+            Patch "/empty5" => Empty, 200;
+            Delete "/empty6" => Empty, 200;
+            Trace "/empty7" => Empty, 200;
+            Options "/empty8" => Empty, 200;
+            Connect "/empty9" => Empty, 200;
+        }
 
-//                     $(
-//                         let test_conn = dummy_connection.try_clone().unwrap();
-//                         let expected_conn = dummy_connection.try_clone().unwrap();
+        test_routes! {
+            text_routes:
+            Get "/text1" => Text("text1"), 200;
+            Head "/text2" => Text("text2"), 200;
+            Post "/text3" => Text("text3"), 201;
+            Put "/text4" => Text("text4"), 200;
+            Patch "/text5" => Text("text5"), 200;
+            Delete "/text6" => Text("text6"), 200;
+            Trace "/text7" => Text("text7"), 200;
+            Options "/text8" => Text("text8"), 200;
+            Connect "/text9" => Text("text9"), 200;
+        }
 
-//                         let req = Request {
-//                             request_line: RequestLine {
-//                                 method: Method::$method,
-//                                 path: $path.to_string(),
-//                                 version: Version::OneDotOne
-//                             },
-//                             headers: Headers::new(),
-//                             body: None,
-//                             conn: test_conn
-//                         };
+        test_routes! {
+            json_routes:
+            Get "/json1" => Json("json1"), 200;
+            Head "/json2" => Json("json2"), 200;
+            Post "/json3" => Json("json3"), 201;
+            Put "/json4" => Json("json4"), 200;
+            Patch "/json5" => Json("json5"), 200;
+            Delete "/json6" => Json("json6"), 200;
+            Trace "/json7" => Json("json7"), 200;
+            Options "/json8" => Json("json8"), 200;
+            Connect "/json9" => Json("json9"), 200;
+        }
 
-//                         let rtr = Arc::clone(&router);
-//                         let res = Router::resolve(req, &rtr).unwrap();
+        test_routes! {
+            html_routes:
+            Get "/html1" => Html("html1"), 200;
+            Head "/html2" => Html("html2"), 200;
+            Post "/html3" => Html("html3"), 201;
+            Put "/html4" => Html("html4"), 200;
+            Patch "/html5" => Html("html5"), 200;
+            Delete "/html6" => Html("html6"), 200;
+            Trace "/html7" => Html("html7"), 200;
+            Options "/html8" => Html("html8"), 200;
+            Connect "/html9" => Html("html9"), 200;
+        }
 
-//                         let mut headers = Headers::new();
-//                         headers.insert(CACHE_CONTROL,
-//                             "no-cache".as_bytes().into());
-//                         headers.insert(CONTENT_LENGTH, "5".as_bytes().into());
-//                         headers.insert(CONTENT_TYPE,
-//                             "text/plain; charset=utf-8".as_bytes().into());
+        test_routes! {
+            xml_routes:
+            Get "/xml1" => Xml("xml1"), 200;
+            Head "/xml2" => Xml("xml2"), 200;
+            Post "/xml3" => Xml("xml3"), 201;
+            Put "/xml4" => Xml("xml4"), 200;
+            Patch "/xml5" => Xml("xml5"), 200;
+            Delete "/xml6" => Xml("xml6"), 200;
+            Trace "/xml7" => Xml("xml7"), 200;
+            Options "/xml8" => Xml("xml8"), 200;
+            Connect "/xml9" => Xml("xml9"), 200;
+        }
+    }
+}
 
-//                         let expected = Response {
-//                             method: Method::$method,
-//                             status_line: StatusLine {
-//                                 version: Version::OneDotOne,
-//                                 status: Status($status)
-//                             },
-//                             headers: Headers::new(),
-//                             body: Some(Vec::from("text route test")),
-//                             conn: expected_conn
-//                         };
+#[cfg(test)]
+mod send_sync {
+    use crate::{
+        Client, Connection, Header, Headers, HeaderKind, HeaderName,
+        HeaderValue, Method, NetReader, NetWriter, Request, RequestLine,
+        Response, Route, Router, Server, Status, StatusLine, Target, Version,
+    };
 
-//                         assert_eq!(res.method, expected.method);
-//                         assert_eq!(res.status_line, expected.status_line);
-//                         assert_eq!(res.headers, expected.headers);
-//                         assert_eq!(res.body, expected.body);
-//                     )+
-//                 }
-//             };
-//         }
+    #[test]
+    fn send_tests() {
+        fn type_is_send<T: Send>() {}
+        type_is_send::<Client>();
+        type_is_send::<Connection>();
+        type_is_send::<Header>();
+        type_is_send::<HeaderKind>();
+        type_is_send::<HeaderName>();
+        type_is_send::<HeaderValue>();
+        type_is_send::<Headers>();
+        type_is_send::<Method>();
+        type_is_send::<NetReader>();
+        type_is_send::<NetWriter>();
+        type_is_send::<Request>();
+        type_is_send::<RequestLine>();
+        type_is_send::<Response>();
+        type_is_send::<Route>();
+        type_is_send::<Router>();
+        type_is_send::<Server>();
+        type_is_send::<Status>();
+        type_is_send::<StatusLine>();
+        type_is_send::<Target>();
+        type_is_send::<Version>();
+    }
 
-//         test_empty_routes! {
-//             Get: "/test1" => Empty, 200;
-//             Head: "/test2" => Empty, 200;
-//             Post: "/test3" => Empty, 200;
-//             Put: "/test4" => Empty, 200;
-//             Patch: "/test5" => Empty, 200;
-//             Delete: "/test6" => Empty, 200;
-//             Trace: "/test7" => Empty, 200;
-//             Options: "/test8" => Empty, 200;
-//             Connect: "127.0.0.1:1234" => Empty, 200;
-//         }
-
-//         test_text_routes! {
-//             Get: "/test1" => Text("test1"), 200;
-//             Head: "/test2" => Text("test2"), 200;
-//             Post: "/test3" => Text("test3"), 200;
-//             Put: "/test4" => Text("test4"), 200;
-//             Patch: "/test5" => Text("test5"), 200;
-//             Delete: "/test6" => Text("test6"), 200;
-//             Trace: "/test7" => Text("test7"), 200;
-//             Options: "/test8" => Text("test8"), 200;
-//             Connect: "127.0.0.1:1234" => Text("test9"), 200;
-//         }
-
-//         test_file_routes! {
-//             Get: "/test1" => File("index.html"), 200;
-//             Head: "/test2" => File("index.html"), 200;
-//             Post: "/test3" => File("index.html"), 200;
-//             Put: "/test4" => File("index.html"), 200;
-//             Patch: "/test5" => File("index.html"), 200;
-//             Delete: "/test6" => File("index.html"), 200;
-//             Trace: "/test7" => File("index.html"), 200;
-//             Options: "/test8" => File("index.html"), 200;
-//             Connect: "127.0.0.1:1234" => File("index.html"), 200;
-//         }
-//     }
-// }
+    #[test]
+    fn sync_tests() {
+        fn type_is_sync<T: Sync>() {}
+        type_is_sync::<Client>();
+        type_is_sync::<Connection>();
+        type_is_sync::<Header>();
+        type_is_sync::<HeaderKind>();
+        type_is_sync::<HeaderName>();
+        type_is_sync::<HeaderValue>();
+        type_is_sync::<Headers>();
+        type_is_sync::<Method>();
+        type_is_sync::<NetReader>();
+        type_is_sync::<NetWriter>();
+        type_is_sync::<Request>();
+        type_is_sync::<RequestLine>();
+        type_is_sync::<Response>();
+        type_is_sync::<Route>();
+        type_is_sync::<Router>();
+        type_is_sync::<Server>();
+        type_is_sync::<Status>();
+        type_is_sync::<StatusLine>();
+        type_is_sync::<Target>();
+        type_is_sync::<Version>();
+    }
+}

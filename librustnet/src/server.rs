@@ -23,6 +23,7 @@ where
     pub port: Option<u16>,
     pub addr: Option<A>,
     pub router: Option<Router>,
+    pub do_logging: bool,
 }
 
 impl<A> Default for ServerBuilder<A>
@@ -35,6 +36,7 @@ where
             port: None,
             addr: None,
             router: None,
+            do_logging: false
         }
     }
 }
@@ -77,6 +79,13 @@ where
         self
     }
 
+    /// Set whether to log connections to stdout (default: disabled).
+    #[must_use]
+    pub fn log(mut self, do_logging: bool) -> Self {
+        self.do_logging = do_logging;
+        self
+    }
+
     /// Builds and returns a `Server` instance.
     pub fn build(mut self) -> NetResult<Server> {
         let router = self.router.take().unwrap_or_default();
@@ -99,6 +108,7 @@ where
         Ok(Server {
             router: Arc::new(router),
             listener: Arc::new(listener),
+            do_logging: Arc::new(self.do_logging),
             keep_listening: Arc::new(AtomicBool::new(false))
         })
     }
@@ -162,31 +172,24 @@ pub struct Server {
     pub router: Arc<Router>,
     /// The local socket on which the server listens.
     pub listener: Arc<Listener>,
+    /// Enables logging new connections.
+    pub do_logging: Arc<bool>,
     /// Trigger for closing the server.
     pub keep_listening: Arc<AtomicBool>,
 }
 
 impl Server {
-    /// Returns a builder object that is used to build a `Server`.
+    /// Returns a `ServerBuilder` object.
     #[must_use]
     pub fn builder<A>() -> ServerBuilder<A>
     where
         A: ToSocketAddrs
     {
-        ServerBuilder::default()
+        ServerBuilder::new()
     }
 
-    /// Returns a new `Server` instance.
+    /// Returns a `ServerBuilder` object with the address field set.
     #[must_use]
-    pub fn new(router: Router, listener: Listener) -> Self {
-        Self {
-            router: Arc::new(router),
-            listener: Arc::new(listener),
-            keep_listening: Arc::new(AtomicBool::new(false))
-        }
-    }
-
-    /// Returns a `Server` instance bound to the provided socket address.
     pub fn http<A>(addr: A) -> ServerBuilder<A>
     where
         A: ToSocketAddrs
@@ -194,12 +197,26 @@ impl Server {
         ServerBuilder::new().addr(addr)
     }
 
+    /// Returns a new `Server` instance.
+    #[must_use]
+    pub fn new(router: Router, listener: Listener, do_log: bool) -> Self {
+        Self {
+            router: Arc::new(router),
+            listener: Arc::new(listener),
+            do_logging: Arc::new(do_log),
+            keep_listening: Arc::new(AtomicBool::new(false))
+        }
+    }
+
     /// Activates the server to start listening on its bound address.
     pub fn start(self) -> NetResult<()> {
-        self.log_start_up()?;
+        if *self.do_logging {
+            self.log_start_up()?;
+        }
 
         let router = Arc::clone(&self.router);
         let listener = Arc::clone(&self.listener);
+        let do_logging = Arc::clone(&self.do_logging);
         let keep_listening = Arc::clone(&self.keep_listening);
 
         // Spawn listener thread.
@@ -213,11 +230,13 @@ impl Server {
                 match listener.accept() {
                     Ok(reader) => {
                         let task_rtr = Arc::clone(&router);
+                        let do_log = Arc::clone(&do_logging);
 
                         // Task an available worker thread with responding.
                         pool.execute(move || {
-                            if let Err(e) = Server::respond(reader, &task_rtr) {
-                                Self::log_error(&e);
+                            match Server::respond(reader, &task_rtr, do_log) {
+                                Err(e) => Self::log_error(&e),
+                                _ => {},
                             }
                         });
                     },
@@ -225,7 +244,9 @@ impl Server {
                 }
             }
 
-            Self::log_shutdown();
+            if *do_logging {
+                Self::log_shutdown();
+            }
         });
 
         // Wait for the server to finish.
@@ -235,16 +256,22 @@ impl Server {
     }
 
     /// Handles a request from a remote connection.
-    pub fn respond(reader: NetReader, router: &Arc<Router>) -> NetResult<()> {
+    pub fn respond(
+        reader: NetReader,
+        router: &Arc<Router>,
+        do_log: Arc<bool>
+    ) -> NetResult<()> {
         let mut req = Request::recv(reader)?;
         let mut res = Response::from_request(&mut req, router)?;
 
-        Self::log_with_status(
-            res.remote_ip(),
-            res.status_code(),
-            req.method(),
-            req.path()
-        );
+        if *do_log {
+            Self::log_with_status(
+                res.remote_ip(),
+                res.status_code(),
+                req.method(),
+                req.path()
+            );
+        }
 
         res.send()?;
         Ok(())

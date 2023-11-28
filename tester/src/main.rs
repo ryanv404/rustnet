@@ -2,12 +2,17 @@ use std::borrow::Borrow;
 use std::env;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
 use librustnet::StatusLine;
+
+const LOCAL_ADDR: &str = "127.0.0.1:7878";
+
+// httpbin.org:80
+const HTTPBIN_ADDR: &str = "54.166.73.68:80";
 
 const CRATE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -33,8 +38,6 @@ struct TestResults {
     client_total: u16,
     server_passed: u16,
     server_total: u16,
-    status_passed: u16,
-    status_total: u16,
 }
 
 fn main() {
@@ -87,14 +90,6 @@ macro_rules! test_client {
         fn $label(tracker: &mut TestResults) {
             tracker.client_total += 1;
 
-            let exp_file: PathBuf = [
-                CRATE_ROOT,
-                "..",
-                "client",
-                "test_data",
-                concat!(stringify!($label), ".txt")
-            ].iter().collect();
-
             let client_bin: PathBuf = [
                 CRATE_ROOT,
                 "..",
@@ -103,29 +98,37 @@ macro_rules! test_client {
                 CLIENT_FILE
             ].iter().collect();
 
-            // httpbin.org:80
-            let uri = concat!("54.86.118.241:80", $uri_path);
-
             let output = Command::new(&client_bin)
                 .args([
                     "--method",
                     $method,
+                    "--path",
+                    $uri_path,
                     "--client-tests",
                     "--",
-                    uri
+                    HTTPBIN_ADDR
                 ])
                 .output()
                 .unwrap();
 
-            match get_result(&output.stdout, &exp_file) {
-                Some((ref out, ref exp)) => {
-                    println!("[{RED}✗{CLR}] {} {}", $method, $uri_path);
-                    println!("OUTPUT:\n{out}\n\nEXPECTED:\n{exp}\n");
-                },
-                None => {
-                    tracker.client_passed += 1;
-                    println!("[{GRN}✔{CLR}] {} {}", $method, $uri_path);
-                },
+            let output = get_trimmed_test_output(&output.stdout);
+
+            let exp_file: PathBuf = [
+                CRATE_ROOT,
+                "..",
+                "client",
+                "test_data",
+                concat!(stringify!($label), ".txt")
+            ].iter().collect();
+
+            let expected = get_expected_from_file(&exp_file);
+
+            if output == expected {
+                tracker.client_passed += 1;
+                println!("[{GRN}✔{CLR}] {} {}", $method, $uri_path);
+            } else {
+                println!("[{RED}✗{CLR}] {} {}", $method, $uri_path);
+                println!("OUTPUT:\n{output}\n\nEXPECTED:\n{expected}\n");
             }
         }
 
@@ -138,14 +141,6 @@ macro_rules! test_server {
         fn $label(tracker: &mut TestResults) {
             tracker.server_total += 1;
 
-            let exp_file: PathBuf = [
-                CRATE_ROOT,
-                "..",
-                "server",
-                "test_data",
-                concat!(stringify!($label), ".txt")
-            ].iter().collect();
-
             let client_bin: PathBuf = [
                 CRATE_ROOT,
                 "..",
@@ -154,42 +149,45 @@ macro_rules! test_server {
                 CLIENT_FILE
             ].iter().collect();
 
-            let output = if $method == "CONNECT" {
-                Command::new(&client_bin)
-                    .args([
-                        "--server-tests",
-                        "--method",
-                        $method,
-                        "--path",
-                        $uri_path,
-                        "--",
-                        "127.0.0.1:7878"
-                    ])
-                    .output()
-                    .unwrap()
-            } else {
-                let uri = concat!("127.0.0.1:7878", $uri_path);
-                Command::new(&client_bin)
-                    .args([
-                        "--server-tests",
-                        "--method",
-                        $method,
-                        "--",
-                        uri
-                    ])
-                    .output()
-                    .unwrap()
+            let output = Command::new(&client_bin)
+                .args([
+                    "--method",
+                    $method,
+                    "--path",
+                    $uri_path,
+                    "--server-tests",
+                    "--",
+                    LOCAL_ADDR
+                ])
+                .output()
+                .unwrap();
+
+            let output = get_trimmed_test_output(&output.stdout);
+
+            let expected = match $uri_path {
+                "/many_methods" => {
+                    let new_body = format!("Hi from the {} route!", $method);
+                    get_expected_from_str(&new_body, $method)
+                },
+                _ => {
+                    let exp_file: PathBuf = [
+                        CRATE_ROOT,
+                        "..",
+                        "server",
+                        "test_data",
+                        concat!(stringify!($label), ".txt")
+                    ].iter().collect();
+
+                    get_expected_from_file(&exp_file)
+                },
             };
 
-            match get_result(&output.stdout, &exp_file) {
-                Some((ref out, ref exp)) => {
-                    println!("[{RED}✗{CLR}] {} {}", $method, $uri_path);
-                    println!("OUTPUT:\n{out}\n\nEXPECTED:\n{exp}\n");
-                },
-                None => {
-                    tracker.server_passed += 1;
-                    println!("[{GRN}✔{CLR}] {} {}", $method, $uri_path);
-                },
+            if output == expected {
+                tracker.server_passed += 1;
+                println!("[{GRN}✔{CLR}] {} {}", $method, $uri_path);
+            } else {
+                println!("[{RED}✗{CLR}] {} {}", $method, $uri_path);
+                println!("OUTPUT:\n{output}\n\nEXPECTED:\n{expected}\n");
             }
         }
 
@@ -198,10 +196,7 @@ macro_rules! test_server {
 }
 
 fn print_final_results(results: &TestResults) {
-    if results.client_total > 0 ||
-        results.server_total > 0 ||
-        results.status_total > 0
-    {
+    if results.client_total > 0 || results.server_total > 0 {
         println!("{BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+{CLR}");
     }
 
@@ -237,26 +232,7 @@ fn print_final_results(results: &TestResults) {
         }
     }
 
-    if results.status_total > 0 {
-        if results.status_passed == results.status_total {
-            println!(
-                "STATUS: {GRN}{} out of {} tests passed.{CLR}",
-                results.status_passed,
-                results.status_total
-            );
-        } else {
-            println!(
-                "STATUS: {RED}{} out of {} tests failed.{CLR}",
-                results.status_total - results.status_passed,
-                results.status_total
-            );
-        }
-    }
-
-    if results.client_total > 0 ||
-        results.server_total > 0 ||
-        results.status_total > 0
-    {
+    if results.client_total > 0 || results.server_total > 0 {
         println!("{BLU}+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+{CLR}");
     }
 }
@@ -290,13 +266,14 @@ fn run_server_tests(results: &mut TestResults) {
         test_server!(head_about: "HEAD", "/about", results);
         test_server!(head_foo: "HEAD", "/foo", results);
         test_server!(head_favicon: "HEAD", "/favicon.ico", results);
-        test_server!(post_about: "POST", "/about", results);
-        test_server!(put_about: "PUT", "/about", results);
-        test_server!(patch_about: "PATCH", "/about", results);
-        test_server!(delete_about: "DELETE", "/about", results);
-        test_server!(trace_about: "TRACE", "/about", results);
-        test_server!(options_about: "OPTIONS", "/about", results);
-        test_server!(connect_test: "CONNECT", "127.0.0.1:1234", results);
+        test_server!(get_many_methods: "GET", "/many_methods", results);
+        test_server!(post_many_methods: "POST", "/many_methods", results);
+        test_server!(put_many_methods: "PUT", "/many_methods", results);
+        test_server!(patch_many_methods: "PATCH", "/many_methods", results);
+        test_server!(delete_many_methods: "DELETE", "/many_methods", results);
+        test_server!(trace_many_methods: "TRACE", "/many_methods", results);
+        test_server!(options_many_methods: "OPTIONS", "/many_methods", results);
+        test_server!(connect_many_methods: "CONNECT", "/many_methods", results);
         println!();
         server.kill().unwrap();
     }
@@ -375,7 +352,7 @@ fn build_and_start_server() -> Option<Child> {
         thread::sleep(Duration::from_millis(500));
 
         let output = Command::new(&client_bin)
-            .args(["--server-tests", "--", "127.0.0.1:7878/"])
+            .args(["--server-tests", "--", LOCAL_ADDR])
             .output()
             .unwrap();
 
@@ -393,61 +370,72 @@ fn build_and_start_server() -> Option<Child> {
 }
 
 fn successful_status(input: &str) -> bool {
-    let input = input.trim_start();
-
-    let Some((line, _)) = input.split_once('\n') else {
-        return false;
-    };
-
-    let Ok(status_line) = StatusLine::parse(line) else {
-        return false;
-    };
-
-    matches!(status_line.status.code(), 200..=299)
+    match input.trim_start().split_once('\n') {
+        Some((line, _)) => match StatusLine::parse(line) {
+            Ok(status_line) => matches!(status_line.status.code(), 200..=299),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
-fn get_result(
-    test_output: &[u8],
-    expected_output: &PathBuf
-) -> Option<(String, String)> {
-    let output = String::from_utf8_lossy(test_output);
-    let mut expected = String::new();
+fn get_trimmed_test_output(output: &[u8]) -> String {
+    let output_str = String::from_utf8_lossy(output);
 
-    let mut f = File::open(expected_output).unwrap();
-    f.read_to_string(&mut expected).unwrap();
-
-    let output: Vec<&str> = output
+    output_str
         .split('\n')
         .filter_map(|line| {
             let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                Some(trimmed)
-            } else {
-                None
-            }
+            if !trimmed.is_empty() { Some(trimmed) } else { None }
         })
-        .collect();
+        .collect::<Vec<&str>>()
+        .join("\n")
+}
 
-    let expected: Vec<&str> = expected
-        .split('\n')
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                Some(trimmed)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let output = output.join("\n");
-    let expected = expected.join("\n");
-
-    if output == expected {
-        None
+fn get_expected_from_str(body: &str, method: &str) -> String {
+    let status = if method == "POST" {
+        "201 Created"
     } else {
-        Some((output, expected))
-    }
+        "200 OK"
+    };
+
+    format!("\
+        HTTP/1.1 {}\n\
+        Cache-Control: no-cache\n\
+        Content-Length: {}\n\
+        Content-Type: text/plain; charset=utf-8\n\
+        Server: rustnet/0.1.0\n\
+        {}",
+        status,
+        body.len(),
+        body
+    )
+}
+
+fn get_expected_from_file(exp_file: &Path) -> String {
+    let mut exp_output = String::new();
+    let mut f = File::open(exp_file).unwrap();
+    f.read_to_string(&mut exp_output).unwrap();
+
+    exp_output
+        .split('\n')
+        .filter_map(|line| {
+            let line = line.trim();
+            if !line.is_empty() && line.starts_with("Host:") {
+                if let Some((name, _old_value)) = line.split_once(":") {
+                    let current_host = format!("{name}: {HTTPBIN_ADDR}");
+                    Some(current_host)
+                } else {
+                    Some(line.to_string())
+                }
+            } else if !line.is_empty() {
+                Some(line.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
 }
 
 fn remove_old_builds(kind: &str) {

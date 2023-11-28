@@ -112,20 +112,18 @@ impl Debug for Response {
 
 impl Response {
     /// Resolves a `Request` into a `Response` based on the provided `Router`.
-    pub fn from_request(
-        request: &mut Request,
-        router: &Router
-    ) -> NetResult<Self> {
+    pub fn from_request(request: &mut Request, router: &Router) -> NetResult<Self> {
         if router.is_empty() {
             let msg = "This server has no routes configured.";
-            let mut target = Target::Text(msg);
-            return Self::new(502, &mut target, request);
+            let target = Target::Text(msg);
+            return Self::new(502, &target, request);
         }
 
         let method = request.method();
-        let mut resolved_route = router.resolve(&request.route());
+        let route = request.route();
+        let maybe_target = router.resolve(&route);
 
-        match (resolved_route.as_mut(), method) {
+        match (maybe_target, method) {
             (Some(target), Method::Get) => {
                 Self::new(200, target, request)
             },
@@ -133,7 +131,7 @@ impl Response {
                 Self::new(200, target, request)
             },
             (Some(target), Method::Post) => {
-                Self::new(200, target, request)
+                Self::new(201, target, request)
             },
             (Some(target), Method::Put) => {
                 Self::new(200, target, request)
@@ -154,8 +152,7 @@ impl Response {
                 Self::new(200, target, request)
             },
             (None, Method::Head) => {
-                // Handle a HEAD request for a route that does not exist
-                // but does exist as for a GET request.
+                // Allow HEAD requests for any route configured for a GET request.
                 let route = Route::Get(request.request_line.path.clone());
 
                 match router.resolve(&route) {
@@ -166,7 +163,7 @@ impl Response {
                 }
             },
             // Handle routes that do not exist.
-            (None, _) => Self::new(404, &mut router.error_handler(), request),
+            (None, _) => Self::new(404, router.error_handler(), request),
         }
     }
 
@@ -177,83 +174,89 @@ impl Response {
         req: &mut Request
     ) -> NetResult<Self> {
         let writer = req.reader
-            .as_ref()
-            .and_then(|reader| NetWriter::try_from(reader).ok())
-            .ok_or_else(|| IoErrorKind::NotConnected)?;
+            .take()
+            .and_then(|reader| NetWriter::try_from(&reader).ok());
 
         let mut res = Self {
             status_line: StatusLine::new(Version::OneDotOne, Status(code)),
             headers: Headers::new(),
             body: Body::Empty,
-            writer: Some(writer)
+            writer
         };
 
-        res.headers.insert_cache_control("no-cache");
-
         match target {
+            Target::Empty => res.headers.insert_cache_control("no-cache"),
             Target::Text(s) => {
+                res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("text/plain; charset=utf-8");
-                res.body = Body::Text((*s).into());
+                res.body = Body::Text(s.to_string());
             },
             Target::Html(s) => {
+                res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("text/html; charset=utf-8");
-                res.body = Body::Html((*s).into());
+                res.body = Body::Html(s.to_string());
             },
             Target::Json(s) => {
+                res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("application/json");
-                res.body = Body::Json((*s).into());
+                res.body = Body::Json(s.to_string());
             },
             Target::Xml(s) => {
+                res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
                 res.headers.insert_content_type("application/xml");
-                res.body = Body::Xml((*s).into());
+                res.body = Body::Xml(s.to_string());
             },
             Target::File(ref fpath) => {
                 let content = fs::read(fpath)?;
                 let cont_type = HeaderValue::infer_content_type(fpath);
+
+                res.headers.insert_cache_control("max-age=604800");
                 res.headers.insert(CONTENT_TYPE, cont_type);
                 res.headers.insert_content_length(content.len());
-                res.headers.insert_cache_control("max-age=604800");
                 res.body = Body::Bytes(content);
             },
             Target::Favicon(ref fpath) => {
                 let content = fs::read(fpath)?;
+
+                res.headers.insert_cache_control("max-age=604800");
                 res.headers.insert_content_type("image/x-icon");
                 res.headers.insert_content_length(content.len());
-                res.headers.insert_cache_control("max-age=604800");
                 res.body = Body::Favicon(content);
             },
-            Target::Fn(handler) => {
-                // Call handler to perform an action.
-                (handler)(req, &res);
-            },
             Target::FnMut(handler) => {
-                // Call handler to update the response.
+                // Call the handler to update the response.
                 (handler.lock().unwrap())(req, &mut res);
 
                 if !res.body.is_empty() {
+                    res.headers.insert_cache_control("no-cache");
                     res.headers.insert_content_length(res.body.len());
                     res.headers.insert_content_type("text/plain; charset=utf-8");
                 }
             },
-            // Target::FnOnce(handler) => {
-            //     // Handler returns a Body instance.
-            //     let body = (handler)();
-            //     let contype = body.as_content_type();
+            // Call the handler to perform an action (with context).
+            Target::Fn(handler) => {
+                (handler)(req, &res);
 
-            //     if let Some((contype_name, contype_value)) = contype {
-            //         res.headers.insert_content_length(body.len());
-            //         res.headers.insert(contype_name, contype_value);
-            //         res.body = body.clone();
-            //     }
-            // },
-            _ => {},
+                if !res.body.is_empty() {
+                    res.headers.insert_cache_control("no-cache");
+                    res.headers.insert_content_length(res.body.len());
+                    res.headers.insert_content_type("text/plain; charset=utf-8");
+                }
+            },
+            Target::Bytes(ref bytes) => {
+                res.headers.insert_cache_control("no-cache");
+                res.headers.insert_content_length(bytes.len());
+                res.headers.insert_content_type("application/octet-stream");
+                res.body = Body::Bytes(bytes.to_vec());
+            },
         }
 
-        if req.method() == Method::Head {
+        // Return accurate headers but no body for HEAD requests.
+        if req.request_line.method == Method::Head {
             res.body = Body::Empty;
         }
 
@@ -368,9 +371,6 @@ impl Response {
     }
 
     /// Returns true if a response body is allowed.
-    ///
-    /// Presence of a response body depends upon the request method and the
-    /// response status code.
     #[must_use]
     pub fn body_is_permitted(&self, method: Method) -> bool {
         match self.status_code() {
