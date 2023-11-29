@@ -1,12 +1,12 @@
-#![allow(unused)]
-
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{
-    self, BufRead, BufWriter, ErrorKind as IoErrorKind, Result as IoResult,
-    StdinLock, StdoutLock, Write,
+    self, BufRead, BufWriter, ErrorKind as IoErrorKind, StdinLock, StdoutLock,
+    Write,
 };
 
-use librustnet::{Client, Response, Request};
+use librustnet::{
+    Client, NetReader, NetResult, NetError, NetWriter, Response, Request
+};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -14,21 +14,6 @@ const YLW: &str = "\x1b[93m";
 const CYAN: &str = "\x1b[96m";
 const PURP: &str = "\x1b[95m";
 const CLR: &str = "\x1b[0m";
-
-pub fn run_tui_browser() -> IoResult<()> {
-    let stdin = io::stdin().lock();
-    let stdout = BufWriter::new(io::stdout().lock());
-    let mut browser = Browser::new(stdin, stdout);
-
-    browser.clear_screen()?;
-    browser.print_intro_message()?;
-    
-    if let Err(e) = browser.run() {
-        eprintln!("Error: {e}");
-    }
-
-    Ok(())
-}
 
 #[derive(Debug, PartialEq, Eq)]
 // Output style options.
@@ -54,16 +39,17 @@ impl Display for OutputStyle {
 
 // An HTTP TUI client.
 #[derive(Debug)]
-struct Browser<'a> {
+pub struct Browser<'a> {
     is_running: bool,
     in_path_mode: bool,
     output_style: OutputStyle,
     request: Option<Request>,
     response: Option<Response>,
+    reader: Option<NetReader>,
+    writer: Option<NetWriter>,
     stdin: StdinLock<'a>,
     stdout: BufWriter<StdoutLock<'a>>,
 }
-
 
 impl<'a> Browser<'a> {
     fn new(stdin: StdinLock<'a>, stdout: BufWriter<StdoutLock<'a>>) -> Self {
@@ -73,17 +59,38 @@ impl<'a> Browser<'a> {
             output_style: OutputStyle::Response,
             request: None,
             response: None,
+            reader: None,
+            writer: None,
             stdin,
-            stdout,
+            stdout
         }
     }
 
-    fn run(&mut self) -> IoResult<()> {
-        self.is_running = true;
+    pub fn run_client_tui() -> NetResult<()> {
+        let stdin = io::stdin().lock();
+        let stdout = BufWriter::new(io::stdout().lock());
+        let mut browser = Browser::new(stdin, stdout);
+
+        browser.clear_screen()?;
+        browser.print_intro_message()?;
+        
+        if let Err(e) = browser.run() {
+            eprintln!("Error: {e}");
+        }
+
+        browser.stdout.write_all(b"\n")?;
+        browser.stdout.flush()?;
+        Ok(())
+    }
+
+    fn run(&mut self) -> NetResult<()> {
         let mut line = String::new();
+
+        self.is_running = true;
 
         while self.is_running {
             line.clear();
+
             self.print_home_prompt()?;
             self.stdin.read_line(&mut line)?;
 
@@ -100,34 +107,39 @@ impl<'a> Browser<'a> {
                 "verbose" => { self.set_output_style(OutputStyle::Verbose)?; },
                 uri if self.output_style == OutputStyle::Request => {
                     if let Ok((addr, path)) = Client::parse_uri(uri) {
-                        self.response = Client::builder()
+                        let mut client = Client::builder()
                             .addr(addr)
                             .path(&path)
-                            .build()
-                            .ok()
-                            .as_mut()
-                            .and_then(|client| client.res.take());
+                            .build()?;
+
+                        self.request = client.req.take();
                     }
 
                     self.print_request()?;
-                    self.response = None;
+                    self.request = None;
                 },
                 uri => match Client::parse_uri(uri) {
                     Ok((addr, path)) => {
-                        self.response = Client::builder()
+                        let mut client = Client::builder()
                             .addr(&addr)
                             .path(&path)
-                            .send()
-                            .ok()
-                            .as_mut()
-                            .and_then(|client| client.res.take());
+                            .build()?;
 
+                        self.reader = client.reader.try_clone().ok();
+                        self.writer = client.writer.try_clone().ok();
+                        self.request = client.req.take();
+
+                        self.send()?;
+                        self.recv()?;
                         self.print_output()?;
 
                         if self.is_connection_open() {
                             self.run_path_mode(&addr)?;
                         } else {
+                            self.request = None;
                             self.response = None;
+                            self.reader = None;
+                            self.writer = None;
                         }
                     },
                     Err(_) => { self.warn_invalid_input("URI")?; },
@@ -139,7 +151,7 @@ impl<'a> Browser<'a> {
     }
 
     #[allow(unused)]
-    fn check_for_command(&mut self, input: &str) -> IoResult<()> {
+    fn check_for_command(&mut self, input: &str) -> NetResult<()> {
         match input {
             "body" => { self.set_output_style(OutputStyle::ResBody)?; },
             "clear" => { self.clear_screen()?; },
@@ -156,14 +168,16 @@ impl<'a> Browser<'a> {
         Ok(())
     }
 
-    fn run_path_mode(&mut self, addr: &str) -> IoResult<()> {
+    fn run_path_mode(&mut self, addr: &str) -> NetResult<()> {
+        let mut line = String::new();
+
         self.response = None;
         self.in_path_mode = true;
-        let mut line = String::new();
 
         // This loop allows for us to keep using the same open connection.
         while self.in_path_mode {
             line.clear();
+
             self.print_path_prompt(addr)?;
             self.stdin.read_line(&mut line)?;
 
@@ -177,12 +191,9 @@ impl<'a> Browser<'a> {
                     } else {
                         self.send()?;
                         self.recv()?;
-
-                        if self.response.is_some() {
-                            self.print_output()?;
-                            self.in_path_mode = self.is_connection_open();
-                            self.response = None;
-                        }
+                        self.print_output()?;
+                        self.in_path_mode = self.is_connection_open();
+                        self.response = None;
                     }
                 },
                 "body" => { self.set_output_style(OutputStyle::ResBody)?; },
@@ -204,68 +215,68 @@ impl<'a> Browser<'a> {
         Ok(())
     }
 
-    fn clear_screen(&mut self) -> IoResult<()> {
+    fn clear_screen(&mut self) -> NetResult<()> {
 		// Clear the screen and move the cursor to the top left.
         self.stdout.write_all(b"\x1b[2J\x1b[1;1H")?;
         self.stdout.flush()?;
         Ok(())
     }
 
-    fn print_intro_message(&mut self) -> IoResult<()> {
+    fn print_intro_message(&mut self) -> NetResult<()> {
         let prog_name = env!("CARGO_BIN_NAME");
 		writeln!(
             &mut self.stdout,
-            "{CYAN}{prog_name}{CLR} is an HTTP client.\n\
+            "`{CYAN}{prog_name}{CLR}` is an HTTP client.\n\
 			Enter `{YLW}help{CLR}` to see all options.\n")?;
         self.stdout.flush()?;
         Ok(())
     }
 
-    fn set_home_mode(&mut self) -> IoResult<()> {
+    fn set_home_mode(&mut self) -> NetResult<()> {
         self.in_path_mode = false;
         self.response = None;
         Ok(())
     }
 
-    fn set_output_style(&mut self, style: OutputStyle) -> IoResult<()> {
+    fn set_output_style(&mut self, style: OutputStyle) -> NetResult<()> {
         self.output_style = style;
         writeln!(
             &mut self.stdout,
-            "Output style: `{CYAN}{}{CLR}`.\n",
+            "Output style: {CYAN}{}{CLR}\n",
             self.output_style
         )?;
         self.stdout.flush()?;
         Ok(())
     }
 
-    fn print_home_prompt(&mut self) -> IoResult<()> {
+    fn print_home_prompt(&mut self) -> NetResult<()> {
         write!(&mut self.stdout, "{GRN}[HOME]${CLR} ")?;
         self.stdout.flush()?;
         Ok(())
     }
 
-    fn print_path_prompt(&mut self, addr: &str) -> IoResult<()> {
+    fn print_path_prompt(&mut self, addr: &str) -> NetResult<()> {
         write!(&mut self.stdout, "{YLW}[{addr}]${CLR} ")?;
         self.stdout.flush()?;
         Ok(())
     }
 
-    fn show_help(&mut self) -> IoResult<()> {
-        writeln!(
-            &mut self.stdout,
-            "\n\
-{PURP}Help:{CLR}
+    fn show_help(&mut self) -> NetResult<()> {
+        writeln!(&mut self.stdout,"\n\
+{PURP}HELP:{CLR}
     Enter an HTTP URI ({GRN}HOME{CLR} mode) or a URI path ({YLW}PATH{CLR} mode) to send
     an HTTP request to a remote host.\n
-{PURP}Modes:{CLR}
+{PURP}MODES:{CLR}
     {GRN}Home{CLR}      Enter an HTTP URI to send a request.
-              Example: {GRN}[HOME]${CLR} httpbin.org/encoding/utf8\n
+              Example:
+              {GRN}[HOME]${CLR} httpbin.org/encoding/utf8\n
     {YLW}Path{CLR}      Enter a URI path to send a new request to the same host.
               This mode is entered automatically while the connection
               to the remote host is kept alive. It can be manually
               exited by using the `home` command.
-              Example: {YLW}[httpbin.org:80]${CLR} /encoding/utf8\n
-{PURP}Commands:{CLR}
+              Example:
+              {YLW}[httpbin.org:80]${CLR} /encoding/utf8\n
+{PURP}COMMANDS:{CLR}
     body      Print data from response bodies.
     clear     Clear the terminal.
     close     Close the program.
@@ -282,44 +293,41 @@ impl<'a> Browser<'a> {
     fn set_path(&mut self, path: &str) {
         self.request
             .as_mut()
-            .map(|req| {
-                req.request_line.path = path.to_string();
-            });
+            .map(|req| { req.request_line.path = path.to_string(); });
     }
 
-    fn warn_invalid_input(&mut self, kind: &str) -> IoResult<()> {
-        writeln!(
-            &mut self.stdout,
-            "{RED}Not a valid {kind} or command.{CLR}\n"
-        )?;
+    fn warn_invalid_input(&mut self, kind: &str) -> NetResult<()> {
+        writeln!(&mut self.stdout, "{RED}Not a valid {kind} or command.{CLR}\n")?;
         self.stdout.flush()?;
         Ok(())
     }
 
-    fn send(&mut self) -> IoResult<()> {
-        let Some(req) = self.request.as_mut() else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
-
-        req.send()?;
-        Ok(())
-    }
-    
-    fn recv(&mut self) -> IoResult<()> {
-        let Some(mut reader) = self.request
+    fn send(&mut self) -> NetResult<()> {
+        let mut writer = self.writer
             .as_ref()
-            .and_then(|req| req.reader
-                .as_ref()
-                .and_then(|reader| reader.try_clone().ok()))
-        else {
-            return Err(IoErrorKind::NotConnected.into());
-        };
+            .ok_or_else(|| NetError::IoError(IoErrorKind::NotConnected))
+            .and_then(|writer| writer.try_clone())?;
 
-        self.response = Response::recv(reader).ok();
+        self.request
+            .as_mut()
+            .ok_or_else(|| NetError::IoError(IoErrorKind::NotConnected))
+            .and_then(|req| writer.send_request(req))?;
+
         Ok(())
     }
 
-    fn print_request(&mut self) -> IoResult<()> {
+    fn recv(&mut self) -> NetResult<()> {
+        let res = self.reader
+            .as_ref()
+            .and_then(|reader| reader.try_clone().ok())
+            .ok_or_else(|| NetError::IoError(IoErrorKind::NotConnected))
+            .and_then(|clone| NetReader::recv_response(clone))?;
+
+        self.response = Some(res);
+        Ok(())
+    }
+
+    fn print_request(&mut self) -> NetResult<()> {
         let output = self.request
             .as_ref()
             .map_or_else(
@@ -345,7 +353,7 @@ impl<'a> Browser<'a> {
         Ok(())
     }
 
-    fn print_response_body(&mut self) -> IoResult<()> {
+    fn print_response_body(&mut self) -> NetResult<()> {
         let output = self.response
             .as_ref()
             .map_or_else(
@@ -364,7 +372,7 @@ impl<'a> Browser<'a> {
         Ok(())
     }
 
-    fn print_response(&mut self) -> IoResult<()> {
+    fn print_response(&mut self) -> NetResult<()> {
         let output = self.response
             .as_ref()
             .map_or_else(
@@ -391,7 +399,7 @@ impl<'a> Browser<'a> {
         Ok(())
     }
 
-    fn print_status_line(&mut self) -> IoResult<()> {
+    fn print_status_line(&mut self) -> NetResult<()> {
         let output = self.response
             .as_ref()
             .map_or_else(
@@ -406,7 +414,7 @@ impl<'a> Browser<'a> {
         Ok(())
     }
 
-    fn print_output(&mut self) -> IoResult<()> {
+    fn print_output(&mut self) -> NetResult<()> {
         match self.output_style {
             OutputStyle::Status => {
                 self.print_status_line()?;
@@ -430,9 +438,8 @@ impl<'a> Browser<'a> {
     }
 
     fn is_connection_open(&self) -> bool {
-        self.response
+        !self.response
             .as_ref()
-            .map_or(false,
-                |res| !res.has_closed_connection_header())
+            .map_or(false, |res| res.has_closed_connection_header())
     }
 }

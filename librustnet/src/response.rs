@@ -394,6 +394,12 @@ impl Response {
         Ok(res)
     }
 
+    /// Returns a String representation of the response's status line.
+    #[must_use]
+    pub fn status_line(&self) -> String {
+        self.status_line.to_string()
+    }
+
     /// Returns the protocol version.
     #[must_use]
     pub const fn version(&self) -> Version {
@@ -498,7 +504,10 @@ impl Response {
     /// Returns true if the Connection header is present with the value "close".
     #[must_use]
     pub fn has_closed_connection_header(&self) -> bool {
-        self.headers.contains(&CONNECTION)
+        match self.headers.get(&CONNECTION) {
+            Some(val) if val.as_str().eq_ignore_ascii_case("close") => true,
+            _ => false,
+        }
     }
 
     /// Returns true if a response body is allowed.
@@ -519,12 +528,6 @@ impl Response {
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body
-    }
-
-    /// Returns a String representation of the response's status line.
-    #[must_use]
-    pub fn status_line(&self) -> String {
-        self.status_line.to_string()
     }
 
     /// Sends an HTTP response to a remote client.

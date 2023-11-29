@@ -4,8 +4,7 @@ use librustnet::{Client, Method};
 use librustnet::consts::DATE;
 
 mod tui;
-#[allow(unused)]
-use tui::run_tui_browser;
+use tui::Browser;
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -42,6 +41,11 @@ fn main() -> io::Result<()> {
                 // Print help message.
                 "--help" => {
                     show_help();
+                    return Ok(());
+                },
+                // Starts the client TUI.
+                "--tui" => {
+                    Browser::run_client_tui()?;
                     return Ok(());
                 },
                 // Uri path.
@@ -221,7 +225,8 @@ fn show_help() {
         {GRN}Options:{CLR}\n    \
             --help           Displays this help message.\n    \
             --method METHOD  Use METHOD as the request method (default: \"GET\").\n    \
-            --path PATH      Use PATH as the URI path (default: \"/\").\n\n\
+            --path PATH      Use PATH as the URI path (default: \"/\").\n    \
+            --tui            Starts the client TUI.\n\n\
         {GRN}Test Options:{CLR}\n    \
             --client-tests   Use output style expected by client tests.\n    \
             --server-tests   Use output style expected by server tests.\n");

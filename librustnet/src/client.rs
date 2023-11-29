@@ -195,7 +195,8 @@ where
             },
         };
 
-        let reader = NetReader::from(stream);
+        let reader = NetReader::from(stream.try_clone()?);
+        let writer = NetWriter::from(stream);
 
         if !self.headers.contains(&ACCEPT) {
             self.headers.insert_accept("*/*");
@@ -210,7 +211,7 @@ where
         }
 
         if !self.headers.contains(&HOST) {
-            let remote = reader.0.get_ref().peer_addr()?;
+            let remote = reader.get_ref().peer_addr()?;
             self.headers.insert_host(remote.ip(), remote.port());
         }
 
@@ -218,17 +219,22 @@ where
             self.headers.insert_user_agent();
         }
 
-        let path = self.path.as_ref()
-            .map_or_else(|| String::from("/"), |path| path.to_string());
+        let path = self.path
+            .as_ref()
+            .map_or_else(
+                || String::from("/"),
+                |path| path.to_string());
+
+        let request_line = RequestLine::new(self.method, path, self.version);
 
         let req = Some(Request {
-            request_line: RequestLine::new(self.method, path, self.version),
+            request_line,
             headers: self.headers,
             body: self.body,
-            reader: Some(reader)
+            reader: None
         });
 
-        Ok(Client { req, res: None })
+        Ok(Client { req, res: None, reader, writer })
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
@@ -265,6 +271,8 @@ where
 pub struct Client {
 	pub req: Option<Request>,
 	pub res: Option<Response>,
+	pub reader: NetReader,
+	pub writer: NetWriter,
 }
 
 impl Display for Client {
@@ -361,33 +369,17 @@ impl Client {
 
     /// Sends an HTTP request to a remote host.
     pub fn send(&mut self) -> NetResult<()> {
-        let mut writer = self.req
-            .as_ref()
-            .and_then(|req| req.reader
-                .as_ref()
-                .and_then(|reader| reader.try_clone().ok())
-                .and_then(|clone| Some(NetWriter::from(clone))))
-            .ok_or_else(|| IoErrorKind::NotConnected)?;
-
-        self.req
-            .as_mut()
+        let mut writer = self.writer.try_clone()?;
+        self.req.as_mut()
             .and_then(|req| writer.send_request(req).ok())
             .ok_or_else(|| IoErrorKind::NotConnected)?;
-
         Ok(())
     }
 
     /// Receives an HTTP response from the remote host.
     pub fn recv(&mut self) -> NetResult<()> {
-        let reader = self.req
-            .as_ref()
-            .and_then(|req| req.reader
-                .as_ref()
-                .and_then(|reader| reader.try_clone().ok()))
-            .ok_or_else(|| IoErrorKind::NotConnected)?;
-
+        let reader = self.reader.try_clone()?;
         self.res = NetReader::recv_response(reader).ok();
-
         Ok(())
     }
 }
