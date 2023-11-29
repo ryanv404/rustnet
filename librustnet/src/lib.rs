@@ -9,16 +9,11 @@
 #![deny(clippy::perf)]
 #![deny(clippy::style)]
 #![deny(clippy::suspicious)]
-#![allow(clippy::similar_names)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::module_name_repetitions)]
 
 #[cfg(test)]
 mod tests;
 
 pub mod client;
-pub mod connection;
 pub mod errors;
 pub mod header;
 pub mod http;
@@ -29,12 +24,11 @@ pub mod server;
 pub mod util;
 
 pub use client::{Client, ClientBuilder};
-pub use connection::{Connection, NetReader, NetWriter};
 pub use errors::{NetError, NetResult, ParseErrorKind};
 pub use header::{Header, HeaderKind, HeaderName, Headers, HeaderValue};
 pub use http::{Method, Status, Version};
-pub use request::{Request, RequestLine};
-pub use response::{Response, StatusLine};
+pub use request::{Request, RequestLine, NetReader};
+pub use response::{Response, StatusLine, NetWriter};
 pub use router::{Body, Route, RouteBuilder, Router, Target};
 pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
 pub use util::{trim_whitespace_bytes, get_datetime};

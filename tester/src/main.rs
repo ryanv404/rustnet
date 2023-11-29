@@ -11,8 +11,7 @@ use librustnet::StatusLine;
 
 const LOCAL_ADDR: &str = "127.0.0.1:7878";
 
-// httpbin.org:80
-const HTTPBIN_ADDR: &str = "54.166.73.68:80";
+const HTTPBIN_ADDR: &str = "httpbin.org:80";
 
 const CRATE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -385,10 +384,21 @@ fn get_trimmed_test_output(output: &[u8]) -> String {
     output_str
         .split('\n')
         .filter_map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() { Some(trimmed) } else { None }
+            let line = line.trim();
+            if !line.is_empty() && line.starts_with("Host:") {
+                if let Some((name, _old_value)) = line.split_once(":") {
+                    let current_host = format!("{name}: {HTTPBIN_ADDR}");
+                    Some(current_host)
+                } else {
+                    Some(line.to_string())
+                }
+            } else if !line.is_empty() {
+                Some(line.to_string())
+            } else {
+                None
+            }
         })
-        .collect::<Vec<&str>>()
+        .collect::<Vec<String>>()
         .join("\n")
 }
 

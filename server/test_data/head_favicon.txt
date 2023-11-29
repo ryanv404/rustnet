@@ -1,5 +1,5 @@
 HTTP/1.1 200 OK
-Cache-Control: max-age=604800
+Cache-Control: no-cache
 Content-Length: 1406
 Content-Type: image/x-icon
 Server: rustnet/0.1.0

@@ -1,14 +1,142 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
-use std::io::ErrorKind as IoErrorKind;
-use std::net::{IpAddr, SocketAddr};
+use std::io::{
+    BufWriter, ErrorKind as IoErrorKind, Result as IoResult, Write,
+    WriterPanicked,
+};
+use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::string::ToString;
 
-use crate::consts::{CONNECTION, CONTENT_TYPE};
-use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetReader, NetResult, 
-    NetWriter, Request, Route, Router, Status, Target, Version,
+use crate::consts::{
+    ACCEPT, CONNECTION, CONTENT_TYPE, HOST, SERVER, USER_AGENT,
+    WRITER_BUFSIZE,
 };
+use crate::{
+    Body, HeaderName, HeaderValue, Headers, Method, NetReader,
+    NetResult, Request, Route, Router, Status, Target, Version,
+};
+
+/// A buffered writer wrapper around a `TcpStream` instance.
+#[derive(Debug)]
+pub struct NetWriter(pub BufWriter<TcpStream>);
+
+impl From<TcpStream> for NetWriter {
+    fn from(stream: TcpStream) -> Self {
+        Self(BufWriter::with_capacity(WRITER_BUFSIZE, stream))
+    }
+}
+
+impl From<NetReader> for NetWriter {
+    fn from(reader: NetReader) -> Self {
+        Self::from(reader.into_inner())
+    }
+}
+
+impl Write for NetWriter {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        self.0.flush()
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.0.write_all(buf)
+    }
+}
+
+impl NetWriter {
+    /// Returns a clone of the current `NetWriter` instance.
+    pub fn try_clone(&self) -> NetResult<Self> {
+        let stream = self.get_ref().try_clone()?;
+        Ok(Self::from(stream))
+    }
+
+    /// Consumes the `NetWriter` and returns the underlying `TcpStream`.
+    pub fn into_parts(self) -> (TcpStream, Result<Vec<u8>, WriterPanicked>) {
+        self.0.into_parts()
+    }
+
+    /// Consumes the `NetWriter` and returns the underlying `TcpStream`.
+    pub fn into_inner(self) -> NetResult<TcpStream> {
+        self.0.into_inner().map_err(|e| e.into_error().into())
+    }
+
+    /// Returns a reference to the underlying `TcpStream`.
+    pub fn get_ref(&self) -> &TcpStream {
+        self.0.get_ref()
+    }
+
+    /// Writes an HTTP request to the underlying `TcpStream`.
+    pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
+        if !req.headers.contains(&ACCEPT) {
+            req.headers.insert_accept("*/*");
+        }
+
+        if !req.headers.contains(&HOST) {
+            let stream = self.0.get_ref();
+            let remote = stream.peer_addr()?;
+            req.headers.insert_host(remote.ip(), remote.port());
+        }
+
+        if !req.headers.contains(&USER_AGENT) {
+            req.headers.insert_user_agent();
+        }
+
+        self.write_all(format!("{}\r\n", &req.request_line).as_bytes())?;
+        self.write_headers(&req.headers)?;
+        self.write_body(&req.body)?;
+
+        self.flush()?;
+        Ok(())
+    }
+
+    /// Writes a server error response to the underlying `TcpStream`.
+    pub fn send_status(&mut self, code: u16) -> NetResult<()> {
+        let mut res = Response::new(code);
+        res.headers.insert_cache_control("no-cache");
+        res.headers.insert_connection("close");
+        res.headers.insert_server();
+        self.send_response(&mut res)?;
+        Ok(())
+    }
+
+    /// Writes an HTTP response to the underlying `TcpStream`.
+    pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
+        if !res.headers.contains(&SERVER) {
+            res.headers.insert_server();
+        }
+
+        self.write_all(format!("{}\r\n", &res.status_line).as_bytes())?;
+        self.write_headers(&res.headers)?;
+        self.write_body(&res.body)?;
+
+        self.flush()?;
+        Ok(())
+    }
+
+    /// Writes the response headers to the underlying `TcpStream`.
+    pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
+        if !headers.is_empty() {
+            for (name, value) in headers.0.iter() {
+                self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
+            }
+        }
+
+        self.write_all(b"\r\n")?;
+        Ok(())
+    }
+
+    /// Writes the response body to the underlying `TcpStream`.
+    pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
+        if !body.is_empty() {
+            self.write_all(body.as_bytes())?;
+        }
+
+        Ok(())
+    }
+}
 
 /// Represents the status line of an HTTP response.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -116,7 +244,7 @@ impl Response {
         if router.is_empty() {
             let msg = "This server has no routes configured.";
             let target = Target::Text(msg);
-            return Self::new(502, &target, request);
+            return Self::from_target(502, &target, request);
         }
 
         let method = request.method();
@@ -125,31 +253,31 @@ impl Response {
 
         match (maybe_target, method) {
             (Some(target), Method::Get) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Head) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Post) => {
-                Self::new(201, target, request)
+                Self::from_target(201, target, request)
             },
             (Some(target), Method::Put) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Patch) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Delete) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Trace) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Options) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (Some(target), Method::Connect) => {
-                Self::new(200, target, request)
+                Self::from_target(200, target, request)
             },
             (None, Method::Head) => {
                 // Allow HEAD requests for any route configured for a GET request.
@@ -157,25 +285,38 @@ impl Response {
 
                 match router.resolve(&route) {
                     // GET route exists so send it as a HEAD response.
-                    Some(target) => Self::new(200, target, request),
+                    Some(target) => Self::from_target(200, target, request),
                     // No route exists for a GET request either.
-                    None => Self::new(404, router.error_handler(), request),
+                    None => Self::from_target(404, router.error_handler(), request),
                 }
             },
             // Handle routes that do not exist.
-            (None, _) => Self::new(404, router.error_handler(), request),
+            (None, _) => Self::from_target(404, router.error_handler(), request),
         }
     }
 
-    /// Returns a new `Response` object.
-    pub fn new(
+    /// Parses the target type and returns a new `Response` object.
+    pub fn new(code: u16) -> Self {
+        Response {
+            status_line: StatusLine {
+                status: Status(code),
+                version: Version::OneDotOne
+            },
+            headers: Headers::new(),
+            body: Body::Empty,
+            writer: None
+        }
+    }
+
+    /// Parses the target type and returns a new `Response` object.
+    pub fn from_target(
         code: u16,
         target: &Target,
         req: &mut Request
     ) -> NetResult<Self> {
         let writer = req.reader
             .take()
-            .and_then(|reader| NetWriter::try_from(&reader).ok());
+            .and_then(|reader| Some(NetWriter::from(reader)));
 
         let mut res = Self {
             status_line: StatusLine::new(Version::OneDotOne, Status(code)),
@@ -192,12 +333,6 @@ impl Response {
                 res.headers.insert_content_type("text/plain; charset=utf-8");
                 res.body = Body::Text(s.to_string());
             },
-            Target::Html(s) => {
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(s.len());
-                res.headers.insert_content_type("text/html; charset=utf-8");
-                res.body = Body::Html(s.to_string());
-            },
             Target::Json(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
@@ -210,11 +345,17 @@ impl Response {
                 res.headers.insert_content_type("application/xml");
                 res.body = Body::Xml(s.to_string());
             },
+            Target::Html(ref fpath) => {
+                let content = fs::read_to_string(fpath)?;
+                res.headers.insert_cache_control("no-cache");
+                res.headers.insert_content_length(content.len());
+                res.headers.insert_content_type("text/html; charset=utf-8");
+                res.body = Body::Html(content);
+            },
             Target::File(ref fpath) => {
                 let content = fs::read(fpath)?;
                 let cont_type = HeaderValue::infer_content_type(fpath);
-
-                res.headers.insert_cache_control("max-age=604800");
+                res.headers.insert_cache_control("no-cache");
                 res.headers.insert(CONTENT_TYPE, cont_type);
                 res.headers.insert_content_length(content.len());
                 res.body = Body::Bytes(content);
@@ -399,15 +540,15 @@ impl Response {
     /// Sends an HTTP response to a remote client.
     pub fn send(&mut self) -> NetResult<()> {
         let mut writer = self.writer
-            .as_ref()
-            .and_then(|writer| writer.try_clone().ok())
+            .take()
+            .and_then(|writer| Some(writer))
             .ok_or_else(|| IoErrorKind::NotConnected)?;
 
         writer.send_response(self)
     }
 
     /// Receives an HTTP response from a remote server.
-    pub fn recv(mut reader: NetReader) -> NetResult<Response> {
-        reader.recv_response()
+    pub fn recv(reader: NetReader) -> NetResult<Response> {
+        NetReader::recv_response(reader)
     }
 }

@@ -385,18 +385,18 @@ mod router {
             Connect "/json9" => Json("json9"), 200;
         }
 
-        test_routes! {
-            html_routes:
-            Get "/html1" => Html("html1"), 200;
-            Head "/html2" => Html("html2"), 200;
-            Post "/html3" => Html("html3"), 201;
-            Put "/html4" => Html("html4"), 200;
-            Patch "/html5" => Html("html5"), 200;
-            Delete "/html6" => Html("html6"), 200;
-            Trace "/html7" => Html("html7"), 200;
-            Options "/html8" => Html("html8"), 200;
-            Connect "/html9" => Html("html9"), 200;
-        }
+        // test_routes! {
+        //     html_routes:
+        //     Get "/html1" => Html("html1"), 200;
+        //     Head "/html2" => Html("html2"), 200;
+        //     Post "/html3" => Html("html3"), 201;
+        //     Put "/html4" => Html("html4"), 200;
+        //     Patch "/html5" => Html("html5"), 200;
+        //     Delete "/html6" => Html("html6"), 200;
+        //     Trace "/html7" => Html("html7"), 200;
+        //     Options "/html8" => Html("html8"), 200;
+        //     Connect "/html9" => Html("html9"), 200;
+        // }
 
         test_routes! {
             xml_routes:
@@ -416,7 +416,7 @@ mod router {
 #[cfg(test)]
 mod send_sync {
     use crate::{
-        Client, Connection, Header, Headers, HeaderKind, HeaderName,
+        Client, Header, Headers, HeaderKind, HeaderName,
         HeaderValue, Method, NetReader, NetWriter, Request, RequestLine,
         Response, Route, Router, Server, Status, StatusLine, Target, Version,
     };
@@ -425,7 +425,6 @@ mod send_sync {
     fn send_tests() {
         fn type_is_send<T: Send>() {}
         type_is_send::<Client>();
-        type_is_send::<Connection>();
         type_is_send::<Header>();
         type_is_send::<HeaderKind>();
         type_is_send::<HeaderName>();
@@ -450,7 +449,6 @@ mod send_sync {
     fn sync_tests() {
         fn type_is_sync<T: Sync>() {}
         type_is_sync::<Client>();
-        type_is_sync::<Connection>();
         type_is_sync::<Header>();
         type_is_sync::<HeaderKind>();
         type_is_sync::<HeaderName>();

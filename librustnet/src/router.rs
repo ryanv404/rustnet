@@ -82,7 +82,7 @@ impl Router {
         P: Into<PathBuf>
     {
         let route = Route::new(Method::Get, uri_path);
-        let target = Target::File(file_path.into());
+        let target = Target::Html(file_path.into());
         self.mount(route, target);
         self
     }
@@ -309,7 +309,7 @@ pub type FnMutHandler = dyn FnMut(&Request, &mut Response) + Send + Sync + 'stat
 pub enum Target {
     Empty,
     Text(&'static str),
-    Html(&'static str),
+    Html(PathBuf),
     Json(&'static str),
     Xml(&'static str),
     Bytes(Vec<u8>),
@@ -330,10 +330,10 @@ impl Display for Target {
         match self {
             Self::Empty => Ok(()),
             Self::Text(s) => write!(f, "{s}"),
-            Self::Html(s) => write!(f, "{s}"),
             Self::Json(s) => write!(f, "{s}"),
             Self::Xml(s) => write!(f, "{s}"),
             Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
+            Self::Html(_) => write!(f, "Html {{ ... }}"),
             Self::File(_) => write!(f, "File {{ ... }}"),
             Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
             Self::Fn(_) => write!(f, "Fn {{ ... }}"),
@@ -347,11 +347,13 @@ impl Debug for Target {
         match self {
             Self::Empty => f.debug_tuple("Empty").finish(),
             Self::Text(s) => f.debug_tuple("Text").field(s).finish(),
-            Self::Html(s) => f.debug_tuple("Html").field(s).finish(),
             Self::Json(s) => f.debug_tuple("Json").field(s).finish(),
             Self::Xml(s) => f.debug_tuple("Xml").field(s).finish(),
             Self::Bytes(ref buf) => {
                 f.debug_tuple("Bytes").field(buf).finish()
+            },
+            Self::Html(path) => {
+                f.debug_tuple("Html").field(path).finish()
             },
             Self::File(path) => {
                 f.debug_tuple("File").field(path).finish()
@@ -375,12 +377,12 @@ impl PartialEq for Target {
         match (self, other) {
             (Self::Empty, Self::Empty) => true,
             (Self::Text(s1), Self::Text(s2)) => s1 == s2,
-            (Self::Html(s1), Self::Html(s2)) => s1 == s2,
             (Self::Json(s1), Self::Json(s2)) => s1 == s2,
             (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
             (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
                 &buf1[..] == &buf2[..]
             },
+            (Self::Html(p1), Self::Html(p2)) => p1 == p2,
             (Self::File(p1), Self::File(p2)) => p1 == p2,
             (Self::Favicon(p1), Self::Favicon(p2)) => p1 == p2,
             (Self::Fn(_), Self::Fn(_)) => true,
@@ -415,13 +417,13 @@ impl Target {
     #[must_use]
     pub const fn is_string(&self) -> bool {
         matches!(self,
-            Self::Text(_) | Self::Html(_) | Self::Json(_) | Self::Xml(_))
+            Self::Text(_) | Self::Json(_) | Self::Xml(_))
     }
 
     /// Returns true if the URI target is a file path.
     #[must_use]
     pub const fn is_file_path(&self) -> bool {
-        matches!(self, Self::File(_) | Self::Favicon(_))
+        matches!(self, Self::File(_) | Self::Favicon(_) | Self::Html(_))
     }
 
     /// Returns a Content-Type `HeaderValue` based on the `Target` variant.

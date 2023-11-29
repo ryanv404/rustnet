@@ -306,7 +306,7 @@ impl<'a> Browser<'a> {
     }
     
     fn recv(&mut self) -> IoResult<()> {
-        let Some(reader) = self.request
+        let Some(mut reader) = self.request
             .as_ref()
             .and_then(|req| req.reader
                 .as_ref()

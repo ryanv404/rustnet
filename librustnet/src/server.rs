@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetError, NetReader, NetResult, Request, Response, Router,
+    Method, NetError, NetReader, NetResult, NetWriter, Request, Response,
+    Router,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -158,10 +159,17 @@ impl Listener {
     }
 
     /// Returns a `NetReader` instance for each incoming connection.
-    pub fn accept(&self) -> NetResult<NetReader> {
+    pub fn accept(&self) -> NetResult<(NetReader, NetWriter)> {
         self.inner
             .accept()
-            .and_then(|(stream, _)| Ok(NetReader::from(stream)))
+            .and_then(|(stream, _)| stream
+                .try_clone()
+                .and_then(|cloned| Ok((stream, cloned))))
+            .and_then(|(stream, cloned)| {
+                let reader = NetReader::from(stream);
+                let writer = NetWriter::from(cloned);
+                Ok((reader, writer))
+            })
             .map_err(|e| NetError::ReadError(e.kind()))
     }
 }
@@ -228,19 +236,23 @@ impl Server {
 
             while keep_listening.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok(reader) => {
-                        let task_rtr = Arc::clone(&router);
+                    Ok((reader, mut writer)) => {
+                        let rtr = Arc::clone(&router);
                         let do_log = Arc::clone(&do_logging);
 
                         // Task an available worker thread with responding.
                         pool.execute(move || {
-                            match Server::respond(reader, &task_rtr, do_log) {
-                                Err(e) => Self::log_error(&e),
-                                _ => {},
-                            }
+                            let _ = Server::handle_connection(reader, &rtr, do_log)
+                                .map_err(|e| {
+                                    Server::log_error(&e);
+
+                                    // Send 500 server error response.
+                                    let _ = writer.send_status(500)
+                                        .map_err(|e| Server::log_error(&e));
+                                });
                         });
                     },
-                    Err(e) => Self::log_error(&e),
+                    Err(e) => Server::log_error(&e),
                 }
             }
 
@@ -256,15 +268,15 @@ impl Server {
     }
 
     /// Handles a request from a remote connection.
-    pub fn respond(
+    pub fn handle_connection(
         reader: NetReader,
         router: &Arc<Router>,
-        do_log: Arc<bool>
+        do_logging: Arc<bool>
     ) -> NetResult<()> {
         let mut req = Request::recv(reader)?;
         let mut res = Response::from_request(&mut req, router)?;
 
-        if *do_log {
+        if *do_logging {
             Self::log_with_status(
                 res.remote_ip(),
                 res.status_code(),
@@ -310,7 +322,12 @@ impl Server {
 
     /// Logs a non-terminating server error.
     pub fn log_error(e: &dyn StdError) {
-        eprintln!("[SERVER] ERROR: {e}");
+        println!("[SERVER] ERROR: {e}");
+    }
+
+    /// Logs a server shutdown message to stdout.
+    pub fn log_error_msg(msg: &str) {
+        println!("[SERVER] ERROR: {msg}");
     }
 
     /// Logs a server start up message to stdout.
@@ -324,7 +341,7 @@ impl Server {
 
     /// Logs a server shutdown message to stdout.
     pub fn log_shutdown() {
-        eprintln!("[SERVER] Now shutting down.");
+        println!("[SERVER] Now shutting down.");
     }
 
     /// Triggers graceful shutdown of the server.

@@ -6,13 +6,13 @@ fn main() -> io::Result<()> {
     // Enable logging from the command-line (default is no logging).
     let do_logging = match env::args().nth(1) {
         Some(opt) if opt.eq_ignore_ascii_case("--enable-logging") => true,
-        None => false,
         Some(unk) => {
             println!("\
-                Unknown command-line option: \"{unk}\".\n\n\
+                Unknown option: \"{unk}\".\n\n\
                 To enable logging, use \"--enable-logging\".\n");
             return Ok(());
         },
+        None => false,
     };
 
     // Set up the router.

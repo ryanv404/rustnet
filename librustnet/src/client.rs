@@ -5,7 +5,8 @@ use std::net::{TcpStream, ToSocketAddrs};
 use crate::consts::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, ParseErrorKind, RequestLine, Response, Request, Version,
+    NetResult, NetWriter, ParseErrorKind, RequestLine, Response, Request,
+    Version,
 };
 
 /// An HTTP request builder object.
@@ -369,9 +370,17 @@ impl Client {
 
     /// Sends an HTTP request to a remote host.
     pub fn send(&mut self) -> NetResult<()> {
+        let mut writer = self.req
+            .as_ref()
+            .and_then(|req| req.reader
+                .as_ref()
+                .and_then(|reader| reader.try_clone().ok())
+                .and_then(|clone| Some(NetWriter::from(clone))))
+            .ok_or_else(|| IoErrorKind::NotConnected)?;
+
         self.req
             .as_mut()
-            .map(|req| req.send().ok())
+            .and_then(|req| writer.send_request(req).ok())
             .ok_or_else(|| IoErrorKind::NotConnected)?;
 
         Ok(())
@@ -386,7 +395,7 @@ impl Client {
                 .and_then(|reader| reader.try_clone().ok()))
             .ok_or_else(|| IoErrorKind::NotConnected)?;
 
-        self.res = Some(Response::recv(reader)?);
+        self.res = NetReader::recv_response(reader).ok();
 
         Ok(())
     }
