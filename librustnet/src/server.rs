@@ -274,7 +274,12 @@ impl Server {
         do_logging: Arc<bool>
     ) -> NetResult<()> {
         let mut req = Request::recv(reader)?;
-        let mut res = Response::from_request(&mut req, router)?;
+        let mut res = Response::from_route(&req.route(), router)?;
+
+        res.writer = req
+            .reader
+            .take()
+            .and_then(|reader| Some(NetWriter::from(reader)));
 
         if *do_logging {
             Self::log_with_status(

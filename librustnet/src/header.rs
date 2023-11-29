@@ -1,4 +1,5 @@
 use std::collections::{btree_map::Entry, BTreeMap};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::IpAddr;
 
 use crate::NetResult;
@@ -13,22 +14,46 @@ pub mod values;
 pub use names::{header_consts, HeaderKind, HeaderName};
 pub use values::HeaderValue;
 
-/// A unit struct that contains a header parsing method.
-pub struct Header;
+/// Represents a single header field line.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Header {
+    pub name: HeaderName,
+    pub value: HeaderValue,
+}
+
+impl Display for Header {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}: {}", self.name, self.value)
+    }
+}
 
 impl Header {
-    /// Parses a string slice into a `HeaderName` and a `HeaderValue`.
-    pub fn parse(line: &str) -> NetResult<(HeaderName, HeaderValue)> {
+    /// Parses a string slice into a `Header`.
+    pub fn parse(line: &str) -> NetResult<Header> {
         let mut tokens = line.splitn(2, ':');
-        let hdr_name = HeaderName::parse(tokens.next())?;
-        let hdr_value = HeaderValue::parse(tokens.next())?;
-        Ok((hdr_name, hdr_value))
+        let name = HeaderName::parse(tokens.next())?;
+        let value = HeaderValue::parse(tokens.next())?;
+        Ok(Self { name, value })
     }
 }
 
 /// A wrapper around an object that maps header names to header values.
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
+
+impl Default for Headers {
+    fn default() -> Self {
+        Self(BTreeMap::<HeaderName, HeaderValue>::new())
+    }
+}
+
+impl PartialEq for Headers {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for Headers {}
 
 impl Headers {
     /// Returns a new `Headers` instance.
@@ -128,6 +153,7 @@ impl Headers {
         self.insert(CACHE_CONTROL, value.as_bytes().into());
     }
 
+    /// Updates headers to reflect the httpbin.org style by status code.
     pub fn update_headers_by_status_code(&mut self, code: u16) {
         match code {
             101 => {

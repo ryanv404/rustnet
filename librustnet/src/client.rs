@@ -116,7 +116,7 @@ where
         } else {
             self.body = body;
             self.headers.insert_content_length(self.body.len());
-            self.headers.insert(CONTENT_TYPE, content_type.as_bytes().into());
+            self.headers.insert_content_type(content_type);
         }
 
         self
@@ -132,9 +132,7 @@ where
         } else {
             self.body = Body::Text(text.into());
             self.headers.insert_content_length(self.body.len());
-            if let Some(body_type) = self.body.as_content_type() {
-                self.headers.insert(CONTENT_TYPE, body_type)
-            }
+            self.headers.insert_content_type("text/plain; charset=utf-8");
         }
 
         self
@@ -150,9 +148,7 @@ where
         } else {
             self.body = Body::Html(html.into());
             self.headers.insert_content_length(self.body.len());
-            if let Some(body_type) = self.body.as_content_type() {
-                self.headers.insert(CONTENT_TYPE, body_type)
-            }
+            self.headers.insert_content_type("text/html; charset=utf-8");
         }
 
         self
@@ -168,9 +164,7 @@ where
         } else {
             self.body = Body::Json(json.into());
             self.headers.insert_content_length(self.body.len());
-            if let Some(body_type) = self.body.as_content_type() {
-                self.headers.insert(CONTENT_TYPE, body_type)
-            }
+            self.headers.insert_content_type("application/json");
         }
 
         self
@@ -185,10 +179,7 @@ where
             self.body = Body::Empty;
         } else {
             self.body = Body::Bytes(bytes.to_vec());
-            self.headers.insert_content_length(self.body.len());
-            if let Some(body_type) = self.body.as_content_type() {
-                self.headers.insert(CONTENT_TYPE, body_type)
-            }
+            self.headers.insert_content_type("application/octet-stream");
         }
 
         self

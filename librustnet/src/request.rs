@@ -123,8 +123,8 @@ impl NetReader {
                         break;
                     }
 
-                    let (name, value) = Header::parse(line)?;
-                    headers.insert(name, value);
+                    let header = Header::parse(line)?;
+                    headers.insert(header.name, header.value);
 
                     buf.clear();
                     num_headers += 1;
@@ -220,6 +220,7 @@ impl Default for RequestLine {
         }
     }
 }
+
 impl Display for RequestLine {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{} {} {}", &self.method, &self.path, &self.version)
@@ -280,6 +281,16 @@ pub struct Request {
     pub body: Body,
     pub reader: Option<NetReader>,
 }
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        self.request_line == other.request_line
+            && self.headers == other.headers
+            && self.body == other.body
+    }
+}
+
+impl Eq for Request {}
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -387,12 +398,10 @@ impl Request {
 
     /// Sends an HTTP request to a remote server.
     pub fn send(&mut self) -> NetResult<()> {
-        let mut writer = self.reader
-            .take()
-            .and_then(|reader| Some(NetWriter::from(reader)))
-            .ok_or_else(|| IoErrorKind::NotConnected)?;
-
-        writer.send_request(self)
+        match self.reader.take() {
+            Some(reader) => NetWriter::from(reader).send_request(self),
+            None => Err(IoErrorKind::NotConnected)?,
+        }
     }
 
     /// Receives an HTTP request from a remote client.

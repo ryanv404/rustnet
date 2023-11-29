@@ -4,10 +4,18 @@ use std::str::{self, FromStr};
 use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialOrd, Ord)]
 pub struct HeaderName {
     pub inner: HeaderKind,
 }
+
+impl PartialEq for HeaderName {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for HeaderName {}
 
 impl Display for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -102,11 +110,27 @@ impl HeaderName {
 }
 
 /// Header name representation.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialOrd, Ord)]
 pub enum HeaderKind {
     Standard(StandardHeader),
     Custom(Vec<u8>),
 }
+
+impl PartialEq for HeaderKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Standard(ref std1), Self::Standard(ref std2)) => {
+                std1 == std2
+            },
+            (Self::Custom(ref buf1), Self::Custom(ref buf2)) => {
+                &buf1[..] == &buf2[..]
+            },
+            _ => false,
+        }
+    }
+}
+
+impl Eq for HeaderKind {}
 
 impl TryFrom<&[u8]> for HeaderKind {
     type Error = NetError;

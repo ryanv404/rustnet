@@ -1,12 +1,19 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::path::Path;
 use std::str::FromStr;
 
 use crate::{NetError, NetResult, ParseErrorKind};
 
-#[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Hash, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
+
+impl PartialEq for HeaderValue {
+    fn eq(&self, other: &Self) -> bool {
+        &self.0[..] == &other.0[..]
+	}
+}
+
+impl Eq for HeaderValue {}
 
 impl Display for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -70,29 +77,6 @@ impl HeaderValue {
     #[must_use]
     pub fn as_str(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.0)
-    }
-
-	/// Infers the Content-Type value from a resource's file extension.
-	/// Defaults to "text/plain" if the extension is not recognized.
-    #[must_use]
-    pub fn infer_content_type(path: &Path) -> Self {
-        path.extension().map_or_else(
-            || Self(Vec::from("text/plain")),
-            |ext| {
-                Self(Vec::from(match ext.to_str() {
-                    Some("html" | "htm") => "text/html; charset=utf-8",
-                    Some("txt") => "text/plain; charset=utf-8",
-                    Some("json") => "application/json",
-                    Some("xml") => "application/xml",
-                    Some("pdf") => "application/pdf",
-                    Some("ico") => "image/x-icon",
-                    Some("jpg" | "jpeg") => "image/jpeg",
-                    Some("png") => "image/png",
-                    Some("gif") => "image/gif",
-                    _ => "text/plain",
-                }))
-            },
-        )
     }
 
     /// Parses an optional string slice into a `HeaderValue`

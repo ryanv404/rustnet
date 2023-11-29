@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::{HeaderValue, Method, Request, Response};
+use crate::consts::CONTENT_TYPE;
+use crate::{Header, HeaderValue, Method, Response};
 
 /// Represents an endpoint defined by an HTTP method and a URI path.
-#[derive(Debug, Hash, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Debug, Hash, Ord, PartialOrd)]
 pub enum Route {
     Get(String),
     Head(String),
@@ -17,6 +18,31 @@ pub enum Route {
     Trace(String),
     Options(String),
     Connect(String),
+}
+
+impl PartialEq for Route {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Get(ref s1), Self::Get(ref s2)) => s1 == s2,
+            (Self::Head(ref s1), Self::Head(ref s2)) => s1 == s2,
+            (Self::Post(ref s1), Self::Post(ref s2)) => s1 == s2,
+            (Self::Put(ref s1), Self::Put(ref s2)) => s1 == s2,
+            (Self::Patch(ref s1), Self::Patch(ref s2)) => s1 == s2,
+            (Self::Delete(ref s1), Self::Delete(ref s2)) => s1 == s2,
+            (Self::Trace(ref s1), Self::Trace(ref s2)) => s1 == s2,
+            (Self::Options(ref s1), Self::Options(ref s2)) => s1 == s2,
+            (Self::Connect(ref s1), Self::Connect(ref s2)) => s1 == s2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Route {}
+
+impl Default for Route {
+    fn default() -> Self {
+        Self::Get("/".to_string())
+    }
 }
 
 impl Route {
@@ -37,21 +63,64 @@ impl Route {
             Method::Connect => Self::Connect(path),
         }
     }
+
+    /// Returns this route's HTTP method.
+    #[must_use]
+    pub fn method(&self) -> Method {
+        match self {
+            Self::Get(_) => Method::Get,
+            Self::Head(_) => Method::Head,
+            Self::Post(_) => Method::Post,
+            Self::Put(_) => Method::Put,
+            Self::Patch(_) => Method::Patch,
+            Self::Delete(_) => Method::Delete,
+            Self::Trace(_) => Method::Trace,
+            Self::Options(_) => Method::Options,
+            Self::Connect(_) => Method::Connect,
+        }
+    }
+
+    /// Returns this route's URI path.
+    #[must_use]
+    pub fn path(&self) -> String {
+        match self {
+            Self::Get(ref path) => path.clone(),
+            Self::Head(ref path) => path.clone(),
+            Self::Post(ref path) => path.clone(),
+            Self::Put(ref path) => path.clone(),
+            Self::Patch(ref path) => path.clone(),
+            Self::Delete(ref path) => path.clone(),
+            Self::Trace(ref path) => path.clone(),
+            Self::Options(ref path) => path.clone(),
+            Self::Connect(ref path) => path.clone(),
+        }
+    }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct Router(pub BTreeMap<Route, Target>);
 
+impl PartialEq for Router {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for Router {}
+
 impl Router {
+    /// Returns a new `Router` instance.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds a new route to the router.
     pub fn mount(&mut self, route: Route, target: Target) {
         self.0.insert(route, target);
     }
 
+    /// Returns the configured `Target` for the route, if available.
     #[must_use]
     pub fn resolve(&self, route: &Route) -> Option<&Target> {
         self.0.get(route)
@@ -82,76 +151,92 @@ impl Router {
         P: Into<PathBuf>
     {
         let route = Route::new(Method::Get, uri_path);
-        let target = Target::Html(file_path.into());
-        self.mount(route, target);
-        self
-    }
-
-    /// Configures handling of a GET request.
-    #[must_use]
-    pub fn get_with_handler<F>(mut self, uri_path: &str, handler: F) -> Self
-    where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
-    {
-        let route = Route::new(Method::Get, uri_path);
-        let target = Target::FnMut(Arc::new(Mutex::new(handler)));
+        let target = Target::File(file_path.into());
         self.mount(route, target);
         self
     }
 
     /// Configures handling of a POST request.
     #[must_use]
-    pub fn post(mut self, uri_path: &str) -> Self {
+    pub fn post<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Post, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
     /// Configures handling of a PUT request.
     #[must_use]
-    pub fn put(mut self, uri_path: &str) -> Self {
+    pub fn put<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Put, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
     /// Configures handling of a PATCH request.
     #[must_use]
-    pub fn patch(mut self, uri_path: &str) -> Self {
+    pub fn patch<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Patch, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
     /// Configures handling of a DELETE request.
     #[must_use]
-    pub fn delete(mut self, uri_path: &str) -> Self {
+    pub fn delete<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Delete, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
     /// Configures handling of a TRACE request.
     #[must_use]
-    pub fn trace(mut self, uri_path: &str) -> Self {
+    pub fn trace<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Trace, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
     /// Configures handling of a CONNECT request.
     #[must_use]
-    pub fn connect(mut self, uri_path: &str) -> Self {
+    pub fn connect<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Connect, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
     /// Configures handling of an OPTIONS request.
     #[must_use]
-    pub fn options(mut self, uri_path: &str) -> Self {
+    pub fn options<P>(mut self, uri_path: &str, file_path: P) -> Self
+    where
+        P: Into<PathBuf>
+    {
         let route = Route::new(Method::Options, uri_path);
-        self.mount(route, Target::Empty);
+        let target = Target::File(file_path.into());
+        self.mount(route, target);
         self
     }
 
@@ -162,7 +247,7 @@ impl Router {
         P: Into<PathBuf>
     {
         let route = Route::new(Method::Get, "/favicon.ico");
-        let target = Target::File(file_path.into());
+        let target = Target::Favicon(file_path.into());
         self.mount(route, target);
         self
     }
@@ -179,17 +264,28 @@ impl Router {
         self
     }
 
-    /// Returns the target resource for error 404 responses.
+    /// Sets the static file path to an HTML page returned by 404 responses.
     #[must_use]
-    pub fn error_handler(&self) -> &Target {
-        let route = Route::Get("__error".to_string());
-        self.resolve(&route).unwrap_or(&Target::Empty)
+    pub fn get_error_404(&self) -> Option<&Target> {
+        self.resolve(&Route::Get("__error".to_string()))
     }
 }
 
+/// A builder object for configuring one URI path to respond differently to
+/// different HTTP methods.
+#[derive(Debug, PartialEq, Eq)]
 pub struct RouteBuilder {
-    path: String,
-    router: Router,
+    pub path: String,
+    pub router: Router,
+}
+
+impl Default for RouteBuilder {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            router: Router::new()
+        }
+    }
 }
 
 impl RouteBuilder {
@@ -203,7 +299,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn get<F>(mut self, handler: F) -> Self
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Get, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -215,7 +311,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn post<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Post, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -227,7 +323,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn put<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Put, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -239,7 +335,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn patch<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Patch, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -251,7 +347,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn delete<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Delete, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -263,7 +359,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn trace<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Trace, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -275,7 +371,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn options<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Options, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -287,7 +383,7 @@ impl RouteBuilder {
     #[must_use]
     pub fn connect<F>(mut self, handler: F) -> Self 
     where
-        F: FnMut(&Request, &mut Response) + Send + Sync + 'static
+        F: FnMut(&mut Response) + Send + Sync + 'static
     {
         let route = Route::new(Method::Connect, &self.path);
         let target = Target::FnMut(Arc::new(Mutex::new(handler)));
@@ -302,14 +398,14 @@ impl RouteBuilder {
     }
 }
 
-pub type FnHandler = dyn Fn(&Request, &Response) + Send + Sync + 'static;
-pub type FnMutHandler = dyn FnMut(&Request, &mut Response) + Send + Sync + 'static;
+pub type FnHandler = dyn Fn(&Response) + Send + Sync + 'static;
+pub type FnMutHandler = dyn FnMut(&mut Response) + Send + Sync + 'static;
 
 /// Target resources used by server end-points.
 pub enum Target {
     Empty,
     Text(&'static str),
-    Html(PathBuf),
+    Html(&'static str),
     Json(&'static str),
     Xml(&'static str),
     Bytes(Vec<u8>),
@@ -376,17 +472,15 @@ impl PartialEq for Target {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Empty, Self::Empty) => true,
-            (Self::Text(s1), Self::Text(s2)) => s1 == s2,
-            (Self::Json(s1), Self::Json(s2)) => s1 == s2,
-            (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
+            (Self::Text(ref s1), Self::Text(ref s2)) => s1 == s2,
+            (Self::Json(ref s1), Self::Json(ref s2)) => s1 == s2,
+            (Self::Html(ref s1), Self::Html(ref s2)) => s1 == s2,
+            (Self::Xml(ref s1), Self::Xml(ref s2)) => s1 == s2,
             (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
                 &buf1[..] == &buf2[..]
             },
-            (Self::Html(p1), Self::Html(p2)) => p1 == p2,
-            (Self::File(p1), Self::File(p2)) => p1 == p2,
-            (Self::Favicon(p1), Self::Favicon(p2)) => p1 == p2,
-            (Self::Fn(_), Self::Fn(_)) => true,
-            (Self::FnMut(_), Self::FnMut(_)) => true,
+            (Self::File(ref p1), Self::File(ref p2)) => p1 == p2,
+            (Self::Favicon(ref p1), Self::Favicon(ref p2)) => p1 == p2,
             _ => false,
         }
     }
@@ -413,204 +507,81 @@ impl Target {
         matches!(self, Self::Fn(_) | Self::FnMut(_))
     }
 
-    /// Returns true if the URI target is a String.
+    /// Returns true if the URI target is plain text.
     #[must_use]
-    pub const fn is_string(&self) -> bool {
-        matches!(self,
-            Self::Text(_) | Self::Json(_) | Self::Xml(_))
+    pub const fn is_text(&self) -> bool {
+        matches!(self, Self::Text(_))
+    }
+
+    /// Returns true if the URI target is JSON.
+    #[must_use]
+    pub const fn is_json(&self) -> bool {
+        matches!(self, Self::Json(_))
+    }
+
+    /// Returns true if the URI target is HTML.
+    #[must_use]
+    pub const fn is_html(&self) -> bool {
+        matches!(self, Self::Html(_))
+    }
+
+    /// Returns true if the URI target is a XML.
+    #[must_use]
+    pub const fn is_xml(&self) -> bool {
+        matches!(self, Self::Xml(_))
     }
 
     /// Returns true if the URI target is a file path.
     #[must_use]
     pub const fn is_file_path(&self) -> bool {
-        matches!(self, Self::File(_) | Self::Favicon(_) | Self::Html(_))
-    }
-
-    /// Returns a Content-Type `HeaderValue` based on the `Target` variant.
-    #[must_use]
-    pub fn as_content_type(&self) -> Option<HeaderValue> {
-        match self {
-            Self::Text(_) => Some(b"text/plain; charset=utf-8"[..].into()),
-            Self::Html(_) => Some(b"text/html; charset=utf-8"[..].into()),
-            Self::Json(_) => Some(b"application/json"[..].into()),
-            Self::Xml(_) => Some(b"application/xml"[..].into()),
-            Self::Bytes(_) => Some(b"application/octet-stream"[..].into()),
-            Self::File(path) => Some(HeaderValue::infer_content_type(path)),
-            Self::Favicon(path) => Some(HeaderValue::infer_content_type(path)),
-            _ => None,
-        }
-    }
-}
-
-/// A respresentation of the body content type.
-#[derive(Clone, Hash)]
-pub enum Body {
-    Empty,
-    Text(String),
-    Html(String),
-    Json(String),
-    Xml(String),
-    Image(Vec<u8>),
-    Bytes(Vec<u8>),
-    Favicon(Vec<u8>),
-}
-
-impl Default for Body {
-    fn default() -> Self {
-        Self::Empty
-    }
-}
-
-impl Display for Body {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            Self::Empty => Ok(()),
-            Self::Text(s) => write!(f, "{s}"),
-            Self::Html(s) => write!(f, "{s}"),
-            Self::Json(s) => write!(f, "{s}"),
-            Self::Xml(s) => write!(f, "{s}"),
-            Self::Image(_) => write!(f, "Image {{ ... }}"),
-            Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
-            Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
-        }
-    }
-}
-
-impl Debug for Body {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            Self::Empty => f.debug_tuple("Empty").finish(),
-            Self::Text(ref s) => f.debug_tuple("Text").field(s).finish(),
-            Self::Html(ref s) => f.debug_tuple("Html").field(s).finish(),
-            Self::Json(ref s) => f.debug_tuple("Json").field(s).finish(),
-            Self::Xml(ref s) => f.debug_tuple("Xml").field(s).finish(),
-            Self::Image(_) => {
-                f.debug_tuple("Image").field(&"{ ... }").finish()
-            },
-            Self::Bytes(_) => {
-                f.debug_tuple("Bytes").field(&"{ ... }").finish()
-            },
-            Self::Favicon(_) => {
-                f.debug_tuple("Favicon").field(&"{ ... }").finish()
-            },
-        }
-    }
-}
-
-impl PartialEq for Body {
-    #[allow(clippy::match_like_matches_macro)]
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Empty, Self::Empty) => true,
-            (Self::Text(s1), Self::Text(s2)) => s1 == s2,
-            (Self::Html(s1), Self::Html(s2)) => s1 == s2,
-            (Self::Json(s1), Self::Json(s2)) => s1 == s2,
-            (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
-            (Self::Image(ref buf1), Self::Image(ref buf2)) => {
-                &buf1[..] == &buf2[..]
-            },
-            (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
-                &buf1[..] == &buf2[..]
-            },
-            (Self::Favicon(ref buf1), Self::Favicon(ref buf2)) => {
-                &buf1[..] == &buf2[..]
-            },
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Body {}
-
-impl Body {
-    /// Returns a default `Body` instance.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self::Empty
-    }
-
-    /// Returns true if the body type is empty.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-
-
-    /// Returns true if the URI target is a String.
-    #[must_use]
-    pub const fn is_string(&self) -> bool {
-        matches!(self,
-            Self::Text(_) | Self::Html(_) | Self::Json(_) | Self::Xml(_))
+        matches!(self, Self::File(_) | Self::Favicon(_))
     }
 
     /// Returns true if the URI target is a vector of bytes.
     #[must_use]
     pub const fn is_bytes(&self) -> bool {
-        matches!(self, Self::Image(_) | Self::Bytes(_) | Self::Favicon(_))
+        matches!(self, Self::Bytes(_))
     }
 
-    /// Returns a Content-Type `HeaderValue` based on the `Body` variant.
+    /// Returns a Content-Type `Header` based on the `Target` variant.
     #[must_use]
-    pub fn as_content_type(&self) -> Option<HeaderValue> {
-        match self {
-            Self::Empty => None,
-            Self::Text(_) => Some(b"text/plain; charset=utf-8"[..].into()),
-            Self::Html(_) => Some(b"text/html; charset=utf-8"[..].into()),
-            Self::Json(_) => Some(b"application/json"[..].into()),
-            Self::Xml(_) => Some(b"application/xml"[..].into()),
-            Self::Image(_) => Some(b"image"[..].into()),
-            Self::Bytes(_) => Some(b"application/octet-stream"[..].into()),
-            Self::Favicon(_) => Some(b"image/x-icon"[..].into()),
+    pub fn as_content_type_header(&self) -> Option<Header> {
+        if self.is_empty() {
+            return None;
         }
+
+        let value: HeaderValue = match self {
+            Self::Text(_) => b"text/plain; charset=utf-8"[..].into(),
+            Self::Html(_) => b"text/html; charset=utf-8"[..].into(),
+            Self::Json(_) => b"application/json"[..].into(),
+            Self::Xml(_) => b"application/xml"[..].into(),
+            Self::Bytes(_) => b"application/octet-stream"[..].into(),
+            Self::File(ref path) | Self::Favicon(ref path) => {
+                Self::get_content_type_from_path(path)
+            },
+            Self::Fn(_) | Self::FnMut(_) => b"text/plain; charset=utf-8"[..].into(),
+            Self::Empty => unreachable!(),
+        };
+
+        Some(Header { name: CONTENT_TYPE, value })
     }
 
-    /// Returns true if the body contains a alphanumeric data.
+    /// Infers a Content-Type header value based on the file extension.
     #[must_use]
-    pub const fn is_alphanumeric(&self) -> bool {
-        match self {
-            Self::Text(_)
-                | Self::Html(_)
-                | Self::Json(_) 
-                | Self::Xml(_) => true,
-            Self::Favicon(_)
-                | Self::Bytes(_) 
-                | Self::Image(_)
-                | Self::Empty => false,
-        }
-    }
-
-    /// Returns the body data as a bytes slice.
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            Self::Empty => &b""[..],
-            Self::Text(ref s) => s.as_bytes(),
-            Self::Html(ref s) => s.as_bytes(),
-            Self::Json(ref s) => s.as_bytes(),
-            Self::Xml(ref s) => s.as_bytes(),
-            Self::Image(ref buf) => buf.as_slice(),
-            Self::Bytes(ref buf) => buf.as_slice(),
-            Self::Favicon(ref buf) => buf.as_slice(),
-        }
-    }
-
-    /// Returns the size of the body data as number of bytes.
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Empty => 0,
-            Self::Text(ref s) => s.len(),
-            Self::Html(ref s) => s.len(),
-            Self::Json(ref s) => s.len(),
-            Self::Xml(ref s) => s.len(),
-            Self::Image(ref buf) => buf.len(),
-            Self::Bytes(ref buf) => buf.len(),
-            Self::Favicon(ref buf) => buf.len(),
-        }
-    }
-
-    /// Changes the body to a text type containing the provided string.
-    pub fn send_text(&mut self, text: &str) {
-        if !text.is_empty() {
-            *self = Self::Text(text.to_string());
-        }
+    pub fn get_content_type_from_path(path: &Path) -> HeaderValue {
+        path.extension().map_or_else(
+            || b"application/octet-stream"[..].into(),
+            |ext| match ext.to_str() {
+                Some("html" | "htm") => b"text/html; charset=utf-8"[..].into(),
+                Some("txt") => b"text/plain; charset=utf-8"[..].into(),
+                Some("json") => b"application/json"[..].into(),
+                Some("xml") => b"application/xml"[..].into(),
+                Some("pdf") => b"application/pdf"[..].into(),
+                Some("ico") => b"image/x-icon"[..].into(),
+                Some("jpg" | "jpeg") => b"image/jpeg"[..].into(),
+                Some("png") => b"image/png"[..].into(),
+                Some("gif") => b"image/gif"[..].into(),
+                _ => b"application/octet-stream"[..].into(),
+            })
     }
 }

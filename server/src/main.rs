@@ -26,14 +26,14 @@ fn main() -> io::Result<()> {
     // Add a single URI path that responds differently to each HTTP method.
     let router = router
         .route("/many_methods")
-            .get(|_req, res| res.body.send_text("Hi from the GET route!"))
-            .post(|_req, res| res.body.send_text("Hi from the POST route!"))
-            .put(|_req, res| res.body.send_text("Hi from the PUT route!"))
-            .patch(|_req, res| res.body.send_text("Hi from the PATCH route!"))
-            .delete(|_req, res| res.body.send_text("Hi from the DELETE route!"))
-            .trace(|_req, res| res.body.send_text("Hi from the TRACE route!"))
-            .options(|_req, res| res.body.send_text("Hi from the OPTIONS route!"))
-            .connect(|_req, res| res.body.send_text("Hi from the CONNECT route!"))
+            .get(|res| res.body.text("Hi from the GET route!"))
+            .post(|res| res.body.text("Hi from the POST route!"))
+            .put(|res| res.body.text("Hi from the PUT route!"))
+            .patch(|res| res.body.text("Hi from the PATCH route!"))
+            .delete(|res| res.body.text("Hi from the DELETE route!"))
+            .trace(|res| res.body.text("Hi from the TRACE route!"))
+            .options(|res| res.body.text("Hi from the OPTIONS route!"))
+            .connect(|res| res.body.text("Hi from the CONNECT route!"))
             .apply();
 
     // Create and run the HTTP server.

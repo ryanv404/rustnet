@@ -40,12 +40,10 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.0.entry(CONNECTION).and_modify(
                             |v| *v = b"upgrade"[..].into());
                     });
-                expected
             },
             num @ (100 | 102 | 103 | 204) => {
                 expected.entry(num).and_modify(
                     |headers| headers.remove(&CONTENT_LENGTH));
-                expected
             },
             num @ (301 | 302 | 303 | 305 | 307) => {
                 expected.entry(num)
@@ -54,7 +52,6 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.insert(LOCATION,
                             b"/redirect/1"[..].into());
                     });
-                expected
             },
             num @ 304 => {
                 expected.entry(num)
@@ -62,7 +59,6 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.remove(&CONTENT_TYPE);
                         headers.remove(&CONTENT_LENGTH);
                     });
-                expected
             },
             401 => {
                 expected.entry(401)
@@ -71,7 +67,6 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.insert(WWW_AUTHENTICATE,
                             br#"Basic realm="Fake Realm""#[..].into());
                     });
-                expected
             },
             402 => {
                 expected.entry(402)
@@ -82,7 +77,6 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.0.entry(CONTENT_LENGTH).and_modify(
                             |v| *v = b"17"[..].into());
                     });
-                expected
             },
             406 => {
                 expected.entry(406)
@@ -92,12 +86,10 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.0.entry(CONTENT_TYPE).and_modify(
                             |v| *v = b"application/json"[..].into());
                     });
-                expected
             },
             num @ (407 | 412) => {
                 expected.entry(num).and_modify(
                     |headers| headers.remove(&CONTENT_TYPE));
-                expected
             },
             418 => {
                 expected.entry(418)
@@ -108,9 +100,11 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                         headers.insert(X_MORE_INFO,
                             b"http://tools.ietf.org/html/rfc2324"[..].into());
                     });
-                expected
             },
-            _ => expected,
+            _ => {},
         }
     }
+
+    expected
 }
+

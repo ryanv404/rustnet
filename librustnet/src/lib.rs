@@ -13,6 +13,7 @@
 #[cfg(test)]
 mod tests;
 
+pub mod body;
 pub mod client;
 pub mod errors;
 pub mod header;
@@ -23,13 +24,14 @@ pub mod router;
 pub mod server;
 pub mod util;
 
+pub use body::Body;
 pub use client::{Client, ClientBuilder};
 pub use errors::{NetError, NetResult, ParseErrorKind};
 pub use header::{Header, HeaderKind, HeaderName, Headers, HeaderValue};
 pub use http::{Method, Status, Version};
 pub use request::{Request, RequestLine, NetReader};
 pub use response::{Response, StatusLine, NetWriter};
-pub use router::{Body, Route, RouteBuilder, Router, Target};
+pub use router::{Route, RouteBuilder, Router, Target};
 pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
 pub use util::{trim_whitespace_bytes, get_datetime};
 

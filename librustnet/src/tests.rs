@@ -132,8 +132,8 @@ mod parse {
         for line in headers_section.split('\n') {
             let trim = line.trim();
             if trim.is_empty() { break; }
-            let (name, value) = Header::parse(trim).unwrap();
-            test_hdrs.insert(name, value);
+            let header = Header::parse(trim).unwrap();
+            test_hdrs.insert(header.name, header.value);
         }
 
         // Compare total lengths.
@@ -236,7 +236,7 @@ mod router {
                     $(
                         let body = Body::$body;
 
-                        let mut req = Request {
+                        let req = Request {
                             request_line: RequestLine {
                                 method: Method::$method,
                                 path: $path.to_string(),
@@ -247,7 +247,7 @@ mod router {
                             reader: None
                         };
 
-                        let res = Response::from_request(&mut req, &router).unwrap();
+                        let res = Response::from_route(&req.route(), &router).unwrap();
 
                         let mut expect = Response {
                             status_line: StatusLine {
@@ -289,7 +289,7 @@ mod router {
 
                         let body = Body::$body(String::from($inner));
 
-                        let mut req = Request {
+                        let req = Request {
                             request_line: RequestLine {
                                 method: Method::$method,
                                 path: $path.to_string(),
@@ -300,7 +300,7 @@ mod router {
                             reader: None
                         };
 
-                        let res = Response::from_request(&mut req, &router).unwrap();
+                        let res = Response::from_route(&req.route(), &router).unwrap();
 
                         let mut expect = Response {
                             status_line: StatusLine {
@@ -416,14 +416,16 @@ mod router {
 #[cfg(test)]
 mod send_sync {
     use crate::{
-        Client, Header, Headers, HeaderKind, HeaderName,
+        Body, Client, Header, Headers, HeaderKind, HeaderName,
         HeaderValue, Method, NetReader, NetWriter, Request, RequestLine,
-        Response, Route, Router, Server, Status, StatusLine, Target, Version,
+        Response, Route, RouteBuilder, Router, Server, Status, StatusLine,
+        Target, Version,
     };
 
     #[test]
     fn send_tests() {
         fn type_is_send<T: Send>() {}
+        type_is_send::<Body>();
         type_is_send::<Client>();
         type_is_send::<Header>();
         type_is_send::<HeaderKind>();
@@ -437,6 +439,7 @@ mod send_sync {
         type_is_send::<RequestLine>();
         type_is_send::<Response>();
         type_is_send::<Route>();
+        type_is_send::<RouteBuilder>();
         type_is_send::<Router>();
         type_is_send::<Server>();
         type_is_send::<Status>();
@@ -448,6 +451,7 @@ mod send_sync {
     #[test]
     fn sync_tests() {
         fn type_is_sync<T: Sync>() {}
+        type_is_sync::<Body>();
         type_is_sync::<Client>();
         type_is_sync::<Header>();
         type_is_sync::<HeaderKind>();
@@ -462,6 +466,7 @@ mod send_sync {
         type_is_sync::<Response>();
         type_is_sync::<Route>();
         type_is_sync::<Router>();
+        type_is_sync::<RouteBuilder>();
         type_is_sync::<Server>();
         type_is_sync::<Status>();
         type_is_sync::<StatusLine>();

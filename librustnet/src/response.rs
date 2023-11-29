@@ -8,8 +8,7 @@ use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::string::ToString;
 
 use crate::consts::{
-    ACCEPT, CONNECTION, CONTENT_TYPE, HOST, SERVER, USER_AGENT,
-    WRITER_BUFSIZE,
+    ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE,
 };
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetReader,
@@ -87,7 +86,6 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &req.request_line).as_bytes())?;
         self.write_headers(&req.headers)?;
         self.write_body(&req.body)?;
-
         self.flush()?;
         Ok(())
     }
@@ -97,7 +95,6 @@ impl NetWriter {
         let mut res = Response::new(code);
         res.headers.insert_cache_control("no-cache");
         res.headers.insert_connection("close");
-        res.headers.insert_server();
         self.send_response(&mut res)?;
         Ok(())
     }
@@ -111,7 +108,6 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &res.status_line).as_bytes())?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
-
         self.flush()?;
         Ok(())
     }
@@ -208,6 +204,16 @@ pub struct Response {
     pub writer: Option<NetWriter>,
 }
 
+impl PartialEq for Response {
+    fn eq(&self, other: &Self) -> bool {
+        self.status_line == other.status_line
+            && self.headers == other.headers
+            && self.body == other.body
+    }
+}
+
+impl Eq for Response {}
+
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         // The response status line.
@@ -239,65 +245,76 @@ impl Debug for Response {
 }
 
 impl Response {
-    /// Resolves a `Request` into a `Response` based on the provided `Router`.
-    pub fn from_request(request: &mut Request, router: &Router) -> NetResult<Self> {
+    /// Resolves a `Route` into a `Response` based on the provided `Router`.
+    pub fn from_route(route: &Route, router: &Router) -> NetResult<Self> {
         if router.is_empty() {
             let msg = "This server has no routes configured.";
             let target = Target::Text(msg);
-            return Self::from_target(502, &target, request);
+            return Self::from_target(502, &target);
         }
 
-        let method = request.method();
-        let route = request.route();
+        let method = route.method();
         let maybe_target = router.resolve(&route);
 
-        match (maybe_target, method) {
+        let mut res = match (maybe_target, method) {
             (Some(target), Method::Get) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Head) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Post) => {
-                Self::from_target(201, target, request)
+                Self::from_target(201, target)?
             },
             (Some(target), Method::Put) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Patch) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Delete) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Trace) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Options) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (Some(target), Method::Connect) => {
-                Self::from_target(200, target, request)
+                Self::from_target(200, target)?
             },
             (None, Method::Head) => {
                 // Allow HEAD requests for any route configured for a GET request.
-                let route = Route::Get(request.request_line.path.clone());
+                let get_route = Route::Get(route.path());
 
-                match router.resolve(&route) {
+                match router.resolve(&get_route) {
                     // GET route exists so send it as a HEAD response.
-                    Some(target) => Self::from_target(200, target, request),
+                    Some(target) => Self::from_target(200, target)?,
                     // No route exists for a GET request either.
-                    None => Self::from_target(404, router.error_handler(), request),
+                    None => match router.get_error_404() {
+                        Some(target) => Self::from_target(404, target)?,
+                        None => Self::from_target(404, &Target::Empty)?,
+                    }
                 }
             },
             // Handle routes that do not exist.
-            (None, _) => Self::from_target(404, router.error_handler(), request),
+            (None, _) => match router.get_error_404() {
+                Some(target) => Self::from_target(404, target)?,
+                None => Self::from_target(404, &Target::Empty)?,
+            }
+        };
+
+        if method == Method::Head {
+            res.body = Body::Empty;
         }
+
+        Ok(res)
     }
 
     /// Parses the target type and returns a new `Response` object.
     pub fn new(code: u16) -> Self {
-        Response {
+        Self {
             status_line: StatusLine {
                 status: Status(code),
                 version: Version::OneDotOne
@@ -309,96 +326,69 @@ impl Response {
     }
 
     /// Parses the target type and returns a new `Response` object.
-    pub fn from_target(
-        code: u16,
-        target: &Target,
-        req: &mut Request
-    ) -> NetResult<Self> {
-        let writer = req.reader
-            .take()
-            .and_then(|reader| Some(NetWriter::from(reader)));
+    pub fn from_target(code: u16, target: &Target) -> NetResult<Self> {
+        let mut res = Self::new(code);
 
-        let mut res = Self {
-            status_line: StatusLine::new(Version::OneDotOne, Status(code)),
-            headers: Headers::new(),
-            body: Body::Empty,
-            writer
-        };
+        if let Some(header) = target.as_content_type_header() {
+            res.headers.insert(header.name, header.value);
+        }
 
         match target {
             Target::Empty => res.headers.insert_cache_control("no-cache"),
             Target::Text(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.headers.insert_content_type("text/plain; charset=utf-8");
                 res.body = Body::Text(s.to_string());
             },
             Target::Json(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.headers.insert_content_type("application/json");
                 res.body = Body::Json(s.to_string());
             },
             Target::Xml(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.headers.insert_content_type("application/xml");
                 res.body = Body::Xml(s.to_string());
             },
             Target::Html(ref fpath) => {
                 let content = fs::read_to_string(fpath)?;
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(content.len());
-                res.headers.insert_content_type("text/html; charset=utf-8");
                 res.body = Body::Html(content);
             },
             Target::File(ref fpath) => {
                 let content = fs::read(fpath)?;
-                let cont_type = HeaderValue::infer_content_type(fpath);
                 res.headers.insert_cache_control("no-cache");
-                res.headers.insert(CONTENT_TYPE, cont_type);
                 res.headers.insert_content_length(content.len());
                 res.body = Body::Bytes(content);
             },
             Target::Favicon(ref fpath) => {
                 let content = fs::read(fpath)?;
-
                 res.headers.insert_cache_control("max-age=604800");
-                res.headers.insert_content_type("image/x-icon");
                 res.headers.insert_content_length(content.len());
                 res.body = Body::Favicon(content);
             },
             Target::FnMut(handler) => {
                 // Call the handler to update the response.
-                (handler.lock().unwrap())(req, &mut res);
-
+                (handler.lock().unwrap())(&mut res);
                 if !res.body.is_empty() {
                     res.headers.insert_cache_control("no-cache");
                     res.headers.insert_content_length(res.body.len());
-                    res.headers.insert_content_type("text/plain; charset=utf-8");
                 }
             },
             // Call the handler to perform an action (with context).
             Target::Fn(handler) => {
-                (handler)(req, &res);
-
+                (handler)(&res);
                 if !res.body.is_empty() {
                     res.headers.insert_cache_control("no-cache");
                     res.headers.insert_content_length(res.body.len());
-                    res.headers.insert_content_type("text/plain; charset=utf-8");
                 }
             },
             Target::Bytes(ref bytes) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(bytes.len());
-                res.headers.insert_content_type("application/octet-stream");
                 res.body = Body::Bytes(bytes.to_vec());
             },
-        }
-
-        // Return accurate headers but no body for HEAD requests.
-        if req.request_line.method == Method::Head {
-            res.body = Body::Empty;
         }
 
         Ok(res)
@@ -539,12 +529,10 @@ impl Response {
 
     /// Sends an HTTP response to a remote client.
     pub fn send(&mut self) -> NetResult<()> {
-        let mut writer = self.writer
-            .take()
-            .and_then(|writer| Some(writer))
-            .ok_or_else(|| IoErrorKind::NotConnected)?;
-
-        writer.send_response(self)
+        match self.writer.take() {
+            Some(mut writer) => writer.send_response(self),
+            None => Err(IoErrorKind::NotConnected)?,
+        }
     }
 
     /// Receives an HTTP response from a remote server.
