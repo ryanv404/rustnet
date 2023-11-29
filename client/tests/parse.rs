@@ -16,7 +16,10 @@ use crate::common::get_expected_headers;
 macro_rules! get_responses {
     ($($code:literal),+) => {{
         let expected_headers = get_expected_headers();
-        let stream = TcpStream::connect("httpbin.org:80").unwrap();
+
+        let Ok(stream) = TcpStream::connect("httpbin.org:80") else {
+            panic!("Could not connect to remote host in: {}", stringify!($label));
+        };
 
         let mut req = Request {
             request_line: RequestLine {
@@ -43,14 +46,34 @@ macro_rules! get_responses {
             req.request_line.path = format!("/status/{}", $code);
             exp.status_line.status = Status($code);
 
-            let mut writer = NetWriter::from(stream.try_clone().unwrap());
-            writer.send_request(&mut req).unwrap();
+            let Ok(stream_clone1) = stream.try_clone() else {
+                panic!("Could not clone stream at status code: {}", $code);
+            };
 
-            let reader = NetReader::from(stream.try_clone().unwrap());
-            let mut res = Response::recv(reader).unwrap();
+            let mut writer = NetWriter::from(stream_clone1);
+
+            match writer.send_request(&mut req) {
+                Ok(_) => {},
+                Err(e) => panic!("Error while sending request at code: {}\n{e}", $code),
+            }
+
+            let Ok(stream_clone2) = stream.try_clone() else {
+                panic!("Could not clone stream into NetReader at status code: {}", $code);
+            };
+
+            let reader = NetReader::from(stream_clone2);
+
+            let Ok(mut res) = Response::recv(reader) else {
+                panic!("Error while receiving response at code: {}", $code);
+            };
+
             res.headers.remove(&DATE);
 
-            exp.headers = expected_headers.get(&$code).cloned().unwrap();
+            let Some(exp_headers) = expected_headers.get(&$code).cloned() else {
+                panic!("Error while cloning expected headers at code: {}", $code);
+            };
+
+            exp.headers = exp_headers;
 
             match $code {
                 101 => {

@@ -291,9 +291,9 @@ impl<'a> Browser<'a> {
     }
 
     fn set_path(&mut self, path: &str) {
-        self.request
-            .as_mut()
-            .map(|req| { req.request_line.path = path.to_string(); });
+        if let Some(req) = self.request.as_mut() {
+            req.request_line.path = path.to_string();
+        }
     }
 
     fn warn_invalid_input(&mut self, kind: &str) -> NetResult<()> {
@@ -305,12 +305,12 @@ impl<'a> Browser<'a> {
     fn send(&mut self) -> NetResult<()> {
         let mut writer = self.writer
             .as_ref()
-            .ok_or_else(|| NetError::IoError(IoErrorKind::NotConnected))
+            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
             .and_then(|writer| writer.try_clone())?;
 
         self.request
             .as_mut()
-            .ok_or_else(|| NetError::IoError(IoErrorKind::NotConnected))
+            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
             .and_then(|req| writer.send_request(req))?;
 
         Ok(())
@@ -320,8 +320,8 @@ impl<'a> Browser<'a> {
         let res = self.reader
             .as_ref()
             .and_then(|reader| reader.try_clone().ok())
-            .ok_or_else(|| NetError::IoError(IoErrorKind::NotConnected))
-            .and_then(|clone| NetReader::recv_response(clone))?;
+            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
+            .and_then(NetReader::recv_response)?;
 
         self.response = Some(res);
         Ok(())

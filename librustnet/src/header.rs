@@ -11,11 +11,13 @@ use crate::consts::{
 pub mod names;
 pub mod values;
 
+#[allow(clippy::module_name_repetitions)]
 pub use names::{header_consts, HeaderKind, HeaderName};
+#[allow(clippy::module_name_repetitions)]
 pub use values::HeaderValue;
 
 /// Represents a single header field line.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Header {
     pub name: HeaderName,
     pub value: HeaderValue,
@@ -29,7 +31,8 @@ impl Display for Header {
 
 impl Header {
     /// Parses a string slice into a `Header`.
-    pub fn parse(line: &str) -> NetResult<Header> {
+    #[allow(clippy::missing_errors_doc)]
+    pub fn parse(line: &str) -> NetResult<Self> {
         let mut tokens = line.splitn(2, ':');
         let name = HeaderName::parse(tokens.next())?;
         let value = HeaderValue::parse(tokens.next())?;
@@ -38,14 +41,8 @@ impl Header {
 }
 
 /// A wrapper around an object that maps header names to header values.
-#[derive(Clone, Debug, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
-
-impl Default for Headers {
-    fn default() -> Self {
-        Self(BTreeMap::<HeaderName, HeaderValue>::new())
-    }
-}
 
 impl PartialEq for Headers {
     fn eq(&self, other: &Self) -> bool {

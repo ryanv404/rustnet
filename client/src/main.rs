@@ -111,7 +111,7 @@ fn main() -> io::Result<()> {
     let mut client = Client::builder()
         .method(method_arg.unwrap_or(Method::Get))
         .addr(&addr)
-        .path(&path_arg.as_ref().unwrap_or(&path))
+        .path(path_arg.as_ref().unwrap_or(&path))
         .send_text(&args.next().unwrap_or_default())?;
 
     // Receive the response from the server.
@@ -119,29 +119,37 @@ fn main() -> io::Result<()> {
 
     // Ignore Date headers in tests.
     if testing_client || testing_server {
-        client.req.as_mut().map(|req| req.headers.remove(&DATE));
-        client.res.as_mut().map(|res| res.headers.remove(&DATE));
+        if let Some(req) = client.req.as_mut() {
+            req.headers.remove(&DATE);
+        }
+
+        if let Some(res) = client.res.as_mut() {
+            res.headers.remove(&DATE);
+        }
     }
 
     if testing_client {
         // Only print request line, request headers, status line, and response
         // headers during client testing.
-        client.req
-            .as_ref()
-            .map(|req| println!("{}\n{}\n",
+        if let Some(req) = client.req.as_ref() {
+            println!(
+                "{}\n{}\n",
                 req.request_line(),
-                req.headers_to_string().trim_end()));
-        client.res
-            .as_ref()
-            .map(|res| println!("{}\n{}",
+                req.headers_to_string().trim_end());
+        }
+
+        if let Some(res) = client.res.as_ref() {
+            println!(
+                "{}\n{}",
                 res.status_line(),
-                res.headers_to_string().trim_end()));
+                res.headers_to_string().trim_end());
+        }
     } else if testing_server {
         // Only print the status line, response headers, and response body
         // (if it is alphanumeric data) during server testing.
-        client.res
-            .as_ref()
-            .map(|res| println!("{}\n{}{}",
+        if let Some(res) = client.res.as_ref() {
+            println!(
+                "{}\n{}{}",
                 res.status_line(),
                 res.headers_to_string().trim_end(),
                 if res.body.is_alphanumeric() {
@@ -149,7 +157,8 @@ fn main() -> io::Result<()> {
                 } else {
                     String::new()
                 }
-            ));
+            );
+        }
     } else {
         // Handle non-testing output.
         print_output(&mut client);

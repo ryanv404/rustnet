@@ -79,6 +79,7 @@ impl Method {
     }
 
     /// Parses an optional string slice into a `Method`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(maybe_method: Option<&str>) -> NetResult<Self> {
         maybe_method
             .ok_or_else(|| ParseErrorKind::Version.into())
@@ -87,7 +88,7 @@ impl Method {
 }
 
 /// HTTP status code.
-#[derive(Clone, Copy, Debug, Hash)]
+#[derive(Clone, Copy, Debug)]
 pub struct Status(pub u16);
 
 impl PartialEq for Status {
@@ -100,7 +101,7 @@ impl Eq for Status {}
 
 impl PartialOrd for Status {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 
@@ -268,6 +269,7 @@ impl Status {
     }
 
     /// Parses an optional string slice into a `Status`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(maybe_status: Option<&str>) -> NetResult<Self> {
         maybe_status
             .ok_or_else(|| ParseErrorKind::Version.into())
@@ -360,6 +362,7 @@ impl Version {
     }
 
     /// Parses an optional string slice into a `Version`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(maybe_version: Option<&str>) -> NetResult<Self> {
         maybe_version
             .ok_or_else(|| ParseErrorKind::Version.into())

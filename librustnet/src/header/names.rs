@@ -4,7 +4,7 @@ use std::str::{self, FromStr};
 use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
-#[derive(Clone, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialOrd, Ord)]
 pub struct HeaderName {
     pub inner: HeaderKind,
 }
@@ -102,6 +102,7 @@ impl HeaderName {
     }
 
     /// Parses an optional string slice into a `HeaderName`
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(maybe_name: Option<&str>) -> NetResult<Self> {
         maybe_name
             .ok_or_else(|| ParseErrorKind::Header.into())
@@ -110,7 +111,7 @@ impl HeaderName {
 }
 
 /// Header name representation.
-#[derive(Clone, Debug, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialOrd, Ord)]
 pub enum HeaderKind {
     Standard(StandardHeader),
     Custom(Vec<u8>),
@@ -123,7 +124,7 @@ impl PartialEq for HeaderKind {
                 std1 == std2
             },
             (Self::Custom(ref buf1), Self::Custom(ref buf2)) => {
-                &buf1[..] == &buf2[..]
+                buf1[..] == buf2[..]
             },
             _ => false,
         }

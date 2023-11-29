@@ -49,22 +49,26 @@ impl BufRead for NetReader {
 
 impl NetReader {
     /// Returns a clone of the current `NetReader` instance.
+    #[allow(clippy::missing_errors_doc)]
     pub fn try_clone(&self) -> NetResult<Self> {
         let stream = self.0.get_ref().try_clone()?;
         Ok(Self::from(stream))
     }
 
     /// Consumes the `NetReader` and returns the underlying `TcpStream`.
+    #[must_use]
     pub fn into_inner(self) -> TcpStream {
         self.0.into_inner()
     }
 
     /// Returns a reference to the underlying `TcpStream`.
+    #[must_use]
     pub fn get_ref(&self) -> &TcpStream {
         self.0.get_ref()
     }
 
     /// Reads an HTTP request from the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn recv_request(mut reader: Self) -> NetResult<Request> {
         let request_line = reader.read_request_line()?;
         let headers = reader.read_headers()?;
@@ -75,6 +79,7 @@ impl NetReader {
     }
 
     /// Reads an HTTP response from the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn recv_response(mut reader: Self) -> NetResult<Response> {
         let status_line = reader.read_status_line()?;
         let headers = reader.read_headers()?;
@@ -85,6 +90,7 @@ impl NetReader {
     }
 
     /// Reads a request line from the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn read_request_line(&mut self) -> NetResult<RequestLine> {
         let mut line = String::with_capacity(1024);
 
@@ -96,6 +102,7 @@ impl NetReader {
     }
 
     /// Reads a response status line from the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn read_status_line(&mut self) -> NetResult<StatusLine> {
         let mut line = String::with_capacity(1024);
 
@@ -107,6 +114,7 @@ impl NetReader {
     }
 
     /// Reads request headers from the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn read_headers(&mut self) -> NetResult<Headers> {
         let mut num_headers = 0;
         let mut headers = Headers::new();
@@ -137,6 +145,7 @@ impl NetReader {
 
     /// Reads and parses the message body based on the value of the
     /// Content-Length and Content-Type headers.
+    #[allow(clippy::missing_errors_doc)]
     pub fn read_body(&mut self, headers: &Headers) -> NetResult<Body> {
         let content_len = headers.get(&CONTENT_LENGTH);
         let content_type = headers.get(&CONTENT_TYPE);
@@ -146,8 +155,8 @@ impl NetReader {
         }
 
         let body_len = content_len
-            .ok_or_else(|| NetError::ParseError(ParseErrorKind::Body))
-            .map(|hdr_val| hdr_val.to_string())
+            .ok_or(NetError::ParseError(ParseErrorKind::Body))
+            .map(ToString::to_string)
             .and_then(|s| s.trim().parse::<usize>()
                 .map_err(|_| NetError::ParseError(ParseErrorKind::Body)))?;
 
@@ -159,8 +168,8 @@ impl NetReader {
             .map_err(|_| NetError::ParseError(ParseErrorKind::Body))?;
 
         let body_type = content_type
-            .ok_or_else(|| NetError::ParseError(ParseErrorKind::Body))
-            .map(|hdr_val| hdr_val.to_string())?;
+            .ok_or(NetError::ParseError(ParseErrorKind::Body))
+            .map(ToString::to_string)?;
 
         if body_type.is_empty() {
             // Return error since content length is greater than zero.
@@ -175,23 +184,31 @@ impl NetReader {
 
         let mut type_tokens = body_type.splitn(2, '/');
 
-        match type_tokens.next().map(|s| s.trim()) {
-            Some("text") => match type_tokens.next().map(|s| s.trim()) {
+        match type_tokens.next().map(str::trim) {
+            Some("text") => match type_tokens.next().map(str::trim) {
                 Some(s) if s.starts_with("html") => {
                     Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
                 },
                 Some(s) if s.starts_with("plain") => {
                     Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
                 },
-                _ => Ok(Body::Text(String::from_utf8_lossy(&buf).to_string())),
+                _ => {
+                    Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
+                },
             },
-            Some("application") => match type_tokens.next().map(|s| s.trim()) {
-                Some(s) if s.starts_with("json") => Ok(Body::Json(String::from_utf8_lossy(&buf).to_string())),
-                Some(s) if s.starts_with("xml") => Ok(Body::Xml(String::from_utf8_lossy(&buf).to_string())),
-                Some(s) if s.starts_with("octet-stream") => Ok(Body::Bytes(buf)),
+            Some("application") => match type_tokens.next().map(str::trim) {
+                Some(s) if s.starts_with("json") => {
+                    Ok(Body::Json(String::from_utf8_lossy(&buf).to_string()))
+                },
+                Some(s) if s.starts_with("xml") => {
+                    Ok(Body::Xml(String::from_utf8_lossy(&buf).to_string()))
+                },
+                Some(s) if s.starts_with("octet-stream") => {
+                    Ok(Body::Bytes(buf))
+                },
                 _ => Ok(Body::Bytes(buf)),
             },
-            Some("image") => match type_tokens.next().map(|s| s.trim()) {
+            Some("image") => match type_tokens.next().map(str::trim) {
                 Some(s) if s.starts_with("x-icon") => Ok(Body::Favicon(buf)),
                 Some(s) if s.starts_with("png") => Ok(Body::Image(buf)),
                 Some(s) if s.starts_with("jpeg") => Ok(Body::Image(buf)),
@@ -204,6 +221,7 @@ impl NetReader {
 }
 
 /// Represents the first line of an HTTP request.
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestLine {
     pub method: Method,
@@ -259,6 +277,7 @@ impl RequestLine {
     }
 
     /// Parses a string slice into a `RequestLine` object.
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(line: &str) -> NetResult<Self> {
         let mut tokens = line.trim_start().splitn(3, ' ');
 
@@ -397,6 +416,7 @@ impl Request {
 	}
 
     /// Sends an HTTP request to a remote server.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send(&mut self) -> NetResult<()> {
         match self.reader.take() {
             Some(reader) => NetWriter::from(reader).send_request(self),
@@ -405,7 +425,8 @@ impl Request {
     }
 
     /// Receives an HTTP request from a remote client.
-    pub fn recv(reader: NetReader) -> NetResult<Request> {
+    #[allow(clippy::missing_errors_doc)]
+    pub fn recv(reader: NetReader) -> NetResult<Self> {
         NetReader::recv_request(reader)
     }
 }

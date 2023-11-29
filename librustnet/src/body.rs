@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 
 /// A respresentation of the body content type.
-#[derive(Clone, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialOrd, Ord)]
 pub enum Body {
     Empty,
     Text(String),
@@ -20,6 +20,7 @@ impl Default for Body {
 }
 
 impl Display for Body {
+    #[allow(clippy::match_same_arms)]
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => Ok(()),
@@ -56,6 +57,7 @@ impl Debug for Body {
 }
 
 impl PartialEq for Body {
+    #[allow(clippy::match_same_arms)]
     #[allow(clippy::match_like_matches_macro)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -65,13 +67,13 @@ impl PartialEq for Body {
             (Self::Json(ref s1), Self::Json(ref s2)) => s1 == s2,
             (Self::Xml(ref s1), Self::Xml(ref s2)) => s1 == s2,
             (Self::Image(ref buf1), Self::Image(ref buf2)) => {
-                &buf1[..] == &buf2[..]
+                buf1[..] == buf2[..]
             },
             (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
-                &buf1[..] == &buf2[..]
+                buf1[..] == buf2[..]
             },
             (Self::Favicon(ref buf1), Self::Favicon(ref buf2)) => {
-                &buf1[..] == &buf2[..]
+                buf1[..] == buf2[..]
             },
             _ => false,
         }
@@ -133,6 +135,8 @@ impl Body {
     }
 
     /// Returns the body data as a bytes slice.
+    #[must_use]
+    #[allow(clippy::match_same_arms)]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Empty => &b""[..],
@@ -147,6 +151,8 @@ impl Body {
     }
 
     /// Returns the size of the body data as number of bytes.
+    #[must_use]
+    #[allow(clippy::match_same_arms)]
     pub fn len(&self) -> usize {
         match self {
             Self::Empty => 0,

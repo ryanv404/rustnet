@@ -7,7 +7,7 @@ use crate::consts::CONTENT_TYPE;
 use crate::{Header, HeaderValue, Method, Response};
 
 /// Represents an endpoint defined by an HTTP method and a URI path.
-#[derive(Debug, Hash, Ord, PartialOrd)]
+#[derive(Debug, Ord, PartialOrd)]
 pub enum Route {
     Get(String),
     Head(String),
@@ -21,6 +21,7 @@ pub enum Route {
 }
 
 impl PartialEq for Route {
+    #[allow(clippy::match_same_arms)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Get(ref s1), Self::Get(ref s2)) => s1 == s2,
@@ -66,7 +67,7 @@ impl Route {
 
     /// Returns this route's HTTP method.
     #[must_use]
-    pub fn method(&self) -> Method {
+    pub const fn method(&self) -> Method {
         match self {
             Self::Get(_) => Method::Get,
             Self::Head(_) => Method::Head,
@@ -82,6 +83,7 @@ impl Route {
 
     /// Returns this route's URI path.
     #[must_use]
+    #[allow(clippy::match_same_arms)]
     pub fn path(&self) -> String {
         match self {
             Self::Get(ref path) => path.clone(),
@@ -422,6 +424,7 @@ impl Default for Target {
 }
 
 impl Display for Target {
+    #[allow(clippy::match_same_arms)]
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => Ok(()),
@@ -468,16 +471,17 @@ impl Debug for Target {
 }
 
 impl PartialEq for Target {
+    #[allow(clippy::match_same_arms)]
     #[allow(clippy::match_like_matches_macro)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Empty, Self::Empty) => true,
-            (Self::Text(ref s1), Self::Text(ref s2)) => s1 == s2,
-            (Self::Json(ref s1), Self::Json(ref s2)) => s1 == s2,
-            (Self::Html(ref s1), Self::Html(ref s2)) => s1 == s2,
-            (Self::Xml(ref s1), Self::Xml(ref s2)) => s1 == s2,
+            (Self::Text(s1), Self::Text(s2)) => s1 == s2,
+            (Self::Json(s1), Self::Json(s2)) => s1 == s2,
+            (Self::Html(s1), Self::Html(s2)) => s1 == s2,
+            (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
             (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
-                &buf1[..] == &buf2[..]
+                buf1[..] == buf2[..]
             },
             (Self::File(ref p1), Self::File(ref p2)) => p1 == p2,
             (Self::Favicon(ref p1), Self::Favicon(ref p2)) => p1 == p2,
@@ -545,6 +549,7 @@ impl Target {
 
     /// Returns a Content-Type `Header` based on the `Target` variant.
     #[must_use]
+    #[allow(clippy::match_same_arms)]
     pub fn as_content_type_header(&self) -> Option<Header> {
         if self.is_empty() {
             return None;

@@ -161,6 +161,7 @@ pub fn is_header_value_token(b: u8) -> bool {
 
 /// Get the current date and time if the `date` program exists.
 #[must_use]
+#[allow(clippy::missing_panics_doc)]
 pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
     if !date_command_exists() {
         return None;
@@ -223,9 +224,3 @@ pub fn date_command_exists() -> bool {
 // start-line = request-line / status-line
 // request-line = method SP request-target SP HTTP-version
 // status-line = HTTP-version SP status-code SP [ reason-phrase ]
-
-/// Parses the provided URI into an authority and a target path.
-#[must_use]
-pub fn parse_uri(_uri: &str) -> Option<(String, String)> {
-    todo!();
-}

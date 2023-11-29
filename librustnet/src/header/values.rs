@@ -4,12 +4,12 @@ use std::str::FromStr;
 
 use crate::{NetError, NetResult, ParseErrorKind};
 
-#[derive(Clone, Hash, Ord, PartialOrd)]
+#[derive(Clone, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
 
 impl PartialEq for HeaderValue {
     fn eq(&self, other: &Self) -> bool {
-        &self.0[..] == &other.0[..]
+        self.0[..] == other.0[..]
 	}
 }
 
@@ -80,6 +80,7 @@ impl HeaderValue {
     }
 
     /// Parses an optional string slice into a `HeaderValue`
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(maybe_value: Option<&str>) -> NetResult<Self> {
         maybe_value
             .ok_or_else(|| ParseErrorKind::Header.into())

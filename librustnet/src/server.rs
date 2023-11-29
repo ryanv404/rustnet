@@ -16,6 +16,7 @@ use crate::{
 
 /// Configures the socket address and the router for a `Server`.
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs
@@ -82,12 +83,13 @@ where
 
     /// Set whether to log connections to stdout (default: disabled).
     #[must_use]
-    pub fn log(mut self, do_logging: bool) -> Self {
+    pub const fn log(mut self, do_logging: bool) -> Self {
         self.do_logging = do_logging;
         self
     }
 
     /// Builds and returns a `Server` instance.
+    #[allow(clippy::missing_errors_doc)]
     pub fn build(mut self) -> NetResult<Server> {
         let router = self.router.take().unwrap_or_default();
 
@@ -104,7 +106,7 @@ where
                     }
                 }
             })
-            .ok_or_else(|| IoErrorKind::InvalidInput)?;
+            .ok_or(IoErrorKind::InvalidInput)?;
 
         Ok(Server {
             router: Arc::new(router),
@@ -115,6 +117,7 @@ where
     }
 
     /// Builds and starts the server.
+    #[allow(clippy::missing_errors_doc)]
     pub fn start(self) -> NetResult<()> {
         let server = self.build()?;
         server.start()
@@ -135,6 +138,7 @@ impl From<TcpListener> for Listener {
 
 impl Listener {
     /// Bind the listener to the given socket address.
+    #[allow(clippy::missing_errors_doc)]
     pub fn bind<A>(addr: A) -> NetResult<Self>
     where
         A: ToSocketAddrs
@@ -145,6 +149,7 @@ impl Listener {
     }
 
     /// Bind the listener to the given socket address.
+    #[allow(clippy::missing_errors_doc)]
     pub fn bind_ip_port(ip: IpAddr, port: u16) -> NetResult<Self> {
         Ok(Self {
             inner: TcpListener::bind((ip, port))?
@@ -152,6 +157,7 @@ impl Listener {
     }
 
     /// Returns the server's socket address.
+    #[allow(clippy::missing_errors_doc)]
     pub fn local_addr(&self) -> NetResult<SocketAddr> {
         self.inner
             .local_addr()
@@ -159,16 +165,17 @@ impl Listener {
     }
 
     /// Returns a `NetReader` instance for each incoming connection.
+    #[allow(clippy::missing_errors_doc)]
     pub fn accept(&self) -> NetResult<(NetReader, NetWriter)> {
         self.inner
             .accept()
             .and_then(|(stream, _)| stream
                 .try_clone()
-                .and_then(|cloned| Ok((stream, cloned))))
-            .and_then(|(stream, cloned)| {
+                .map(|cloned| (stream, cloned)))
+            .map(|(stream, cloned)| {
                 let reader = NetReader::from(stream);
                 let writer = NetWriter::from(cloned);
-                Ok((reader, writer))
+                (reader, writer)
             })
             .map_err(|e| NetError::ReadError(e.kind()))
     }
@@ -217,6 +224,8 @@ impl Server {
     }
 
     /// Activates the server to start listening on its bound address.
+    #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_panics_doc)]
     pub fn start(self) -> NetResult<()> {
         if *self.do_logging {
             self.log_start_up()?;
@@ -242,17 +251,17 @@ impl Server {
 
                         // Task an available worker thread with responding.
                         pool.execute(move || {
-                            let _ = Server::handle_connection(reader, &rtr, do_log)
+                            let _ = Self::handle_connection(reader, &rtr, &do_log)
                                 .map_err(|e| {
-                                    Server::log_error(&e);
+                                    Self::log_error(&e);
 
                                     // Send 500 server error response.
                                     let _ = writer.send_status(500)
-                                        .map_err(|e| Server::log_error(&e));
+                                        .map_err(|e| Self::log_error(&e));
                                 });
                         });
                     },
-                    Err(e) => Server::log_error(&e),
+                    Err(e) => Self::log_error(&e),
                 }
             }
 
@@ -268,10 +277,12 @@ impl Server {
     }
 
     /// Handles a request from a remote connection.
+    #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::similar_names)]
     pub fn handle_connection(
         reader: NetReader,
         router: &Arc<Router>,
-        do_logging: Arc<bool>
+        do_logging: &Arc<bool>
     ) -> NetResult<()> {
         let mut req = Request::recv(reader)?;
         let mut res = Response::from_route(&req.route(), router)?;
@@ -279,9 +290,9 @@ impl Server {
         res.writer = req
             .reader
             .take()
-            .and_then(|reader| Some(NetWriter::from(reader)));
+            .map(NetWriter::from);
 
-        if *do_logging {
+        if **do_logging {
             Self::log_with_status(
                 res.remote_ip(),
                 res.status_code(),
@@ -319,10 +330,9 @@ impl Server {
         method: Method,
         path: &str
     ) {
-        match maybe_ip {
-            Some(ip) => println!("[{ip}|{status}] {method} {path}"),
-            None => println!("[?|{status}] {method} {path}"),
-        }
+        maybe_ip.map_or_else(
+            || println!("[?|{status}] {method} {path}"),
+            |ip| println!("[{ip}|{status}] {method} {path}"));
     }
 
     /// Logs a non-terminating server error.
@@ -336,6 +346,7 @@ impl Server {
     }
 
     /// Logs a server start up message to stdout.
+    #[allow(clippy::missing_errors_doc)]
     pub fn log_start_up(&self) -> NetResult<()> {
         let local_addr = self.listener.local_addr()?;
         let ip = local_addr.ip();
@@ -350,6 +361,7 @@ impl Server {
     }
 
     /// Triggers graceful shutdown of the server.
+    #[allow(clippy::missing_errors_doc)]
     pub fn shutdown(&self) -> NetResult<()> {
         // Stops the listener thread's loop.
         self.keep_listening.store(false, Ordering::Relaxed);
@@ -369,31 +381,32 @@ impl Server {
 pub type Task = Box<dyn FnOnce() + Send + 'static>;
 
 pub struct Worker {
-    _id: usize,
-    handle: Option<JoinHandle<()>>,
+    pub id: usize,
+    pub handle: Option<JoinHandle<()>>,
 }
 
 impl Worker {
     /// Spawns a worker thread that receives tasks and executes them.
-    fn new(_id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
+    fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(job) = receiver.lock().unwrap().recv() {
                 job();
             }
         });
 
-        Self { _id, handle: Some(handle) }
+        Self { id, handle: Some(handle) }
     }
 }
 
 pub struct ThreadPool {
-    workers: Vec<Worker>,
-    sender: Option<Sender<Task>>,
+    pub workers: Vec<Worker>,
+    pub sender: Option<Sender<Task>>,
 }
 
 impl ThreadPool {
     /// Create a new `ThreadPool` with the given number of worker threads.
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
 
@@ -411,6 +424,7 @@ impl ThreadPool {
     }
 
     /// Sends a `Task` to a worker thread for executon.
+    #[allow(clippy::missing_panics_doc)]
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,

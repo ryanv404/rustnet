@@ -5,12 +5,13 @@ use std::net::{TcpStream, ToSocketAddrs};
 use crate::consts::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, NetWriter, ParseErrorKind, RequestLine, Response, Request,
+    NetResult, NetWriter, ParseErrorKind, Response, Request, RequestLine,
     Version,
 };
 
 /// An HTTP request builder object.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientBuilder<A>
 where
     A: ToSocketAddrs
@@ -109,6 +110,7 @@ where
     }
 
 	/// Sets the request body, Content-Type header, and Content-Length header.
+    #[must_use]
 	pub fn body(mut self, body: Body, content_type: &str) -> Self {
         if body.is_empty() {
             self.headers.insert_content_length(0);
@@ -186,6 +188,7 @@ where
 	}
 
     /// Builds and returns a new `Client` instance.
+    #[allow(clippy::missing_errors_doc)]
     pub fn build(mut self) -> NetResult<Client> {
         let stream = match self.addr.as_ref() {
             Some(addr) => TcpStream::connect(addr)?,
@@ -223,7 +226,7 @@ where
             .as_ref()
             .map_or_else(
                 || String::from("/"),
-                |path| path.to_string());
+                ToString::to_string);
 
         let request_line = RequestLine::new(self.method, path, self.version);
 
@@ -238,6 +241,7 @@ where
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send(self) -> NetResult<Client> {
         let mut client = self.build()?;
         client.send()?;
@@ -245,6 +249,7 @@ where
     }
 
     /// Sends an HTTP request with a text body.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send_text(self, text: &str) -> NetResult<Client> {
         let mut client = self.text(text).build()?;
         client.send()?;
@@ -252,6 +257,7 @@ where
     }
 
     /// Sends an HTTP request with an HTML body.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send_html(self, html: &str) -> NetResult<Client> {
         let mut client = self.html(html).build()?;
         client.send()?;
@@ -259,6 +265,7 @@ where
     }
 
     /// Sends an HTTP request with a JSON body.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send_json(self, json: &str) -> NetResult<Client> {
         let mut client = self.json(json).build()?;
         client.send()?;
@@ -301,6 +308,7 @@ impl Client {
     
 
     /// Parses a string slice into a host address and a URI path.
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
         let uri = uri.trim();
 
@@ -368,15 +376,17 @@ impl Client {
     }
 
     /// Sends an HTTP request to a remote host.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send(&mut self) -> NetResult<()> {
         let mut writer = self.writer.try_clone()?;
         self.req.as_mut()
             .and_then(|req| writer.send_request(req).ok())
-            .ok_or_else(|| IoErrorKind::NotConnected)?;
+            .ok_or(IoErrorKind::NotConnected)?;
         Ok(())
     }
 
     /// Receives an HTTP response from the remote host.
+    #[allow(clippy::missing_errors_doc)]
     pub fn recv(&mut self) -> NetResult<()> {
         let reader = self.reader.try_clone()?;
         self.res = NetReader::recv_response(reader).ok();

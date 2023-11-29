@@ -386,7 +386,7 @@ fn get_trimmed_test_output(output: &[u8]) -> String {
         .filter_map(|line| {
             let line = line.trim();
             if !line.is_empty() && line.starts_with("Host:") {
-                if let Some((name, _old_value)) = line.split_once(":") {
+                if let Some((name, _old_value)) = line.split_once(':') {
                     let current_host = format!("{name}: {HTTPBIN_ADDR}");
                     Some(current_host)
                 } else {
@@ -432,7 +432,7 @@ fn get_expected_from_file(exp_file: &Path) -> String {
         .filter_map(|line| {
             let line = line.trim();
             if !line.is_empty() && line.starts_with("Host:") {
-                if let Some((name, _old_value)) = line.split_once(":") {
+                if let Some((name, _old_value)) = line.split_once(':') {
                     let current_host = format!("{name}: {HTTPBIN_ADDR}");
                     Some(current_host)
                 } else {

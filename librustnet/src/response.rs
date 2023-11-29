@@ -47,6 +47,7 @@ impl Write for NetWriter {
 
 impl NetWriter {
     /// Returns a clone of the current `NetWriter` instance.
+    #[allow(clippy::missing_errors_doc)]
     pub fn try_clone(&self) -> NetResult<Self> {
         let stream = self.get_ref().try_clone()?;
         Ok(Self::from(stream))
@@ -58,16 +59,19 @@ impl NetWriter {
     }
 
     /// Consumes the `NetWriter` and returns the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn into_inner(self) -> NetResult<TcpStream> {
         self.0.into_inner().map_err(|e| e.into_error().into())
     }
 
     /// Returns a reference to the underlying `TcpStream`.
+    #[must_use]
     pub fn get_ref(&self) -> &TcpStream {
         self.0.get_ref()
     }
 
     /// Writes an HTTP request to the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
         if !req.headers.contains(&ACCEPT) {
             req.headers.insert_accept("*/*");
@@ -91,6 +95,7 @@ impl NetWriter {
     }
 
     /// Writes a server error response to the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send_status(&mut self, code: u16) -> NetResult<()> {
         let mut res = Response::new(code);
         res.headers.insert_cache_control("no-cache");
@@ -100,6 +105,7 @@ impl NetWriter {
     }
 
     /// Writes an HTTP response to the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
         if !res.headers.contains(&SERVER) {
             res.headers.insert_server();
@@ -113,9 +119,10 @@ impl NetWriter {
     }
 
     /// Writes the response headers to the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
         if !headers.is_empty() {
-            for (name, value) in headers.0.iter() {
+            for (name, value) in &headers.0 {
                 self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
             }
         }
@@ -125,6 +132,7 @@ impl NetWriter {
     }
 
     /// Writes the response body to the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
         if !body.is_empty() {
             self.write_all(body.as_bytes())?;
@@ -135,7 +143,7 @@ impl NetWriter {
 }
 
 /// Represents the status line of an HTTP response.
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StatusLine {
     pub version: Version,
     pub status: Status,
@@ -188,6 +196,7 @@ impl StatusLine {
     }
 
     /// Parses a string slice into a `StatusLine` object.
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(line: &str) -> NetResult<Self> {
         let mut tokens = line.trim_start().splitn(3, ' ');
         let version = Version::parse(tokens.next())?;
@@ -246,6 +255,7 @@ impl Debug for Response {
 
 impl Response {
     /// Resolves a `Route` into a `Response` based on the provided `Router`.
+    #[allow(clippy::missing_errors_doc)]
     pub fn from_route(route: &Route, router: &Router) -> NetResult<Self> {
         if router.is_empty() {
             let msg = "This server has no routes configured.";
@@ -254,7 +264,7 @@ impl Response {
         }
 
         let method = route.method();
-        let maybe_target = router.resolve(&route);
+        let maybe_target = router.resolve(route);
 
         let mut res = match (maybe_target, method) {
             (Some(target), Method::Get) => {
@@ -313,6 +323,7 @@ impl Response {
     }
 
     /// Parses the target type and returns a new `Response` object.
+    #[must_use]
     pub fn new(code: u16) -> Self {
         Self {
             status_line: StatusLine {
@@ -326,6 +337,8 @@ impl Response {
     }
 
     /// Parses the target type and returns a new `Response` object.
+    #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_panics_doc)]
     pub fn from_target(code: u16, target: &Target) -> NetResult<Self> {
         let mut res = Self::new(code);
 
@@ -338,17 +351,17 @@ impl Response {
             Target::Text(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Text(s.to_string());
+                res.body = Body::Text((*s).to_string());
             },
             Target::Json(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Json(s.to_string());
+                res.body = Body::Json((*s).to_string());
             },
             Target::Xml(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Xml(s.to_string());
+                res.body = Body::Xml((*s).to_string());
             },
             Target::Html(ref fpath) => {
                 let content = fs::read_to_string(fpath)?;
@@ -387,7 +400,7 @@ impl Response {
             Target::Bytes(ref bytes) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(bytes.len());
-                res.body = Body::Bytes(bytes.to_vec());
+                res.body = Body::Bytes(bytes.clone());
             },
         }
 
@@ -504,10 +517,10 @@ impl Response {
     /// Returns true if the Connection header is present with the value "close".
     #[must_use]
     pub fn has_closed_connection_header(&self) -> bool {
-        match self.headers.get(&CONNECTION) {
-            Some(val) if val.as_str().eq_ignore_ascii_case("close") => true,
-            _ => false,
-        }
+        matches!(
+            self.headers.get(&CONNECTION), 
+            Some(conn_val) if conn_val.as_str().eq_ignore_ascii_case("close")
+        )
     }
 
     /// Returns true if a response body is allowed.
@@ -531,6 +544,7 @@ impl Response {
     }
 
     /// Sends an HTTP response to a remote client.
+    #[allow(clippy::missing_errors_doc)]
     pub fn send(&mut self) -> NetResult<()> {
         match self.writer.take() {
             Some(mut writer) => writer.send_response(self),
@@ -539,7 +553,8 @@ impl Response {
     }
 
     /// Receives an HTTP response from a remote server.
-    pub fn recv(reader: NetReader) -> NetResult<Response> {
+    #[allow(clippy::missing_errors_doc)]
+    pub fn recv(reader: NetReader) -> NetResult<Self> {
         NetReader::recv_response(reader)
     }
 }
