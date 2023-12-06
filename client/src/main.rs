@@ -1,4 +1,5 @@
-use std::{env, io};
+use std::env;
+use std::io::{Result as IoResult};
 
 use librustnet::{Client, Method};
 use librustnet::consts::DATE;
@@ -12,16 +13,16 @@ const PURP: &str = "\x1b[95m";
 const CLR: &str = "\x1b[0m";
 
 #[rustfmt::skip]
-fn main() -> io::Result<()> {
+fn main() -> IoResult<()> {
     let mut path_arg = None;
     let mut method_arg = None;
 
     let mut testing_client = false;
     let mut testing_server = false;
 
+    // Handle the CLI options.
     let mut args = env::args().skip(1);
 
-    // Handle the CLI options.
     let uri = loop {
         match args.next() {
             // End of options flag.
@@ -133,14 +134,14 @@ fn main() -> io::Result<()> {
         // headers during client testing.
         if let Some(req) = client.req.as_ref() {
             println!(
-                "{}\n{}\n",
+                "{}\n{}",
                 req.request_line(),
                 req.headers_to_string().trim_end());
         }
 
         if let Some(res) = client.res.as_ref() {
             println!(
-                "{}\n{}",
+                "\n{}\n{}",
                 res.status_line(),
                 res.headers_to_string().trim_end());
         }
@@ -171,72 +172,62 @@ fn print_output(client: &mut Client) {
     let req = client.req.take().unwrap();
     let res = client.res.take().unwrap();
 
-    let req_body = req.body.to_string();
-    let res_body = res.body.to_string();
-
     let res_color = if res.status_code() >= 400 {
         RED
     } else {
         GRN
     };
 
+    let request_line = req.request_line();
+    let req_headers = req.headers_to_string();
+    let req_headers = req_headers.trim_end();
+    let req_body = req.body.to_string();
+    let req_body = req_body.trim_end();
+
+    let status_line = res.status_line();
+    let res_headers = res.headers_to_string();
+    let res_headers = res_headers.trim_end();
+    let res_body = res.body.to_string();
+    let res_body = res_body.trim_end();
+
     match (req_body.len(), res_body.len()) {
         (0, 0) => {
             println!(
-                "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n",
-                req.request_line(),
-                req.headers_to_string().trim_end(),
-                res.status_line(),
-                res.headers_to_string().trim_end()
-            );
+                "{PURP}{request_line}{CLR}\n{req_headers}\n\n\
+                {res_color}{status_line}{CLR}\n{res_headers}");
         },
         (_, 0) => {
             println!(
-                "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n",
-                req.request_line(),
-                req.headers_to_string().trim_end(),
-                req_body.trim_end(),
-                res.status_line(),
-                res.headers_to_string().trim_end()
-            );
+                "{PURP}{request_line}{CLR}\n{req_headers}\n{req_body}\n\n\
+                {res_color}{status_line}{CLR}\n{res_headers}");
         },
         (0, _) => {
             println!(
-                "{PURP}{}{CLR}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
-                req.request_line(),
-                req.headers_to_string().trim_end(),
-                res.status_line(),
-                res.headers_to_string().trim_end(),
-                res_body.trim_end()
-            );
+                "{PURP}{request_line}{CLR}\n{req_headers}\n\n\
+                {res_color}{status_line}{CLR}\n{res_headers}\n\n{res_body}");
         },
         (_, _) => {
             println!(
-                "{PURP}{}{CLR}\n{}\n{}\n\n{res_color}{}{CLR}\n{}\n\n{}\n",
-                req.request_line(),
-                req.headers_to_string().trim_end(),
-                req_body.trim_end(),
-                res.status_line(),
-                res.headers_to_string().trim_end(),
-                res_body.trim_end()
-            );
+                "{PURP}{request_line}{CLR}\n{req_headers}\n{req_body}\n\n\
+                {res_color}{status_line}{CLR}\n{res_headers}\n\n{res_body}");
         },
     }
 }
 
 fn show_help() {
-    let name = env!("CARGO_BIN_NAME");
+    let prog_name = env!("CARGO_BIN_NAME");
+
     eprintln!("\
-        {GRN}Usage:{CLR} {name} <URI> [DATA]\n\n\
-        {GRN}Arguments:{CLR}\n    \
-            URI    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").\n    \
-            DATA   Data to be sent in the request body (optional).\n\n\
-        {GRN}Options:{CLR}\n    \
-            --help           Displays this help message.\n    \
-            --method METHOD  Use METHOD as the request method (default: \"GET\").\n    \
-            --path PATH      Use PATH as the URI path (default: \"/\").\n    \
-            --tui            Starts the client TUI.\n\n\
-        {GRN}Test Options:{CLR}\n    \
-            --client-tests   Use output style expected by client tests.\n    \
-            --server-tests   Use output style expected by server tests.\n");
+{GRN}Usage:{CLR} {prog_name} <URI> [DATA]\n
+{GRN}Arguments:{CLR}
+    URI    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").
+    DATA   Data to be sent in the request body (optional).\n
+{GRN}Options:{CLR}
+    --help           Displays this help message.
+    --method METHOD  Use METHOD as the request method (default: \"GET\").
+    --path PATH      Use PATH as the URI path (default: \"/\").
+    --tui            Starts the client TUI.\n
+{GRN}Test Options:{CLR}
+    --client-tests   Use output style expected by client tests.
+    --server-tests   Use output style expected by server tests.");
 }

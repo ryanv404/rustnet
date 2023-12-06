@@ -428,10 +428,10 @@ mod send_sync {
         type_is_send::<Body>();
         type_is_send::<Client>();
         type_is_send::<Header>();
+        type_is_send::<Headers>();
         type_is_send::<HeaderKind>();
         type_is_send::<HeaderName>();
         type_is_send::<HeaderValue>();
-        type_is_send::<Headers>();
         type_is_send::<Method>();
         type_is_send::<NetReader>();
         type_is_send::<NetWriter>();
@@ -454,10 +454,10 @@ mod send_sync {
         type_is_sync::<Body>();
         type_is_sync::<Client>();
         type_is_sync::<Header>();
+        type_is_sync::<Headers>();
         type_is_sync::<HeaderKind>();
         type_is_sync::<HeaderName>();
         type_is_sync::<HeaderValue>();
-        type_is_sync::<Headers>();
         type_is_sync::<Method>();
         type_is_sync::<NetReader>();
         type_is_sync::<NetWriter>();

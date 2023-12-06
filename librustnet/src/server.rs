@@ -143,17 +143,13 @@ impl Listener {
     where
         A: ToSocketAddrs
     {
-        Ok(Self {
-            inner: TcpListener::bind(addr)?
-        })
+        Ok(Self { inner: TcpListener::bind(addr)? })
     }
 
     /// Bind the listener to the given socket address.
     #[allow(clippy::missing_errors_doc)]
     pub fn bind_ip_port(ip: IpAddr, port: u16) -> NetResult<Self> {
-        Ok(Self {
-            inner: TcpListener::bind((ip, port))?
-        })
+        Ok(Self { inner: TcpListener::bind((ip, port))? })
     }
 
     /// Returns the server's socket address.

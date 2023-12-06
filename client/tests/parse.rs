@@ -46,8 +46,11 @@ macro_rules! get_responses {
             req.request_line.path = format!("/status/{}", $code);
             exp.status_line.status = Status($code);
 
-            let Ok(stream_clone1) = stream.try_clone() else {
-                panic!("Could not clone stream at status code: {}", $code);
+            let stream_clone1 = match stream.try_clone() {
+                Ok(clone) => clone,
+                Err(e) => {
+                    panic!("Could not clone stream at status code: {}\n{e}", $code);
+                },
             };
 
             let mut writer = NetWriter::from(stream_clone1);
@@ -57,14 +60,20 @@ macro_rules! get_responses {
                 Err(e) => panic!("Error while sending request at code: {}\n{e}", $code),
             }
 
-            let Ok(stream_clone2) = stream.try_clone() else {
-                panic!("Could not clone stream into NetReader at status code: {}", $code);
+            let stream_clone2 = match stream.try_clone() {
+                Ok(clone) => clone,
+                Err(e) => {
+                    panic!("Could not clone stream into NetReader at status code: {}\n{e}", $code);
+                },
             };
 
             let reader = NetReader::from(stream_clone2);
 
-            let Ok(mut res) = Response::recv(reader) else {
-                panic!("Error while receiving response at code: {}", $code);
+            let mut res = match Response::recv(reader) {
+                Ok(res) => res,
+                Err(e) => {
+                    panic!("Error while receiving response at code: {}\n{e}", $code);
+                },
             };
 
             res.headers.remove(&DATE);

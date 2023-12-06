@@ -19,9 +19,9 @@ impl Display for ParseErrorKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Path => f.write_str("URI path parsing failed"),
-            Self::Method => f.write_str("HTTP method parsing failed"),
-            Self::Version => f.write_str("HTTP version parsing failed"),
-            Self::Status => f.write_str("HTTP status parsing failed"),
+            Self::Method => f.write_str("method parsing failed"),
+            Self::Version => f.write_str("version parsing failed"),
+            Self::Status => f.write_str("status parsing failed"),
             Self::RequestLine => f.write_str("request line parsing failed"),
             Self::StatusLine => f.write_str("status line parsing failed"),
             Self::Header => f.write_str("header parsing failed"),
@@ -66,11 +66,9 @@ impl Display for NetError {
 }
 
 impl From<IoError> for NetError {
-    #[allow(clippy::match_same_arms)]
     fn from(err: IoError) -> Self {
         match err.kind() {
             kind @ IoErrorKind::UnexpectedEof => Self::ReadError(kind),
-            kind @ IoErrorKind::WouldBlock => Self::ReadError(kind),
             kind @ IoErrorKind::WriteZero => Self::WriteError(kind),
             kind => Self::IoError(kind),
         }
@@ -78,11 +76,9 @@ impl From<IoError> for NetError {
 }
 
 impl From<IoErrorKind> for NetError {
-    #[allow(clippy::match_same_arms)]
     fn from(kind: IoErrorKind) -> Self {
         match kind {
             IoErrorKind::UnexpectedEof => Self::ReadError(kind),
-            IoErrorKind::WouldBlock => Self::ReadError(kind),
             IoErrorKind::WriteZero => Self::WriteError(kind),
             kind => Self::IoError(kind),
         }
@@ -90,16 +86,15 @@ impl From<IoErrorKind> for NetError {
 }
 
 impl From<NetError> for IoError {
-    #[allow(clippy::match_same_arms)]
     fn from(err: NetError) -> Self {
         match err {
             NetError::HttpsNotImplemented => {
                 Self::new(IoErrorKind::Unsupported, err.to_string())
             },
             NetError::ParseError(_) => err.into(),
-            NetError::ReadError(kind) => Self::from(kind),
-            NetError::WriteError(kind) => Self::from(kind),
-            NetError::IoError(kind) => Self::from(kind),
+            NetError::ReadError(kind)
+                | NetError::WriteError(kind) 
+                | NetError::IoError(kind) => Self::from(kind),
         }
     }
 }

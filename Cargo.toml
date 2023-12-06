@@ -2,8 +2,7 @@
 members = [
     "librustnet",
     "client",
-    "server",
-    "tester"
+    "server"
 ]
 
 resolver = "2"

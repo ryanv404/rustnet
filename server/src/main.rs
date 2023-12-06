@@ -1,20 +1,9 @@
-use std::{env, io};
+use std::env;
+use std::io;
 
 use librustnet::{Router, Server};
 
 fn main() -> io::Result<()> {
-    // Enable logging from the command-line (default is no logging).
-    let do_logging = match env::args().nth(1) {
-        Some(opt) if opt.eq_ignore_ascii_case("--enable-logging") => true,
-        Some(unk) => {
-            println!("\
-                Unknown option: \"{unk}\".\n\n\
-                To enable logging, use \"--enable-logging\".\n");
-            return Ok(());
-        },
-        None => false,
-    };
-
     // Set up the router.
     let router = Router::new()
         // Add routes that serve static resources.
@@ -36,10 +25,22 @@ fn main() -> io::Result<()> {
             .connect(|res| res.body.text("Hi from the CONNECT route!"))
             .apply();
 
+    // Check if logging has been enabled.
+    let should_log = match env::args().nth(1) {
+        None => false,
+        Some(opt) if opt == "--enable-logging" => true,
+        Some(unk) => {
+            println!("\
+                Unknown option: \"{unk}\".\n\n\
+                To enable logging, use \"--enable-logging\".\n");
+            return Ok(());
+        },
+    };
+
     // Create and run the HTTP server.
     Server::http("127.0.0.1:7878")
         .router(router)
-        .log(do_logging)
+        .log(should_log)
         .start()?;
 
     Ok(())
