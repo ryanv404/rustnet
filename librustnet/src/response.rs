@@ -5,14 +5,16 @@ use std::io::{
     WriterPanicked,
 };
 use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::str::FromStr;
 use std::string::ToString;
 
 use crate::consts::{
     ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE,
 };
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetReader,
-    NetResult, Request, Route, Router, Status, Target, Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
+    NetResult, ParseErrorKind, Request, Route, Router, Status, Target,
+    Version,
 };
 
 /// A buffered writer wrapper around a `TcpStream` instance.
@@ -164,6 +166,23 @@ impl Display for StatusLine {
     }
 }
 
+impl FromStr for StatusLine {
+    type Err = NetError;
+
+    /// Parses a string slice into a `StatusLine` object.
+    #[allow(clippy::missing_errors_doc)]
+    fn from_str(line: &str) -> NetResult<Self> {
+        line
+            .trim_start()
+            .split_once(' ')
+            .ok_or(ParseErrorKind::StatusLine.into())
+            .and_then(|(token1, token2)| {
+                let version = token1.parse::<Version>()?;
+                let status = token2.parse::<Status>()?;
+                Ok(Self::new(version, status))
+            })
+    }
+}
 impl StatusLine {
     /// Returns a new `StatusLine` instance.
     #[must_use]
@@ -193,15 +212,6 @@ impl StatusLine {
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
         self.status.msg()
-    }
-
-    /// Parses a string slice into a `StatusLine` object.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(line: &str) -> NetResult<Self> {
-        let mut tokens = line.trim_start().splitn(3, ' ');
-        let version = Version::parse(tokens.next())?;
-        let status = Status::parse(tokens.next())?;
-        Ok(Self::new(version, status))
     }
 }
 

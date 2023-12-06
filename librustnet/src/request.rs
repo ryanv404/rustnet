@@ -3,7 +3,7 @@ use std::io::{
     BufRead, BufReader, ErrorKind as IoErrorKind, Read, Result as IoResult,
 };
 use std::net::TcpStream;
-use std::str;
+use std::str::{self, FromStr};
 use std::string::ToString;
 
 use crate::consts::{
@@ -95,9 +95,9 @@ impl NetReader {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Err(e) => Err(NetError::ReadError(e.kind())),
+            Err(e) => Err(NetError::Read(e.kind())),
             Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
-            Ok(_) => RequestLine::parse(&line),
+            Ok(_) => line.parse::<RequestLine>(),
         }
     }
 
@@ -107,9 +107,9 @@ impl NetReader {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Err(e) => Err(NetError::ReadError(e.kind())),
+            Err(e) => Err(NetError::Read(e.kind())),
             Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
-            Ok(_) => StatusLine::parse(&line),
+            Ok(_) => line.parse::<StatusLine>(),
         }
     }
 
@@ -122,7 +122,7 @@ impl NetReader {
 
         while num_headers <= MAX_HEADERS {
             match self.read_line(&mut buf) {
-                Err(e) => return Err(NetError::ReadError(e.kind())),
+                Err(e) => return Err(NetError::Read(e.kind())),
                 Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
                 Ok(_) => {
                     let line = buf.trim();
@@ -155,25 +155,25 @@ impl NetReader {
         }
 
         let body_len = content_len
-            .ok_or(NetError::ParseError(ParseErrorKind::Body))
+            .ok_or(NetError::Parse(ParseErrorKind::Body))
             .map(ToString::to_string)
             .and_then(|s| s.trim().parse::<usize>()
-                .map_err(|_| NetError::ParseError(ParseErrorKind::Body)))?;
+                .map_err(|_| NetError::Parse(ParseErrorKind::Body)))?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
         }
 
         let num_bytes = u64::try_from(body_len)
-            .map_err(|_| NetError::ParseError(ParseErrorKind::Body))?;
+            .map_err(|_| NetError::Parse(ParseErrorKind::Body))?;
 
         let body_type = content_type
-            .ok_or(NetError::ParseError(ParseErrorKind::Body))
+            .ok_or(NetError::Parse(ParseErrorKind::Body))
             .map(ToString::to_string)?;
 
         if body_type.is_empty() {
             // Return error since content length is greater than zero.
-            return Err(NetError::ParseError(ParseErrorKind::Body));
+            return Err(NetError::Parse(ParseErrorKind::Body));
         }
 
         let mut reader = self.take(num_bytes);
@@ -245,6 +245,32 @@ impl Display for RequestLine {
     }
 }
 
+impl FromStr for RequestLine {
+    type Err = NetError;
+
+    /// Parses a string slice into a `RequestLine` object.
+    #[allow(clippy::missing_errors_doc)]
+    fn from_str(line: &str) -> NetResult<Self> {
+        let mut tokens = line.trim_start().splitn(3, ' ');
+
+        let method = tokens
+            .next()
+            .ok_or(ParseErrorKind::RequestLine.into())
+            .and_then(|token| token.parse::<Method>())?;
+
+        let path = tokens
+            .next()
+            .ok_or(NetError::Parse(ParseErrorKind::RequestLine))
+            .and_then(|token| Ok(token.to_string()))?;
+
+        let version = tokens
+            .next()
+            .ok_or(ParseErrorKind::RequestLine.into())
+            .and_then(|token| token.parse::<Version>())?;
+
+        Ok(Self { method, path, version })
+    }
+}
 impl RequestLine {
     /// Returns a new `RequestLine` instance.
     #[must_use]
@@ -274,22 +300,6 @@ impl RequestLine {
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
-    }
-
-    /// Parses a string slice into a `RequestLine` object.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(line: &str) -> NetResult<Self> {
-        let mut tokens = line.trim_start().splitn(3, ' ');
-
-        let method = Method::parse(tokens.next())?;
-
-        let path = tokens.next()
-            .ok_or(ParseErrorKind::RequestLine)
-            .map(ToString::to_string)?;
-
-        let version = Version::parse(tokens.next())?;
-
-        Ok(Self { method, path, version })
     }
 }
 

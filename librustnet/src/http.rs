@@ -77,14 +77,6 @@ impl Method {
             Self::Options => "OPTIONS",
         }
     }
-
-    /// Parses an optional string slice into a `Method`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(maybe_method: Option<&str>) -> NetResult<Self> {
-        maybe_method
-            .ok_or_else(|| ParseErrorKind::Version.into())
-            .and_then(Self::from_str)
-    }
 }
 
 /// HTTP status code.
@@ -127,9 +119,14 @@ impl FromStr for Status {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        s.trim().parse::<u16>()
-            .map(Self)
-            .map_err(|_| ParseErrorKind::Status.into())
+        s.trim()
+            .split_once(' ')
+            .ok_or(ParseErrorKind::Status.into())
+            .and_then(|(code, _msg)| {
+                let status_code = code.parse::<u16>()
+                    .map_err(|_| ParseErrorKind::Status)?;
+                Ok(Self(status_code))
+            })
     }
 }
 
@@ -267,14 +264,6 @@ impl Status {
     pub const fn code(&self) -> u16 {
         self.0
     }
-
-    /// Parses an optional string slice into a `Status`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(maybe_status: Option<&str>) -> NetResult<Self> {
-        maybe_status
-            .ok_or_else(|| ParseErrorKind::Version.into())
-            .and_then(Self::from_str)
-    }
 }
 
 /// The HTTP protocol version.
@@ -359,13 +348,5 @@ impl Version {
     #[must_use]
     pub fn is_supported(&self) -> bool {
         *self == Self::OneDotOne
-    }
-
-    /// Parses an optional string slice into a `Version`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(maybe_version: Option<&str>) -> NetResult<Self> {
-        maybe_version
-            .ok_or_else(|| ParseErrorKind::Version.into())
-            .and_then(Self::from_str)
     }
 }

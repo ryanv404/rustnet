@@ -2,7 +2,7 @@
 mod parse {
     use crate::{
         Client, Header, Headers, HeaderKind, HeaderName, HeaderValue,
-        Method, RequestLine, Status, Version,
+        Method, RequestLine, Status, StatusLine, Version,
     };
     use crate::consts::{
         ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, TEST_HEADERS, USER_AGENT
@@ -11,66 +11,94 @@ mod parse {
 
     #[test]
     fn methods() {
-        assert_eq!(Method::parse(Some("GET")), Ok(Method::Get));
-        assert_eq!(Method::parse(Some("HEAD")), Ok(Method::Head));
-        assert_eq!(Method::parse(Some("POST")), Ok(Method::Post));
-        assert_eq!(Method::parse(Some("PUT")), Ok(Method::Put));
-        assert_eq!(Method::parse(Some("PATCH")), Ok(Method::Patch));
-        assert_eq!(Method::parse(Some("DELETE")), Ok(Method::Delete));
-        assert_eq!(Method::parse(Some("TRACE")), Ok(Method::Trace));
-        assert_eq!(Method::parse(Some("OPTIONS")), Ok(Method::Options));
-        assert_eq!(Method::parse(Some("CONNECT")), Ok(Method::Connect));
-        assert!(Method::parse(Some("get")).is_err());
-        assert!(Method::parse(Some("FOO")).is_err());
+        assert_eq!("GET".parse::<Method>(), Ok(Method::Get));
+        assert_eq!("HEAD".parse::<Method>(), Ok(Method::Head));
+        assert_eq!("POST".parse::<Method>(), Ok(Method::Post));
+        assert_eq!("PUT".parse::<Method>(), Ok(Method::Put));
+        assert_eq!("PATCH".parse::<Method>(), Ok(Method::Patch));
+        assert_eq!("DELETE".parse::<Method>(), Ok(Method::Delete));
+        assert_eq!("TRACE".parse::<Method>(), Ok(Method::Trace));
+        assert_eq!("OPTIONS".parse::<Method>(), Ok(Method::Options));
+        assert_eq!("CONNECT".parse::<Method>(), Ok(Method::Connect));
+        assert!("FOO".parse::<Method>().is_err());
+        // HTTP methods are case-sensitive.
+        assert!("get".parse::<Method>().is_err());
     }
 
     #[test]
     fn status_codes() {
-        assert_eq!(Status::parse(Some("100")), Ok(Status(100)));
-        assert_eq!(Status::parse(Some("201")), Ok(Status(201)));
-        assert_eq!(Status::parse(Some("301")), Ok(Status(301)));
-        assert_eq!(Status::parse(Some("403")), Ok(Status(403)));
-        assert_eq!(Status::parse(Some("500")), Ok(Status(500)));
-        assert!(Status::parse(Some("abc")).is_err());
+        assert_eq!(
+            "101 Switching Protocols".parse::<Status>(),
+            Ok(Status(101))
+        );
+        assert_eq!("201 Created".parse::<Status>(), Ok(Status(201)));
+        assert_eq!("300 Multiple Choices".parse::<Status>(), Ok(Status(300)));
+        assert_eq!("400 Bad Request".parse::<Status>(), Ok(Status(400)));
+        assert_eq!("501 Not Implemented".parse::<Status>(), Ok(Status(501)));
+        assert!("abc".parse::<Status>().is_err());
     }
 
     #[test]
     fn versions() {
-        assert_eq!(Version::parse(Some("HTTP/0.9")), Ok(Version::ZeroDotNine));
-        assert_eq!(Version::parse(Some("HTTP/1.0")), Ok(Version::OneDotZero));
-        assert_eq!(Version::parse(Some("HTTP/1.1")), Ok(Version::OneDotOne));
-        assert_eq!(Version::parse(Some("HTTP/2.0")), Ok(Version::TwoDotZero));
-        assert_eq!(Version::parse(Some("HTTP/3.0")), Ok(Version::ThreeDotZero));
-        assert!(Version::parse(Some("HTTP/1.2")).is_err());
+        assert_eq!("HTTP/0.9".parse::<Version>(), Ok(Version::ZeroDotNine));
+        assert_eq!("HTTP/1.0".parse::<Version>(), Ok(Version::OneDotZero));
+        assert_eq!("HTTP/1.1".parse::<Version>(), Ok(Version::OneDotOne));
+        assert_eq!("HTTP/2.0".parse::<Version>(), Ok(Version::TwoDotZero));
+        assert_eq!("HTTP/3.0".parse::<Version>(), Ok(Version::ThreeDotZero));
+        assert!("HTTP/1.2".parse::<Version>().is_err());
     }
 
     #[test]
     fn request_lines() {
-        macro_rules! parse_reqline {
+        macro_rules! parse_requestline {
             (SHOULD_ERR: $line:literal) => {
-                let should_err = RequestLine::parse($line);
+                let should_err = $line.parse::<RequestLine>();
                 assert!(should_err.is_err());
             };
             ($method:ident: $line:literal) => {
-                let req_line = RequestLine::parse($line).unwrap();
+                let req_line = $line.parse::<RequestLine>().unwrap();
                 assert_eq!(req_line.method, Method::$method);
                 assert_eq!(req_line.path, "/test".to_string());
                 assert_eq!(req_line.version, Version::OneDotOne);
             };
         }
 
-        parse_reqline!(Get: "GET /test HTTP/1.1\r\n");
-        parse_reqline!(Head: "HEAD /test HTTP/1.1\r\n");
-        parse_reqline!(Post: "POST /test HTTP/1.1\r\n");
-        parse_reqline!(Put: "PUT /test HTTP/1.1\r\n");
-        parse_reqline!(Patch: "PATCH /test HTTP/1.1\r\n");
-        parse_reqline!(Delete: "DELETE /test HTTP/1.1\r\n");
-        parse_reqline!(Trace: "TRACE /test HTTP/1.1\r\n");
-        parse_reqline!(Options: "OPTIONS /test HTTP/1.1\r\n");
-        parse_reqline!(Connect: "CONNECT /test HTTP/1.1\r\n");
-        parse_reqline!(SHOULD_ERR: "GET");
-        parse_reqline!(SHOULD_ERR: "GET /test");
-        parse_reqline!(SHOULD_ERR: "FOO bar baz");
+        parse_requestline!(Get: "GET /test HTTP/1.1\r\n");
+        parse_requestline!(Head: "HEAD /test HTTP/1.1\r\n");
+        parse_requestline!(Post: "POST /test HTTP/1.1\r\n");
+        parse_requestline!(Put: "PUT /test HTTP/1.1\r\n");
+        parse_requestline!(Patch: "PATCH /test HTTP/1.1\r\n");
+        parse_requestline!(Delete: "DELETE /test HTTP/1.1\r\n");
+        parse_requestline!(Trace: "TRACE /test HTTP/1.1\r\n");
+        parse_requestline!(Options: "OPTIONS /test HTTP/1.1\r\n");
+        parse_requestline!(Connect: "CONNECT /test HTTP/1.1\r\n");
+        parse_requestline!(SHOULD_ERR: "GET");
+        parse_requestline!(SHOULD_ERR: "GET /test");
+        parse_requestline!(SHOULD_ERR: "FOO bar baz");
+    }
+
+    #[test]
+    fn status_lines() {
+        macro_rules! parse_statusline {
+            (SHOULD_ERR: $line:literal) => {
+                let should_err = $line.parse::<StatusLine>();
+                assert!(should_err.is_err());
+            };
+            ($code:literal: $line:literal) => {
+                let status_line = $line.parse::<StatusLine>().unwrap();
+                assert_eq!(status_line.version, Version::OneDotOne);
+                assert_eq!(status_line.status, Status($code));
+            };
+        }
+
+        parse_statusline!(100: "HTTP/1.1 100 Continue\r\n");
+        parse_statusline!(200: "HTTP/1.1 200 OK\r\n");
+        parse_statusline!(301: "HTTP/1.1 301 Moved Permanently\r\n");
+        parse_statusline!(403: "HTTP/1.1 403 Forbidden\r\n");
+        parse_statusline!(505: "HTTP/1.1 505 HTTP Version Not Supported\r\n");
+        parse_statusline!(SHOULD_ERR: "HTTP/1.1");
+        parse_statusline!(SHOULD_ERR: "200 OK");
+        parse_statusline!(SHOULD_ERR: "FOO bar baz");
     }
 
     #[test]
@@ -207,7 +235,7 @@ mod utils {
     }
 }
 
- #[cfg(test)]
+#[cfg(test)]
 mod router {
     mod resolve {
         use std::collections::BTreeMap;

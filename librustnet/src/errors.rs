@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::result::Result as StdResult;
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParseErrorKind {
     Path,
     Method,
@@ -38,17 +38,17 @@ impl From<ParseErrorKind> for IoError {
 
 impl From<ParseErrorKind> for NetError {
     fn from(kind: ParseErrorKind) -> Self {
-        Self::ParseError(kind)
+        Self::Parse(kind)
     }
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetError {
     HttpsNotImplemented,
-    ParseError(ParseErrorKind),
-    ReadError(IoErrorKind),
-    WriteError(IoErrorKind),
-    IoError(IoErrorKind),
+    Parse(ParseErrorKind),
+    Read(IoErrorKind),
+    Write(IoErrorKind),
+    Io(IoErrorKind),
 }
 
 impl StdError for NetError {}
@@ -57,10 +57,10 @@ impl Display for NetError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::HttpsNotImplemented => f.write_str("HTTPS is not implemented"),
-            Self::ParseError(kind) => write!(f, "{kind}"),
-            Self::ReadError(kind) => write!(f, "IO read error: {}", IoError::from(*kind)),
-            Self::WriteError(kind) => write!(f, "IO write error: {}", IoError::from(*kind)),
-            Self::IoError(kind) => write!(f, "IO error: {}", IoError::from(*kind)),
+            Self::Parse(kind) => write!(f, "{kind}"),
+            Self::Read(kind) => write!(f, "IO read error: {}", IoError::from(*kind)),
+            Self::Write(kind) => write!(f, "IO write error: {}", IoError::from(*kind)),
+            Self::Io(kind) => write!(f, "IO error: {}", IoError::from(*kind)),
         }
     }
 }
@@ -68,9 +68,9 @@ impl Display for NetError {
 impl From<IoError> for NetError {
     fn from(err: IoError) -> Self {
         match err.kind() {
-            kind @ IoErrorKind::UnexpectedEof => Self::ReadError(kind),
-            kind @ IoErrorKind::WriteZero => Self::WriteError(kind),
-            kind => Self::IoError(kind),
+            kind @ IoErrorKind::UnexpectedEof => Self::Read(kind),
+            kind @ IoErrorKind::WriteZero => Self::Write(kind),
+            kind => Self::Io(kind),
         }
     }
 }
@@ -78,9 +78,9 @@ impl From<IoError> for NetError {
 impl From<IoErrorKind> for NetError {
     fn from(kind: IoErrorKind) -> Self {
         match kind {
-            IoErrorKind::UnexpectedEof => Self::ReadError(kind),
-            IoErrorKind::WriteZero => Self::WriteError(kind),
-            kind => Self::IoError(kind),
+            IoErrorKind::UnexpectedEof => Self::Read(kind),
+            IoErrorKind::WriteZero => Self::Write(kind),
+            kind => Self::Io(kind),
         }
     }
 }
@@ -91,10 +91,10 @@ impl From<NetError> for IoError {
             NetError::HttpsNotImplemented => {
                 Self::new(IoErrorKind::Unsupported, err.to_string())
             },
-            NetError::ParseError(_) => err.into(),
-            NetError::ReadError(kind)
-                | NetError::WriteError(kind) 
-                | NetError::IoError(kind) => Self::from(kind),
+            NetError::Parse(_) => err.into(),
+            NetError::Read(kind)
+                | NetError::Write(kind) 
+                | NetError::Io(kind) => Self::from(kind),
         }
     }
 }
