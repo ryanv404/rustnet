@@ -104,6 +104,16 @@ fn get_expected_from_file(exp_file: &Path) -> String {
 // Client tests
 mod get {
     use super::*;
+    use std::net::TcpStream;
+    use librustnet::{
+        Body, Headers, Method, NetReader, NetWriter, Request, RequestLine,
+        Response, Status, StatusLine, Version,
+    };
+    use librustnet::consts::{
+        CONTENT_LENGTH as CL, CONTENT_TYPE as CT, CONNECTION as CONN, DATE,
+        LOCATION, WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE, 
+    };
+
     run_client_test!(deny: "GET", "/deny");
     run_client_test!(html: "GET", "/html");
     run_client_test!(json: "GET", "/json");
@@ -114,18 +124,6 @@ mod get {
     run_client_test!(image_png: "GET", "/image/png");
     run_client_test!(image_svg: "GET", "/image/svg");
     run_client_test!(image_webp: "GET", "/image/webp");
-    run_client_test!(status_418: "GET", "/status/418");
-
-    use std::net::TcpStream;
-
-    use librustnet::{
-        Body, Headers, Method, NetReader, NetWriter, Request, RequestLine,
-        Response, Status, StatusLine, Version,
-    };
-    use librustnet::consts::{
-        CONTENT_LENGTH as CL, CONTENT_TYPE as CT, CONNECTION as CONN, DATE,
-        LOCATION, WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE, 
-    };
 
     // Remote server responds with the status code corresponding to `code`.
     macro_rules! get_responses {
