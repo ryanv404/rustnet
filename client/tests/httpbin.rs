@@ -255,7 +255,9 @@ mod get {
                 exp.writer = None;
 
                 assert_eq!(res, exp,
-                    "\nFAILED at code {}:\ntest:\n{}\nexpected:\n{}\n",
+                    "\nFAILED at code {}:\n\
+                    test:\n{}\n\
+                    expected:\n{}\n",
                     $code, res, exp);
             )+
         }};
