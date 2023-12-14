@@ -248,12 +248,7 @@ mod resolve_routes {
     };
 
     macro_rules! test_route_resolver {
-        (
-            empty:
-            $(
-                $method:ident $path:literal => $code:literal;
-            )+
-        ) => {
+        (empty: $( $method:ident $path:literal => $code:literal; )+) => {
             #[test]
             fn empty() {
                 let routes = BTreeMap::from([
@@ -294,11 +289,8 @@ mod resolve_routes {
                 )+
             }
         };
-        (
-            html:
-            $(
-                $method:ident $path:literal => $target:literal, $code:literal;
-            )+
+        (html:
+            $( $method:ident $path:literal => $file:literal, $code:literal; )+
         ) => {
             #[test]
             fn html() {
@@ -308,7 +300,7 @@ mod resolve_routes {
                     let filepath = concat!(
                         env!("CARGO_MANIFEST_DIR"),
                         "/../server/static/",
-                        $target
+                        $file
                     );
 
                     routes.insert(
@@ -366,11 +358,8 @@ mod resolve_routes {
                 )+
             }
         };
-        (
-            favicon:
-            $(
-                $method:ident $path:literal => $target:literal, $code:literal;
-            )+
+        (favicon:
+            $( $method:ident $path:literal => $file:literal, $code:literal; )+
         ) => {
             #[test]
             fn favicon() {
@@ -380,7 +369,7 @@ mod resolve_routes {
                     let filepath = concat!(
                         env!("CARGO_MANIFEST_DIR"),
                         "/../server/static/",
-                        $target
+                        $file
                     );
 
                     routes.insert(
@@ -435,11 +424,8 @@ mod resolve_routes {
                 )+
             }
         };
-        (
-            file:
-            $(
-                $method:ident $path:literal => $target:literal, $code:literal;
-            )+
+        (file:
+            $( $method:ident $path:literal => $file:literal, $code:literal; )+
         ) => {
             #[test]
             fn file() {
@@ -449,7 +435,7 @@ mod resolve_routes {
                     let filepath = concat!(
                         env!("CARGO_MANIFEST_DIR"),
                         "/../server/static/",
-                        $target
+                        $file
                     );
 
                     routes.insert(
@@ -507,11 +493,10 @@ mod resolve_routes {
                 )+
             }
         };
-        (
-            $label:ident:
-            $(
-                $method:ident $path:literal =>
-                $body:ident($inner:expr), $code:literal;
+        ($label:ident:
+            $( 
+                $method:ident $path:literal => $body:ident($inner:expr),
+                $code:literal;
             )+
         ) => {
             #[test]

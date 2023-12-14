@@ -102,7 +102,7 @@ where
                         (Some(ip), Some(port)) => {
                             Listener::bind_ip_port(ip, port).ok()
                         },
-                        (_, _) => None
+                        (_, _) => None,
                     }
                 }
             })

@@ -1,7 +1,6 @@
 #[macro_use]
 mod common;
 
-// Client tests
 mod get {
     run_client_test!(deny: "GET", "/deny");
     run_client_test!(html: "GET", "/html");

@@ -1,9 +1,216 @@
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
 
 use librustnet::Headers;
+
+pub const DELETE_STATUS_200: &str = "\
+    DELETE /status/200 HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 0
+    Content-Type: text/html; charset=utf-8
+    Server: gunicorn/19.9.0";
+
+pub const GET_DENY: &str = "\
+    GET /deny HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 239
+    Content-Type: text/plain
+    Server: gunicorn/19.9.0";
+
+pub const GET_ENCODING_UTF8: &str = "\
+    GET /encoding/utf8 HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 14239
+    Content-Type: text/html; charset=utf-8
+    Server: gunicorn/19.9.0";
+
+pub const GET_HTML: &str = "\
+    GET /html HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 3741
+    Content-Type: text/html; charset=utf-8
+    Server: gunicorn/19.9.0";
+
+pub const GET_IMAGE_JPEG: &str = "\
+    GET /image/jpeg HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 35588
+    Content-Type: image/jpeg
+    Server: gunicorn/19.9.0";
+
+pub const GET_IMAGE_PNG: &str = "\
+    GET /image/png HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 8090
+    Content-Type: image/png
+    Server: gunicorn/19.9.0";
+
+pub const GET_IMAGE_SVG: &str = "\
+    GET /image/svg HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 8984
+    Content-Type: image/svg+xml
+    Server: gunicorn/19.9.0";
+
+pub const GET_IMAGE_WEBP: &str = "\
+    GET /image/webp HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 10568
+    Content-Type: image/webp
+    Server: gunicorn/19.9.0";
+
+pub const GET_JSON: &str = "\
+    GET /json HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 429
+    Content-Type: application/json
+    Server: gunicorn/19.9.0";
+
+pub const GET_ROBOTS_TXT: &str = "\
+    GET /robots.txt HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 30
+    Content-Type: text/plain
+    Server: gunicorn/19.9.0";
+
+pub const GET_XML: &str = "\
+    GET /xml HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 200 OK
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 522
+    Content-Type: application/xml
+    Server: gunicorn/19.9.0";
+
+pub const PATCH_STATUS_201: &str = "\
+    PATCH /status/201 HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 201 Created
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 0
+    Content-Type: text/html; charset=utf-8
+    Server: gunicorn/19.9.0";
+
+pub const POST_STATUS_201: &str = "\
+    POST /status/201 HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 201 Created
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 0
+    Content-Type: text/html; charset=utf-8
+    Server: gunicorn/19.9.0";
+
+pub const PUT_STATUS_203: &str = "\
+    PUT /status/203 HTTP/1.1
+    Accept: */*
+    Content-Length: 0
+    Host: 54.86.118.241:80
+    User-Agent: rustnet/0.1.0
+
+    HTTP/1.1 203 Non-Authoritative Information
+    Access-Control-Allow-Credentials: true
+    Access-Control-Allow-Origin: *
+    Connection: keep-alive
+    Content-Length: 0
+    Content-Type: text/html; charset=utf-8
+    Server: gunicorn/19.9.0";
 
 pub const VALID_STATUS_CODES: [u16; 94] = [
     100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 218, 226,
@@ -127,8 +334,9 @@ macro_rules! get_responses {
             CONTENT_LENGTH as CL, CONTENT_TYPE as CT, CONNECTION as CONN,
             DATE, LOCATION, WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE,
         };
+        use crate::common::get_expected_headers;
 
-        let expected_headers = crate::common::get_expected_headers();
+        let expected_headers = get_expected_headers();
 
         let Ok(stream) = TcpStream::connect("httpbin.org:80") else {
             panic!(
@@ -284,8 +492,8 @@ macro_rules! run_client_test {
     ($label:ident: $method:literal, $uri_path:literal) => {
         #[test]
         fn $label() {
-            use std::path::PathBuf;
             use std::process::Command;
+            use $crate::common::{get_expected_output, get_test_output};
 
             let output = Command::new("cargo")
                 .args([
@@ -301,28 +509,15 @@ macro_rules! run_client_test {
                 .output()
                 .unwrap();
 
-            let output = crate::common::get_trimmed_test_output(&output.stdout);
-
-            let filename = format!(
-                "{}_{}.txt",
-                $method.to_lowercase(),
-                stringify!($label)
-            );
-
-            let exp_file: PathBuf = [
-                env!("CARGO_MANIFEST_DIR"),
-                "test_data",
-                &filename
-            ].iter().collect();
-
-            let expected = $crate::common::get_expected_from_file(&exp_file);
+            let output = get_test_output(&output.stdout);
+            let expected = get_expected_output($method, $uri_path);
 
             assert_eq!(output, expected, "Failure at: {}", stringify!($label));
         }
     };
 }
 
-pub fn get_trimmed_test_output(output: &[u8]) -> String {
+pub fn get_test_output(output: &[u8]) -> String {
     let output_str = String::from_utf8_lossy(output);
 
     output_str
@@ -347,13 +542,29 @@ pub fn get_trimmed_test_output(output: &[u8]) -> String {
         .join("\n")
 }
 
-pub fn get_expected_from_file(exp_file: &Path) -> String {
-    let mut exp_output = String::new();
+pub fn get_expected_output(method: &str, path: &str) -> String {
+    let output = match method {
+        "GET" => match path {
+            "/deny" => GET_DENY,
+            "/html" => GET_HTML,
+            "/json" => GET_JSON,
+            "/xml" => GET_XML,
+            "/robots.txt" => GET_ROBOTS_TXT,
+            "/encoding/utf8" => GET_ENCODING_UTF8,
+            "/image/jpeg" => GET_IMAGE_JPEG,
+            "/image/png" => GET_IMAGE_PNG,
+            "/image/svg" => GET_IMAGE_SVG,
+            "/image/webp" => GET_IMAGE_WEBP,
+            _ => unreachable!(),
+        },
+        "POST" => POST_STATUS_201,
+        "PUT" => PUT_STATUS_203,
+        "PATCH" => PATCH_STATUS_201,
+        "DELETE" => DELETE_STATUS_200,
+        _ => unreachable!(),
+    };
 
-    let mut f = File::open(exp_file).unwrap();
-    f.read_to_string(&mut exp_output).unwrap();
-
-    exp_output
+    output
         .split('\n')
         .filter_map(|line| {
             let line = line.trim();
