@@ -173,7 +173,7 @@ impl Listener {
                 let writer = NetWriter::from(cloned);
                 (reader, writer)
             })
-            .map_err(|e| NetError::Read(e.kind()))
+            .map_err(|e| NetError::ReadError(e.kind()))
     }
 }
 

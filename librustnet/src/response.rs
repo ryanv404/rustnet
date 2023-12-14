@@ -277,33 +277,15 @@ impl Response {
         let maybe_target = router.resolve(route);
 
         let mut res = match (maybe_target, method) {
-            (Some(target), Method::Get) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Head) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Post) => {
-                Self::from_target(201, target)?
-            },
-            (Some(target), Method::Put) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Patch) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Delete) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Trace) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Options) => {
-                Self::from_target(200, target)?
-            },
-            (Some(target), Method::Connect) => {
-                Self::from_target(200, target)?
-            },
+            (Some(target), Method::Get) => Self::from_target(200, target)?,
+            (Some(target), Method::Head) => Self::from_target(200, target)?,
+            (Some(target), Method::Post) => Self::from_target(201, target)?,
+            (Some(target), Method::Put) => Self::from_target(200, target)?,
+            (Some(target), Method::Patch) => Self::from_target(200, target)?,
+            (Some(target), Method::Delete) => Self::from_target(200, target)?,
+            (Some(target), Method::Trace) => Self::from_target(200, target)?,
+            (Some(target), Method::Options) => Self::from_target(200, target)?,
+            (Some(target), Method::Connect) => Self::from_target(200, target)?,
             (None, Method::Head) => {
                 // Allow HEAD requests for any route configured for a GET request.
                 let get_route = Route::Get(route.path());
@@ -361,31 +343,31 @@ impl Response {
             Target::Text(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Text((*s).to_string());
+                res.body = Body::Text(s.to_string());
             },
             Target::Json(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Json((*s).to_string());
+                res.body = Body::Json(s.to_string());
             },
             Target::Xml(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Xml((*s).to_string());
+                res.body = Body::Xml(s.to_string());
             },
-            Target::Html(ref fpath) => {
+            Target::Html(fpath) => {
                 let content = fs::read_to_string(fpath)?;
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(content.len());
                 res.body = Body::Html(content);
             },
-            Target::File(ref fpath) => {
+            Target::File(fpath) => {
                 let content = fs::read(fpath)?;
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(content.len());
                 res.body = Body::Bytes(content);
             },
-            Target::Favicon(ref fpath) => {
+            Target::Favicon(fpath) => {
                 let content = fs::read(fpath)?;
                 res.headers.insert_cache_control("max-age=604800");
                 res.headers.insert_content_length(content.len());
@@ -407,7 +389,7 @@ impl Response {
                     res.headers.insert_content_length(res.body.len());
                 }
             },
-            Target::Bytes(ref bytes) => {
+            Target::Bytes(bytes) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(bytes.len());
                 res.body = Body::Bytes(bytes.clone());

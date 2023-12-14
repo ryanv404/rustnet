@@ -95,7 +95,7 @@ impl NetReader {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Err(e) => Err(NetError::Read(e.kind())),
+            Err(e) => Err(NetError::ReadError(e.kind())),
             Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
             Ok(_) => line.parse::<RequestLine>(),
         }
@@ -107,7 +107,7 @@ impl NetReader {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Err(e) => Err(NetError::Read(e.kind())),
+            Err(e) => Err(NetError::ReadError(e.kind())),
             Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
             Ok(_) => line.parse::<StatusLine>(),
         }
@@ -122,7 +122,7 @@ impl NetReader {
 
         while num_headers <= MAX_HEADERS {
             match self.read_line(&mut buf) {
-                Err(e) => return Err(NetError::Read(e.kind())),
+                Err(e) => return Err(NetError::ReadError(e.kind())),
                 Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
                 Ok(_) => {
                     let line = buf.trim();
@@ -155,25 +155,25 @@ impl NetReader {
         }
 
         let body_len = content_len
-            .ok_or(NetError::Parse(ParseErrorKind::Body))
+            .ok_or(NetError::ParseError(ParseErrorKind::Body))
             .map(ToString::to_string)
             .and_then(|s| s.trim().parse::<usize>()
-                .map_err(|_| NetError::Parse(ParseErrorKind::Body)))?;
+                .map_err(|_| NetError::ParseError(ParseErrorKind::Body)))?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
         }
 
         let num_bytes = u64::try_from(body_len)
-            .map_err(|_| NetError::Parse(ParseErrorKind::Body))?;
+            .map_err(|_| NetError::ParseError(ParseErrorKind::Body))?;
 
         let body_type = content_type
-            .ok_or(NetError::Parse(ParseErrorKind::Body))
+            .ok_or(NetError::ParseError(ParseErrorKind::Body))
             .map(ToString::to_string)?;
 
         if body_type.is_empty() {
             // Return error since content length is greater than zero.
-            return Err(NetError::Parse(ParseErrorKind::Body));
+            return Err(NetError::ParseError(ParseErrorKind::Body));
         }
 
         let mut reader = self.take(num_bytes);
@@ -260,7 +260,7 @@ impl FromStr for RequestLine {
 
         let path = tokens
             .next()
-            .ok_or(NetError::Parse(ParseErrorKind::RequestLine))
+            .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
             .and_then(|token| Ok(token.to_string()))?;
 
         let version = tokens
