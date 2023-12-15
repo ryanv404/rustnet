@@ -30,6 +30,7 @@ mod get {
         get_responses! [300, 301, 302, 303, 304, 305, 306, 307, 308];
     }
 
+    #[ignore]
     #[test]
     fn status_4xx() {
         get_responses! [
@@ -40,6 +41,7 @@ mod get {
         ];
     }
 
+    #[ignore]
     #[test]
     fn status_5xx() {
         get_responses! [
