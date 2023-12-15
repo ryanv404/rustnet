@@ -13,8 +13,8 @@ use crate::consts::{
 };
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, ParseErrorKind, Request, Route, Router, Status, Target,
-    Version,
+    NetResult, ParseErrorKind, Request, RequestLine, Route, Router, Status,
+    Target, Version,
 };
 
 /// A buffered writer wrapper around a `TcpStream` instance.
@@ -80,7 +80,7 @@ impl NetWriter {
         }
 
         if !req.headers.contains(&HOST) {
-            let stream = self.0.get_ref();
+            let stream = self.get_ref();
             let remote = stream.peer_addr()?;
             req.headers.insert_host(remote.ip(), remote.port());
         }
@@ -92,6 +92,31 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &req.request_line).as_bytes())?;
         self.write_headers(&req.headers)?;
         self.write_body(&req.body)?;
+        self.flush()?;
+        Ok(())
+    }
+
+    /// Writes a dummy HTTP request to the underlying `TcpStream`.
+    #[allow(clippy::missing_errors_doc)]
+    pub fn send_dummy_request(&mut self) -> NetResult<()> {
+        let request_line = RequestLine {
+            method: Method::Get,
+            path: String::from("/dummy"),
+            version: Version::OneDotOne
+        };
+
+        let mut headers = Headers::new();
+        headers.insert_connection("close");
+        headers.insert_content_length(0);
+        headers.insert_user_agent();
+
+        let local = self.get_ref().local_addr()?;
+        headers.insert_host(local.ip(), local.port());
+
+        let request_line = format!("{request_line}\r\n");
+        self.write_all(request_line.as_bytes())?;
+        self.write_headers(&headers)?;
+
         self.flush()?;
         Ok(())
     }
@@ -116,6 +141,7 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &res.status_line).as_bytes())?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
+
         self.flush()?;
         Ok(())
     }
@@ -266,52 +292,87 @@ impl Debug for Response {
 impl Response {
     /// Resolves a `Route` into a `Response` based on the provided `Router`.
     #[allow(clippy::missing_errors_doc)]
-    pub fn from_route(route: &Route, router: &Router) -> NetResult<Self> {
+    pub fn from_route(route: &Route, router: &Router) -> Self {
         if router.is_empty() {
-            let msg = "This server has no routes configured.";
-            let target = Target::Text(msg);
-            return Self::from_target(502, &target);
+            let mut res = Self::new(500);
+            res.body = Body::Text(
+                "This server has no routes configured.".to_string()
+            );
+            res.headers.insert_cache_control("no-cache");
+            res.headers.insert_connection("close");
+            res.headers.insert_content_length(res.body.len());
+            res.headers.insert_content_type("text/plain; charset=utf-8");
+            return res;
         }
 
         let method = route.method();
         let maybe_target = router.resolve(route);
 
-        let mut res = match (maybe_target, method) {
-            (Some(target), Method::Get) => Self::from_target(200, target)?,
-            (Some(target), Method::Head) => Self::from_target(200, target)?,
-            (Some(target), Method::Post) => Self::from_target(201, target)?,
-            (Some(target), Method::Put) => Self::from_target(200, target)?,
-            (Some(target), Method::Patch) => Self::from_target(200, target)?,
-            (Some(target), Method::Delete) => Self::from_target(200, target)?,
-            (Some(target), Method::Trace) => Self::from_target(200, target)?,
-            (Some(target), Method::Options) => Self::from_target(200, target)?,
-            (Some(target), Method::Connect) => Self::from_target(200, target)?,
+        let maybe_res = match (maybe_target, method) {
+            (Some(target), Method::Get) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Head) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Post) => {
+                Self::from_target(201, target)
+            },
+            (Some(target), Method::Put) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Patch) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Delete) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Trace) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Options) => {
+                Self::from_target(200, target)
+            },
+            (Some(target), Method::Connect) => {
+                Self::from_target(200, target)
+            },
             (None, Method::Head) => {
                 // Allow HEAD requests for any route configured for a GET request.
                 let get_route = Route::Get(route.path());
 
                 match router.resolve(&get_route) {
                     // GET route exists so send it as a HEAD response.
-                    Some(target) => Self::from_target(200, target)?,
+                    Some(target) => Self::from_target(200, target),
                     // No route exists for a GET request either.
                     None => match router.get_error_404() {
-                        Some(target) => Self::from_target(404, target)?,
-                        None => Self::from_target(404, &Target::Empty)?,
+                        Some(target) => Self::from_target(404, target),
+                        None => Self::from_target(404, &Target::Empty),
                     }
                 }
             },
             // Handle routes that do not exist.
             (None, _) => match router.get_error_404() {
-                Some(target) => Self::from_target(404, target)?,
-                None => Self::from_target(404, &Target::Empty)?,
+                Some(target) => Self::from_target(404, target),
+                None => Self::from_target(404, &Target::Empty),
             }
         };
 
-        if method == Method::Head {
-            res.body = Body::Empty;
+        match maybe_res {
+            Ok(mut res) if method == Method::Head => {
+                res.body = Body::Empty;
+                res
+            },
+            Ok(res) => res,
+            Err(e) => {
+                let mut res = Self::new(500);
+                res.body = Body::Text(format!("Error: {e}"));
+                res.headers.insert_cache_control("no-cache");
+                res.headers.insert_connection("close");
+                res.headers.insert_content_length(res.body.len());
+                res.headers.insert_content_type("text/plain; charset=utf-8");
+                res
+            },
         }
-
-        Ok(res)
     }
 
     /// Parses the target type and returns a new `Response` object.

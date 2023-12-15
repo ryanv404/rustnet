@@ -1,3 +1,5 @@
+pub const LOCAL_ADDR: &str = "127.0.0.1:7878";
+
 pub const CONNECT_MANY_METHODS: &str = "\
     HTTP/1.1 200 OK
     Cache-Control: no-cache
@@ -174,86 +176,15 @@ pub const TRACE_MANY_METHODS: &str = "\
 
     Hi from the TRACE route!";
 
-// pub fn start_test_server() {
-//     use std::process::{Command, Stdio};
+pub fn is_server_live(addr: &str) -> bool {
+    use std::net::TcpStream;
 
-//     const LOCAL_ADDR: &str = "127.0.0.1:7878";
-
-//     let client_output = Command::new("cargo")
-//         .args(["run", "-p", "client", "--", "--server-tests", "--", LOCAL_ADDR])
-//         .output()
-//         .unwrap();
-
-//     let res = String::from_utf8_lossy(&client_output.stdout);
-
-//     if is_successful_status(res.borrow()) {
-//         return;
-//     }
-
-//     let _clean = Command::new("cargo")
-//         .args(["clean"])
-//         .stdout(Stdio::null())
-//         .stderr(Stdio::null())
-//         .status()
-//         .unwrap();
-
-//     let server_build = Command::new("cargo")
-//         .args(["build", "-p", "server"])
-//         .stdout(Stdio::null())
-//         .stderr(Stdio::null())
-//         .status()
-//         .unwrap();
-
-//     assert!(server_build.success());
-
-//     let _server = Command::new("cargo")
-//         .args(["run", "-p", "server", "--", "--enable-logging"])
-//         .spawn()
-//         .unwrap();
-
-//     let mut attempt_num = 0;
-//     let mut server_is_live = false;
-    
-//     while attempt_num < 3 {
-//         thread::sleep(Duration::from_millis(500));
-
-//         let client_output = Command::new("cargo")
-//             .args(["run", "-p", "client", "--", "--server-tests", "--", LOCAL_ADDR])
-//             .output()
-//             .unwrap();
-
-//         let res = String::from_utf8_lossy(&client_output.stdout);
-        
-//         if is_successful_status(res.borrow()) {
-//             println!("Connect attempt #{} SUCCEEDED", attempt_num + 1);
-//             server_is_live = true;
-//             break;
-//         } else {
-//             println!("Connect attempt #{} FAILED", attempt_num + 1);
-//             attempt_num += 1;
-//         }
-//     }
-
-//     assert!(server_is_live, "Server took too long to go live.");
-// }
-
-// pub fn is_successful_status(input: &str) -> bool {
-//     use librustnet::StatusLine;
-//     dbg!(&input);
-//     let result = match input.trim_start().split_once('\n') {
-//         Some((line, _)) => match line.parse::<StatusLine>() {
-//             Ok(status_line) => {
-//                 dbg!(&status_line);
-//                 dbg!(&status_line.status.code());
-//                 matches!(status_line.status.code(), 200..=299)
-//             },
-//             _ => false,
-//         },
-//         _ => false,
-//     };
-//     dbg!(&result);
-//     result
-// }
+    if TcpStream::connect(addr).is_ok() {
+        true
+    } else {
+        false
+    }
+}
 
 pub fn get_test_output(input: &str) -> String {
     input
@@ -314,19 +245,87 @@ pub fn get_expected_output(method: &str, path: &str) -> String {
         .join("\n")
 }
 
-macro_rules! run_server_test {
+macro_rules! run_server_tests {
+    (START_TEST_SERVER) => {
+        #[test]
+        fn test_server_started() {
+            use std::process::{Command, Stdio};
+            use std::thread;
+            use std::time::Duration;
+            use $crate::common::{is_server_live, LOCAL_ADDR};
+
+            let _server = Command::new("cargo")
+                .args([
+                    "run",
+                    "-p", "server",
+                    "--",
+                    "--use-shutdown-route"
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+
+            let mut attempt_num = 0;
+
+            while attempt_num < 5 {
+                if is_server_live(LOCAL_ADDR) {
+                    return;
+                } else {
+                    thread::sleep(Duration::from_millis(300));
+                    attempt_num += 1;
+                }
+            }
+
+            panic!("Server took too long to go live.");
+        }
+    };
+    (SHUTDOWN_TEST_SERVER) => {
+        #[test]
+        fn test_server_shutdown() {
+            use std::process::{Command, Stdio};
+            use std::thread;
+            use std::time::Duration;
+            use $crate::common::{is_server_live, LOCAL_ADDR};
+
+            let _shutdown = Command::new("cargo")
+                .args([
+                    "run",
+                    "-p", "client",
+                    "--",
+                    "--method", "DELETE",
+                    "--path", "/__shutdown_server__",
+                    "--server-tests",
+                    "--",
+                    LOCAL_ADDR
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+
+            let mut attempt_num = 0;
+
+            while attempt_num < 5 {
+                if is_server_live(LOCAL_ADDR) {
+                    thread::sleep(Duration::from_millis(200));
+                    attempt_num += 1;
+                } else {
+                    break;
+                }
+            }
+
+            assert!(!is_server_live(LOCAL_ADDR));
+        }
+    };
     ($( $label:ident: $method:literal, $uri_path:literal; )+) => {
         $(
             #[test]
-            #[ignore]
             fn $label() {
-                use std::io::{Error as IoError, ErrorKind as IoErrorKind};
                 use std::process::Command;
                 use $crate::common::{
-                    get_expected_output, get_test_output,
+                    get_expected_output, get_test_output, LOCAL_ADDR,
                 };
-
-                pub const LOCAL_ADDR: &str = "127.0.0.1:7878";
 
                 let output = Command::new("cargo")
                     .args([
@@ -340,12 +339,10 @@ macro_rules! run_server_test {
                         LOCAL_ADDR
                     ])
                     .output()
-                    .and_then(|out| String::from_utf8(out.stdout)
-                        .map_err(|e| IoError::new(
-                            IoErrorKind::Other, format!("{e}"))))
                     .unwrap();
 
-                let output = get_test_output(&output);
+                let output_str = String::from_utf8(output.stdout).unwrap();
+                let output = get_test_output(&output_str);
                 let expected = get_expected_output($method, $uri_path);
 
                 assert_eq!(output, expected);
@@ -353,16 +350,3 @@ macro_rules! run_server_test {
         )+
     };
 }
-
-// macro_rules! run_server_tests {
-//     ( $($label:ident: $method:literal, $uri_path:literal;)+ ) => {
-//         #[test]
-//         fn run_tests() {
-//             use $crate::common::start_test_server;
-
-//             let mut server = start_test_server();
-//             $( run_server_test!($label: $method, $uri_path); )+
-//             server.kill().unwrap();
-//         }
-//     };
-// }

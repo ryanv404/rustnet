@@ -271,7 +271,7 @@ mod resolve_routes {
                         reader: None
                     };
 
-                    let res = Response::from_route(&req.route(), &router).unwrap();
+                    let res = Response::from_route(&req.route(), &router);
 
                     let mut expect = Response {
                         status_line: StatusLine {
@@ -305,7 +305,7 @@ mod resolve_routes {
 
                     routes.insert(
                         Route::new(Method::$method, $path),
-                        Target::Html(filepath)
+                        Target::Html(PathBuf::from(filepath))
                     );
 
                     let router = Arc::new(Router(routes));
@@ -351,8 +351,7 @@ mod resolve_routes {
                         writer: None
                     };
 
-                    let res = Response::from_route(&req.route(), &router)
-                        .unwrap();
+                    let res = Response::from_route(&req.route(), &router);
 
                     assert_eq!(res, expect);
                 )+
@@ -417,8 +416,7 @@ mod resolve_routes {
                         writer: None
                     };
 
-                    let res = Response::from_route(&req.route(), &router)
-                        .unwrap();
+                    let res = Response::from_route(&req.route(), &router);
 
                     assert_eq!(res, expect);
                 )+
@@ -486,8 +484,7 @@ mod resolve_routes {
                         writer: None
                     };
 
-                    let res = Response::from_route(&req.route(), &router)
-                        .unwrap();
+                    let res = Response::from_route(&req.route(), &router);
 
                     assert_eq!(res, expect);
                 )+
@@ -521,8 +518,7 @@ mod resolve_routes {
                         reader: None
                     };
 
-                    let res = Response::from_route(&req.route(), &router)
-                        .unwrap();
+                    let res = Response::from_route(&req.route(), &router);
 
                     let mut expect = Response {
                         status_line: StatusLine {

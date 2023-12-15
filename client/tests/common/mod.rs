@@ -334,15 +334,12 @@ macro_rules! get_responses {
             CONTENT_LENGTH as CL, CONTENT_TYPE as CT, CONNECTION as CONN,
             DATE, LOCATION, WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE,
         };
-        use crate::common::get_expected_headers;
+        use $crate::common::get_expected_headers;
 
         let expected_headers = get_expected_headers();
 
         let Ok(stream) = TcpStream::connect("httpbin.org:80") else {
-            panic!(
-                "Could not connect to remote host in: {}",
-                stringify!($label)
-            );
+            panic!("Could not connect to remote host.");
         };
 
         let mut req = Request {
@@ -483,7 +480,7 @@ macro_rules! get_responses {
             res.writer = None;
             exp.writer = None;
 
-            assert_eq!(res, exp, "FAILED at status code {}.", $code);
+            assert_eq!(res, exp);
         )+
     };
 }
@@ -509,18 +506,17 @@ macro_rules! run_client_test {
                 .output()
                 .unwrap();
 
-            let output = get_test_output(&output.stdout);
+            let output_str = String::from_utf8(output.stdout).unwrap();
+            let output = get_test_output(&output_str);
             let expected = get_expected_output($method, $uri_path);
 
-            assert_eq!(output, expected, "Failure at: {}", stringify!($label));
+            assert_eq!(output, expected);
         }
     };
 }
 
-pub fn get_test_output(output: &[u8]) -> String {
-    let output_str = String::from_utf8_lossy(output);
-
-    output_str
+pub fn get_test_output(input: &str) -> String {
+    input
         .split('\n')
         .filter_map(|line| {
             let line = line.trim();

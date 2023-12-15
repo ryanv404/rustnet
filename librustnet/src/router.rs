@@ -97,6 +97,14 @@ impl Route {
             Self::Connect(ref path) => path.clone(),
         }
     }
+
+    /// Returns true if this `Route` is the server shutdown route.
+    pub fn is_shutdown_route(&self) -> bool {
+        match self {
+            Self::Delete(ref path) if path == "/__shutdown_server__" => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -153,7 +161,7 @@ impl Router {
         P: Into<PathBuf>
     {
         let route = Route::new(Method::Get, uri_path);
-        let target = Target::File(file_path.into());
+        let target = Target::Html(file_path.into());
         self.mount(route, target);
         self
     }
@@ -261,7 +269,7 @@ impl Router {
         P: Into<PathBuf>
     {
         let route = Route::new(Method::Get, "__error");
-        let target = Target::File(file_path.into());
+        let target = Target::Html(file_path.into());
         self.mount(route, target);
         self
     }
@@ -407,10 +415,10 @@ pub type FnMutHandler = dyn FnMut(&mut Response) + Send + Sync + 'static;
 pub enum Target {
     Empty,
     Text(&'static str),
-    Html(&'static str),
     Json(&'static str),
     Xml(&'static str),
     Bytes(Vec<u8>),
+    Html(PathBuf),
     File(PathBuf),
     Favicon(PathBuf),
     Fn(Arc<FnHandler>),
@@ -478,11 +486,11 @@ impl PartialEq for Target {
             (Self::Empty, Self::Empty) => true,
             (Self::Text(s1), Self::Text(s2)) => s1 == s2,
             (Self::Json(s1), Self::Json(s2)) => s1 == s2,
-            (Self::Html(s1), Self::Html(s2)) => s1 == s2,
             (Self::Xml(s1), Self::Xml(s2)) => s1 == s2,
             (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
                 buf1[..] == buf2[..]
             },
+            (Self::Html(ref p1), Self::Html(ref p2)) => p1 == p2,
             (Self::File(ref p1), Self::File(ref p2)) => p1 == p2,
             (Self::Favicon(ref p1), Self::Favicon(ref p2)) => p1 == p2,
             _ => false,
@@ -538,7 +546,7 @@ impl Target {
     /// Returns true if the URI target is a file path.
     #[must_use]
     pub const fn is_file_path(&self) -> bool {
-        matches!(self, Self::File(_) | Self::Favicon(_))
+        matches!(self, Self::File(_) | Self::Favicon(_) | Self::Html(_))
     }
 
     /// Returns true if the URI target is a vector of bytes.

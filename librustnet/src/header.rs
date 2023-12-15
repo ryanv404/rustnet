@@ -101,7 +101,7 @@ impl Headers {
         self.0.len()
     }
 
-    /// Inserts the default response headers.
+    /// Inserts a collection of default server response headers.
     pub fn default_response_headers(&mut self) {
         self.insert_server();
         self.insert_connection("keep-alive");

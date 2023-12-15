@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
 use crate::{
-    Method, NetError, NetReader, NetResult, NetWriter, Request, Response,
-    Router,
+    Body, Method, NetError, NetReader, NetResult, NetWriter, Request, Response,
+    Route, Router, Target,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -26,6 +26,7 @@ where
     pub addr: Option<A>,
     pub router: Option<Router>,
     pub do_logging: bool,
+    pub use_shutdown_route: bool,
 }
 
 impl<A> Default for ServerBuilder<A>
@@ -38,7 +39,8 @@ where
             port: None,
             addr: None,
             router: None,
-            do_logging: false
+            do_logging: false,
+            use_shutdown_route: false
         }
     }
 }
@@ -88,23 +90,35 @@ where
         self
     }
 
+    /// Set whether to add a route to gracefully shutdown the server
+    /// (default: disabled).
+    #[must_use]
+    pub const fn shutdown_route(mut self, use_shutdown_route: bool) -> Self {
+        self.use_shutdown_route = use_shutdown_route;
+        self
+    }
+
     /// Builds and returns a `Server` instance.
     #[allow(clippy::missing_errors_doc)]
     pub fn build(mut self) -> NetResult<Server> {
-        let router = self.router.take().unwrap_or_default();
+        let mut router = self.router.take().unwrap_or_default();
+
+        if self.use_shutdown_route {
+            let route = Route::new(Method::Delete, "/__shutdown_server__");
+            let target = Target::Text("The server is now shutting down.");
+            router.mount(route, target);
+        }
 
         let listener = self.addr
             .as_ref()
-            .and_then(|addr| {
-                match Listener::bind(addr) {
-                    Ok(listener) => Some(listener),
-                    Err(_) => match (self.ip, self.port) {
-                        (Some(ip), Some(port)) => {
-                            Listener::bind_ip_port(ip, port).ok()
-                        },
-                        (_, _) => None,
-                    }
-                }
+            .and_then(|addr| match Listener::bind(addr) {
+                Ok(listener) => Some(listener),
+                Err(_) => match (self.ip, self.port) {
+                    (Some(ip), Some(port)) => {
+                        Listener::bind_ip_port(ip, port).ok()
+                    },
+                    (_, _) => None,
+                },
             })
             .ok_or(IoErrorKind::InvalidInput)?;
 
@@ -112,13 +126,15 @@ where
             router: Arc::new(router),
             listener: Arc::new(listener),
             do_logging: Arc::new(self.do_logging),
-            keep_listening: Arc::new(AtomicBool::new(false))
+            use_shutdown_route: Arc::new(self.use_shutdown_route),
+            keep_listening: Arc::new(AtomicBool::new(false)),
+            handle: None
         })
     }
 
     /// Builds and starts the server.
     #[allow(clippy::missing_errors_doc)]
-    pub fn start(self) -> NetResult<()> {
+    pub fn start(self) -> NetResult<Server> {
         let server = self.build()?;
         server.start()
     }
@@ -143,13 +159,15 @@ impl Listener {
     where
         A: ToSocketAddrs
     {
-        Ok(Self { inner: TcpListener::bind(addr)? })
+        let inner = TcpListener::bind(addr)?;
+        Ok(Self { inner })
     }
 
     /// Bind the listener to the given socket address.
     #[allow(clippy::missing_errors_doc)]
     pub fn bind_ip_port(ip: IpAddr, port: u16) -> NetResult<Self> {
-        Ok(Self { inner: TcpListener::bind((ip, port))? })
+        let inner = TcpListener::bind((ip, port))?;
+        Ok(Self { inner })
     }
 
     /// Returns the server's socket address.
@@ -185,8 +203,12 @@ pub struct Server {
     pub listener: Arc<Listener>,
     /// Enables logging new connections.
     pub do_logging: Arc<bool>,
-    /// Trigger for closing the server.
+    /// Enables use of a route for closing the server.
+    pub use_shutdown_route: Arc<bool>,
+    /// Trigger for stopping the server's listener loop.
     pub keep_listening: Arc<AtomicBool>,
+    /// A handle to the server's listener thread.
+    pub handle: Option<JoinHandle<()>>,
 }
 
 impl Server {
@@ -210,66 +232,103 @@ impl Server {
 
     /// Returns a new `Server` instance.
     #[must_use]
-    pub fn new(router: Router, listener: Listener, do_log: bool) -> Self {
+    pub fn new(
+        router: Router,
+        listener: Listener,
+        use_shutdown_route: bool,
+        do_log: bool
+    ) -> Self {
         Self {
             router: Arc::new(router),
             listener: Arc::new(listener),
             do_logging: Arc::new(do_log),
-            keep_listening: Arc::new(AtomicBool::new(false))
+            use_shutdown_route: Arc::new(use_shutdown_route),
+            keep_listening: Arc::new(AtomicBool::new(false)),
+            handle: None
         }
     }
 
     /// Activates the server to start listening on its bound address.
     #[allow(clippy::missing_errors_doc)]
     #[allow(clippy::missing_panics_doc)]
-    pub fn start(self) -> NetResult<()> {
+    pub fn start(mut self) -> NetResult<Self> {
         if *self.do_logging {
-            self.log_start_up()?;
+            let local_addr = self.listener.local_addr()?;
+            let ip = local_addr.ip();
+            let port = local_addr.port();
+            println!("[SERVER] Listening on {ip}:{port}.");
         }
 
         let router = Arc::clone(&self.router);
         let listener = Arc::clone(&self.listener);
         let do_logging = Arc::clone(&self.do_logging);
+        let use_shutdown_route = Arc::clone(&self.use_shutdown_route);
         let keep_listening = Arc::clone(&self.keep_listening);
+
+        keep_listening.store(true, Ordering::Relaxed);
 
         // Spawn listener thread.
         let handle = spawn(move || {
             // Create a thread pool to handle incoming requests.
             let pool = ThreadPool::new(NUM_WORKER_THREADS);
 
-            keep_listening.store(true, Ordering::Relaxed);
-
             while keep_listening.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((reader, mut writer)) => {
-                        let rtr = Arc::clone(&router);
                         let do_log = Arc::clone(&do_logging);
+                        let inner_router = Arc::clone(&router);
+                        let do_keep_listening = Arc::clone(&keep_listening);
+                        let do_use_shutdown_rt = Arc::clone(&use_shutdown_route);
 
                         // Task an available worker thread with responding.
                         pool.execute(move || {
-                            let _ = Self::handle_connection(reader, &rtr, &do_log)
-                                .map_err(|e| {
-                                    Self::log_error(&e);
+                            let result = Self::handle_connection(
+                                reader,
+                                &inner_router,
+                                &do_log,
+                                &do_use_shutdown_rt
+                            );
 
-                                    // Send 500 server error response.
-                                    let _ = writer.send_status(500)
-                                        .map_err(|e| Self::log_error(&e));
-                                });
+                            match result {
+                                Ok(do_shutdown) if do_shutdown => {
+                                    do_keep_listening.store(false, Ordering::Relaxed);
+                                    writer.send_dummy_request().unwrap();
+                                },
+                                Err(err1) => {
+                                    // Send 500 server error response if there's an error.
+                                    let mut res = Response::new(500);
+
+                                    let msg = format!("Error: {}", &err1);
+                                    res.body = Body::Text(msg);
+
+                                    res.headers.insert_connection("close");
+                                    res.headers.insert_cache_control("no-cache");
+                                    res.headers.insert_content_length(res.body.len());
+                                    res.headers.insert_content_type("text/plain; charset=utf-8");
+
+                                    match writer.send_response(&mut res) {
+                                        Ok(_) if *do_log => {
+                                            Self::log_error(&err1);
+                                        },
+                                        Err(err2) if *do_log => {
+                                            Self::log_error(&err1);
+                                            Self::log_error(&err2);
+                                        },
+                                        _ => {},
+                                    }
+                                },
+                                _ => {},
+                            }
                         });
                     },
-                    Err(e) => Self::log_error(&e),
+                    Err(e) if *do_logging => Self::log_error(&e),
+                    _ => {},
                 }
-            }
-
-            if *do_logging {
-                Self::log_shutdown();
             }
         });
 
-        // Wait for the server to finish.
-        handle.join().unwrap();
-
-        Ok(())
+        self.handle = Some(handle);
+        Ok(self)
     }
 
     /// Handles a request from a remote connection.
@@ -278,27 +337,37 @@ impl Server {
     pub fn handle_connection(
         reader: NetReader,
         router: &Arc<Router>,
-        do_logging: &Arc<bool>
-    ) -> NetResult<()> {
+        do_logging: &Arc<bool>,
+        use_shutdown_route: &Arc<bool>
+    ) -> NetResult<bool> {
         let mut req = Request::recv(reader)?;
-        let mut res = Response::from_route(&req.route(), router)?;
+        let route = req.route();
 
-        res.writer = req
-            .reader
+        let mut res = Response::from_route(&route, router);
+        res.writer = req.reader
             .take()
-            .map(NetWriter::from);
+            .and_then(|reader| Some(NetWriter::from(reader)));
 
         if **do_logging {
-            Self::log_with_status(
-                res.remote_ip(),
-                res.status_code(),
-                req.method(),
-                req.path()
-            );
+            let maybe_ip = res.remote_ip();
+            let status = res.status_code();
+            let method = route.method();
+            let path = route.path();
+
+            match maybe_ip {
+                Some(ip) => println!("[{ip}|{status}] {method} {path}"),
+                None => println!("[?|{status}] {method} {path}"),
+            }
         }
 
         res.send()?;
-        Ok(())
+
+        // Check for server shutdown signal
+        if **use_shutdown_route && route.is_shutdown_route() {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Returns the local socket address of the server.
@@ -319,54 +388,33 @@ impl Server {
         self.local_addr().map(|sock| sock.port())
     }
 
-    /// Logs the response status and request line.
-    pub fn log_with_status(
-        maybe_ip: Option<IpAddr>,
-        status: u16,
-        method: Method,
-        path: &str
-    ) {
-        maybe_ip.map_or_else(
-            || println!("[?|{status}] {method} {path}"),
-            |ip| println!("[{ip}|{status}] {method} {path}"));
-    }
-
     /// Logs a non-terminating server error.
     pub fn log_error(e: &dyn StdError) {
-        println!("[SERVER] ERROR: {e}");
+        println!("[SERVER] Error: {e}");
     }
 
     /// Logs a server shutdown message to stdout.
     pub fn log_error_msg(msg: &str) {
-        println!("[SERVER] ERROR: {msg}");
-    }
-
-    /// Logs a server start up message to stdout.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn log_start_up(&self) -> NetResult<()> {
-        let local_addr = self.listener.local_addr()?;
-        let ip = local_addr.ip();
-        let port = local_addr.port();
-        println!("[SERVER] Listening on {ip}:{port}.");
-        Ok(())
+        println!("[SERVER] Error: {msg}");
     }
 
     /// Logs a server shutdown message to stdout.
-    pub fn log_shutdown() {
+    pub fn log_shutdown(&self) {
         println!("[SERVER] Now shutting down.");
     }
 
     /// Triggers graceful shutdown of the server.
     #[allow(clippy::missing_errors_doc)]
-    pub fn shutdown(&self) -> NetResult<()> {
-        // Stops the listener thread's loop.
-        self.keep_listening.store(false, Ordering::Relaxed);
+    pub fn shutdown(self) -> NetResult<()> {
+        if *self.do_logging {
+            self.log_shutdown();
+        }
 
         // Briefly connect to ourselves to unblock the listener thread.
-        if let Some(addr) = self.local_addr() {
-            let _ = TcpStream::connect(addr).map(|stream|
-                stream.shutdown(Shutdown::Both));
-        }
+        let _ = self.local_addr()
+            .ok_or(IoErrorKind::NotConnected.into())
+            .and_then(|addr| TcpStream::connect(addr))
+            .and_then(|stream| stream.shutdown(Shutdown::Both))?;
 
         // Give the worker threads a bit of time to shutdown.
         thread::sleep(Duration::from_millis(200));
@@ -383,7 +431,7 @@ pub struct Worker {
 
 impl Worker {
     /// Spawns a worker thread that receives tasks and executes them.
-    fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
+    pub fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(job) = receiver.lock().unwrap().recv() {
                 job();
@@ -394,6 +442,7 @@ impl Worker {
     }
 }
 
+/// Holds the pool of `Worker` threads.
 pub struct ThreadPool {
     pub workers: Vec<Worker>,
     pub sender: Option<Sender<Task>>,
@@ -406,11 +455,11 @@ impl ThreadPool {
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
 
-        let mut workers = Vec::with_capacity(size);
         let (tx, rx) = channel();
-
         let sender = Some(tx);
         let receiver = Arc::new(Mutex::new(rx));
+
+        let mut workers = Vec::with_capacity(size);
 
         for id in 0..size {
             workers.push(Worker::new(id, Arc::clone(&receiver)));
