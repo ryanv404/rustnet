@@ -292,7 +292,6 @@ impl Server {
                             match result {
                                 Ok(do_shutdown) if do_shutdown => {
                                     do_keep_listening.store(false, Ordering::Relaxed);
-                                    writer.send_dummy_request().unwrap();
                                 },
                                 Err(err1) => {
                                     // Send 500 server error response if there's an error.
@@ -307,7 +306,7 @@ impl Server {
                                     res.headers.insert_content_type("text/plain; charset=utf-8");
 
                                     match writer.send_response(&mut res) {
-                                        Ok(_) if *do_log => {
+                                        Ok(()) if *do_log => {
                                             Self::log_error(&err1);
                                         },
                                         Err(err2) if *do_log => {
@@ -328,6 +327,7 @@ impl Server {
         });
 
         self.handle = Some(handle);
+
         Ok(self)
     }
 
@@ -344,20 +344,16 @@ impl Server {
         let route = req.route();
 
         let mut res = Response::from_route(&route, router);
-        res.writer = req.reader
-            .take()
-            .and_then(|reader| Some(NetWriter::from(reader)));
+        res.writer = req.reader.take().map(NetWriter::from);
 
         if **do_logging {
-            let maybe_ip = res.remote_ip();
             let status = res.status_code();
             let method = route.method();
             let path = route.path();
 
-            match maybe_ip {
-                Some(ip) => println!("[{ip}|{status}] {method} {path}"),
-                None => println!("[?|{status}] {method} {path}"),
-            }
+            res.remote_ip().map_or_else(
+                || println!("[?|{status}] {method} {path}"),
+                |ip| println!("[{ip}|{status}] {method} {path}"));
         }
 
         res.send()?;
@@ -411,10 +407,12 @@ impl Server {
         }
 
         // Briefly connect to ourselves to unblock the listener thread.
-        let _ = self.local_addr()
-            .ok_or(IoErrorKind::NotConnected.into())
-            .and_then(|addr| TcpStream::connect(addr))
+        self.local_addr()
+            .ok_or_else(|| IoErrorKind::NotConnected.into())
+            .and_then(TcpStream::connect)
             .and_then(|stream| stream.shutdown(Shutdown::Both))?;
+
+        drop(self);
 
         // Give the worker threads a bit of time to shutdown.
         thread::sleep(Duration::from_millis(200));
@@ -431,6 +429,7 @@ pub struct Worker {
 
 impl Worker {
     /// Spawns a worker thread that receives tasks and executes them.
+    #[allow(clippy::missing_panics_doc)]
     pub fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(job) = receiver.lock().unwrap().recv() {
@@ -454,12 +453,11 @@ impl ThreadPool {
     #[allow(clippy::missing_panics_doc)]
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
+        let mut workers = Vec::with_capacity(size);
 
         let (tx, rx) = channel();
         let sender = Some(tx);
         let receiver = Arc::new(Mutex::new(rx));
-
-        let mut workers = Vec::with_capacity(size);
 
         for id in 0..size {
             workers.push(Worker::new(id, Arc::clone(&receiver)));

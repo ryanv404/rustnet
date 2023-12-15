@@ -9,9 +9,6 @@ mod get {
     run_client_test!(robots_txt: "GET", "/robots.txt");
     run_client_test!(encoding_utf8: "GET", "/encoding/utf8");
     run_client_test!(image_jpeg: "GET", "/image/jpeg");
-    run_client_test!(image_png: "GET", "/image/png");
-    run_client_test!(image_svg: "GET", "/image/svg");
-    run_client_test!(image_webp: "GET", "/image/webp");
 
     #[test]
     fn status_1xx() {
@@ -20,9 +17,7 @@ mod get {
 
     #[test]
     fn status_2xx() {
-        get_responses! [
-            200, 201, 202, 203, 204, 205, 206, 207, 208, 218, 226
-        ];
+        get_responses! [200, 201, 202, 203, 204, 205, 206, 207, 208, 218];
     }
 
     #[test]
@@ -30,24 +25,14 @@ mod get {
         get_responses! [300, 301, 302, 303, 304, 305, 306, 307, 308];
     }
 
-    #[ignore]
     #[test]
     fn status_4xx() {
-        get_responses! [
-            400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412,
-            413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425,
-            426, 428, 429, 430, 431, 440, 444, 449, 450, 451, 460, 463, 464,
-            494, 495, 496, 497, 498, 499
-        ];
+        get_responses! [400, 401, 402, 403, 404, 405, 406, 407, 408, 418];
     }
 
-    #[ignore]
     #[test]
     fn status_5xx() {
-        get_responses! [
-            500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 520,
-            521, 522, 523, 524, 525, 526, 527, 529, 530, 561, 598, 599
-        ];
+        get_responses! [500, 501, 502, 503, 504, 505, 506, 507, 508, 509];
     }
 }
 

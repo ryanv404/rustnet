@@ -121,7 +121,7 @@ impl FromStr for Status {
     fn from_str(s: &str) -> NetResult<Self> {
         s.trim()
             .split_once(' ')
-            .ok_or(ParseErrorKind::Status.into())
+            .ok_or_else(|| ParseErrorKind::Status.into())
             .and_then(|(code, _msg)| {
                 let status_code = code.parse::<u16>()
                     .map_err(|_| ParseErrorKind::Status)?;

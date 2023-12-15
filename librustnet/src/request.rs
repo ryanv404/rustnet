@@ -155,25 +155,25 @@ impl NetReader {
         }
 
         let body_len = content_len
-            .ok_or(NetError::ParseError(ParseErrorKind::Body))
+            .ok_or(ParseErrorKind::Body)
             .map(ToString::to_string)
             .and_then(|s| s.trim().parse::<usize>()
-                .map_err(|_| NetError::ParseError(ParseErrorKind::Body)))?;
+                .map_err(|_| ParseErrorKind::Body))?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
         }
 
         let num_bytes = u64::try_from(body_len)
-            .map_err(|_| NetError::ParseError(ParseErrorKind::Body))?;
+            .map_err(|_| ParseErrorKind::Body)?;
 
         let body_type = content_type
-            .ok_or(NetError::ParseError(ParseErrorKind::Body))
-            .map(ToString::to_string)?;
+            .map(ToString::to_string)
+            .ok_or(ParseErrorKind::Body)?;
 
         if body_type.is_empty() {
             // Return error since content length is greater than zero.
-            return Err(NetError::ParseError(ParseErrorKind::Body));
+            return Err(ParseErrorKind::Body)?;
         }
 
         let mut reader = self.take(num_bytes);
@@ -255,18 +255,18 @@ impl FromStr for RequestLine {
 
         let method = tokens
             .next()
-            .ok_or(ParseErrorKind::RequestLine.into())
-            .and_then(|token| token.parse::<Method>())?;
+            .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
+            .and_then(str::parse)?;
 
         let path = tokens
             .next()
-            .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
-            .and_then(|token| Ok(token.to_string()))?;
+            .map(ToString::to_string)
+            .ok_or(ParseErrorKind::RequestLine)?;
 
         let version = tokens
             .next()
-            .ok_or(ParseErrorKind::RequestLine.into())
-            .and_then(|token| token.parse::<Version>())?;
+            .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
+            .and_then(str::parse)?;
 
         Ok(Self { method, path, version })
     }

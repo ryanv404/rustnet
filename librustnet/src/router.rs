@@ -99,11 +99,9 @@ impl Route {
     }
 
     /// Returns true if this `Route` is the server shutdown route.
+    #[must_use]
     pub fn is_shutdown_route(&self) -> bool {
-        match self {
-            Self::Delete(ref path) if path == "/__shutdown_server__" => true,
-            _ => false,
-        }
+        matches!(self, Self::Delete(ref p) if p == "/__shutdown_server__")
     }
 }
 

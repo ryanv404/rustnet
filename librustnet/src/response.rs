@@ -198,10 +198,9 @@ impl FromStr for StatusLine {
     /// Parses a string slice into a `StatusLine` object.
     #[allow(clippy::missing_errors_doc)]
     fn from_str(line: &str) -> NetResult<Self> {
-        line
-            .trim_start()
+        line.trim_start()
             .split_once(' ')
-            .ok_or(ParseErrorKind::StatusLine.into())
+            .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
             .and_then(|(token1, token2)| {
                 let version = token1.parse::<Version>()?;
                 let status = token2.parse::<Status>()?;
@@ -292,6 +291,8 @@ impl Debug for Response {
 impl Response {
     /// Resolves a `Route` into a `Response` based on the provided `Router`.
     #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::match_same_arms)]
+    #[must_use]
     pub fn from_route(route: &Route, router: &Router) -> Self {
         if router.is_empty() {
             let mut res = Self::new(500);
@@ -340,21 +341,20 @@ impl Response {
                 // Allow HEAD requests for any route configured for a GET request.
                 let get_route = Route::Get(route.path());
 
-                match router.resolve(&get_route) {
-                    // GET route exists so send it as a HEAD response.
-                    Some(target) => Self::from_target(200, target),
+                router.resolve(&get_route).map_or_else(
                     // No route exists for a GET request either.
-                    None => match router.get_error_404() {
-                        Some(target) => Self::from_target(404, target),
-                        None => Self::from_target(404, &Target::Empty),
-                    }
-                }
+                    || router.get_error_404().map_or_else(
+                        || Self::from_target(404, &Target::Empty),
+                        |target| Self::from_target(404, target)),
+                    // GET route exists so send it as a HEAD response.
+                    |target| Self::from_target(200, target))
             },
             // Handle routes that do not exist.
-            (None, _) => match router.get_error_404() {
-                Some(target) => Self::from_target(404, target),
-                None => Self::from_target(404, &Target::Empty),
-            }
+            (None, _) => {
+                router.get_error_404().map_or_else(
+                    || Self::from_target(404, &Target::Empty),
+                    |target| Self::from_target(404, target))
+            },
         };
 
         match maybe_res {
@@ -404,17 +404,17 @@ impl Response {
             Target::Text(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Text(s.to_string());
+                res.body = Body::Text((*s).to_string());
             },
             Target::Json(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Json(s.to_string());
+                res.body = Body::Json((*s).to_string());
             },
             Target::Xml(s) => {
                 res.headers.insert_cache_control("no-cache");
                 res.headers.insert_content_length(s.len());
-                res.body = Body::Xml(s.to_string());
+                res.body = Body::Xml((*s).to_string());
             },
             Target::Html(fpath) => {
                 let content = fs::read_to_string(fpath)?;

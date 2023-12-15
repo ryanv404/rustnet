@@ -48,6 +48,7 @@ mod parse {
         assert!("HTTP/1.2".parse::<Version>().is_err());
     }
 
+    #[allow(clippy::cognitive_complexity)]
     #[test]
     fn request_lines() {
         macro_rules! parse_requestline {
@@ -145,14 +146,14 @@ mod parse {
             Pineapple: pizza\r\n\r\n";
 
         let expected_hdrs = Headers(BTreeMap::from([
-            (ACCEPT, "*/*".as_bytes().into()),
-            (ACCEPT_ENCODING, "gzip, deflate, br".as_bytes().into()),
-            (CONNECTION, "keep-alive".as_bytes().into()),
-            (HOST, "example.com".as_bytes().into()),
-            (USER_AGENT, "xh/0.19.3".as_bytes().into()),
+            (ACCEPT, b"*/*"[..].into()),
+            (ACCEPT_ENCODING, b"gzip, deflate, br"[..].into()),
+            (CONNECTION, b"keep-alive"[..].into()),
+            (HOST, b"example.com"[..].into()),
+            (USER_AGENT, b"xh/0.19.3"[..].into()),
             (HeaderName {
                 inner: HeaderKind::Custom(Vec::from("Pineapple")),
-            }, "pizza".as_bytes().into()),
+            }, b"pizza"[..].into()),
         ]));
 
         let mut test_hdrs = Headers::new();
@@ -636,8 +637,8 @@ mod send_sync {
     };
 
     #[test]
-    fn send_tests() {
-        fn type_is_send<T: Send>() {}
+    const fn send_tests() {
+        const fn type_is_send<T: Send>() {}
         type_is_send::<Body>();
         type_is_send::<Client>();
         type_is_send::<ClientBuilder<&str>>();
@@ -670,8 +671,8 @@ mod send_sync {
     }
 
     #[test]
-    fn sync_tests() {
-        fn type_is_sync<T: Sync>() {}
+    const fn sync_tests() {
+        const fn type_is_sync<T: Sync>() {}
         type_is_sync::<Body>();
         type_is_sync::<Client>();
         type_is_sync::<ClientBuilder<&str>>();

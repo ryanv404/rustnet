@@ -179,11 +179,7 @@ pub const TRACE_MANY_METHODS: &str = "\
 pub fn is_server_live(addr: &str) -> bool {
     use std::net::TcpStream;
 
-    if TcpStream::connect(addr).is_ok() {
-        true
-    } else {
-        false
-    }
+    TcpStream::connect(addr).is_ok()
 }
 
 pub fn get_test_output(input: &str) -> String {

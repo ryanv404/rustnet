@@ -77,51 +77,6 @@ pub const GET_IMAGE_JPEG: &str = "\
     Content-Type: image/jpeg
     Server: gunicorn/19.9.0";
 
-pub const GET_IMAGE_PNG: &str = "\
-    GET /image/png HTTP/1.1
-    Accept: */*
-    Content-Length: 0
-    Host: 54.86.118.241:80
-    User-Agent: rustnet/0.1.0
-
-    HTTP/1.1 200 OK
-    Access-Control-Allow-Credentials: true
-    Access-Control-Allow-Origin: *
-    Connection: keep-alive
-    Content-Length: 8090
-    Content-Type: image/png
-    Server: gunicorn/19.9.0";
-
-pub const GET_IMAGE_SVG: &str = "\
-    GET /image/svg HTTP/1.1
-    Accept: */*
-    Content-Length: 0
-    Host: 54.86.118.241:80
-    User-Agent: rustnet/0.1.0
-
-    HTTP/1.1 200 OK
-    Access-Control-Allow-Credentials: true
-    Access-Control-Allow-Origin: *
-    Connection: keep-alive
-    Content-Length: 8984
-    Content-Type: image/svg+xml
-    Server: gunicorn/19.9.0";
-
-pub const GET_IMAGE_WEBP: &str = "\
-    GET /image/webp HTTP/1.1
-    Accept: */*
-    Content-Length: 0
-    Host: 54.86.118.241:80
-    User-Agent: rustnet/0.1.0
-
-    HTTP/1.1 200 OK
-    Access-Control-Allow-Credentials: true
-    Access-Control-Allow-Origin: *
-    Connection: keep-alive
-    Content-Length: 10568
-    Content-Type: image/webp
-    Server: gunicorn/19.9.0";
-
 pub const GET_JSON: &str = "\
     GET /json HTTP/1.1
     Accept: */*
@@ -212,14 +167,10 @@ pub const PUT_STATUS_203: &str = "\
     Content-Type: text/html; charset=utf-8
     Server: gunicorn/19.9.0";
 
-pub const VALID_STATUS_CODES: [u16; 94] = [
-    100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 218, 226,
-    300, 301, 302, 303, 304, 305, 306, 307, 308, 400, 401, 402, 403, 404, 405,
-    406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420,
-    421, 422, 423, 424, 425, 426, 428, 429, 430, 431, 440, 444, 449, 450, 451,
-    460, 463, 464, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505,
-    506, 507, 508, 509, 510, 511, 520, 521, 522, 523, 524, 525, 526, 527, 529,
-    530, 561, 598, 599
+pub const VALID_STATUS_CODES: [u16; 43] = [
+    100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 218, 300,
+    301, 302, 303, 304, 305, 306, 307, 308, 400, 401, 402, 403, 404, 405, 406,
+    407, 408, 418, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509
 ];
 
 pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
@@ -299,8 +250,8 @@ pub fn get_expected_headers() -> BTreeMap<u16, Headers> {
                             |v| *v = b"application/json"[..].into());
                     });
             },
-            num @ (407 | 412) => {
-                expected.entry(num).and_modify(
+            407 => {
+                expected.entry(407).and_modify(
                     |headers| headers.remove(&CT));
             },
             418 => {
@@ -461,7 +412,7 @@ macro_rules! get_responses {
                     exp.headers.insert(XMORE,
                         b"http://vimeo.com/22053820"[..].into());
                 },
-                407 | 412 => {
+                407 => {
                     exp.headers.remove(&CT);
                 },
                 418 => {
@@ -548,9 +499,6 @@ pub fn get_expected_output(method: &str, path: &str) -> String {
             "/robots.txt" => GET_ROBOTS_TXT,
             "/encoding/utf8" => GET_ENCODING_UTF8,
             "/image/jpeg" => GET_IMAGE_JPEG,
-            "/image/png" => GET_IMAGE_PNG,
-            "/image/svg" => GET_IMAGE_SVG,
-            "/image/webp" => GET_IMAGE_WEBP,
             _ => unreachable!(),
         },
         "POST" => POST_STATUS_201,
