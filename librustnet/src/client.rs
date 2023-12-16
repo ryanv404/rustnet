@@ -10,7 +10,6 @@ use crate::{
 };
 
 /// An HTTP request builder object.
-#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientBuilder<A>
 where

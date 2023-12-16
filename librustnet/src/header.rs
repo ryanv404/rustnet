@@ -1,8 +1,9 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::IpAddr;
+use std::str::FromStr;
 
-use crate::NetResult;
+use crate::{NetError, NetResult, ParseErrorKind};
 use crate::consts::{
     ACCEPT, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
     LOCATION, SERVER, USER_AGENT, WWW_AUTHENTICATE, X_MORE_INFO,
@@ -11,9 +12,7 @@ use crate::consts::{
 pub mod names;
 pub mod values;
 
-#[allow(clippy::module_name_repetitions)]
 pub use names::{header_consts, HeaderKind, HeaderName};
-#[allow(clippy::module_name_repetitions)]
 pub use values::HeaderValue;
 
 /// Represents a single header field line.
@@ -29,14 +28,18 @@ impl Display for Header {
     }
 }
 
-impl Header {
-    /// Parses a string slice into a `Header`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(line: &str) -> NetResult<Self> {
-        let mut tokens = line.splitn(2, ':');
-        let name = HeaderName::parse(tokens.next())?;
-        let value = HeaderValue::parse(tokens.next())?;
-        Ok(Self { name, value })
+impl FromStr for Header {
+    type Err = NetError;
+
+    fn from_str(line: &str) -> NetResult<Self> {
+        line.trim()
+            .split_once(':')
+            .ok_or(NetError::ParseError(ParseErrorKind::Header))
+            .and_then(|(name, value)| {
+                let name = name.parse::<HeaderName>()?;
+                let value = value.parse::<HeaderValue>()?;
+                Ok(Self { name, value })
+            })
     }
 }
 

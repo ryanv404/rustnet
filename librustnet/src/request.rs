@@ -131,11 +131,11 @@ impl NetReader {
                         break;
                     }
 
-                    let header = Header::parse(line)?;
+                    let header = line.parse::<Header>()?;
                     headers.insert(header.name, header.value);
 
-                    buf.clear();
                     num_headers += 1;
+                    buf.clear();
                 }
             }
         }
@@ -221,7 +221,6 @@ impl NetReader {
 }
 
 /// Represents the first line of an HTTP request.
-#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestLine {
     pub method: Method,

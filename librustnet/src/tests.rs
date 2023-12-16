@@ -108,8 +108,8 @@ mod parse {
             let lower = String::from_utf8(lowercase.to_vec()).unwrap();
             let upper = lower.to_ascii_uppercase();
             let expected = HeaderName { inner: HeaderKind::Standard(std_header) };
-            assert_eq!(HeaderName::parse(Some(&lower)), Ok(expected.clone()));
-            assert_eq!(HeaderName::parse(Some(&upper)), Ok(expected));
+            assert_eq!(lower.parse::<HeaderName>(), Ok(expected.clone()));
+            assert_eq!(upper.parse::<HeaderName>(), Ok(expected));
         }
     }
 
@@ -117,14 +117,16 @@ mod parse {
     fn custom_headers() {
         macro_rules! test_custom_headers {
             ($name:literal, $value:literal) =>  {{
-                let test_name = HeaderName::parse(Some($name));
+                let test_name = $name.parse::<HeaderName>().unwrap();
                 let expected_name = HeaderName {
                     inner: HeaderKind::Custom(Vec::from($name))
                 };
-                let test_value = HeaderValue::parse(Some($value));
+
+                let test_value = $value.parse::<HeaderValue>().unwrap();
                 let expected_value = HeaderValue(Vec::from($value));
-                assert_eq!(test_name, Ok(expected_name));
-                assert_eq!(test_value, Ok(expected_value));
+
+                assert_eq!(test_name, expected_name);
+                assert_eq!(test_value, expected_value);
             }};
         }
 
@@ -151,29 +153,28 @@ mod parse {
             (CONNECTION, b"keep-alive"[..].into()),
             (HOST, b"example.com"[..].into()),
             (USER_AGENT, b"xh/0.19.3"[..].into()),
-            (HeaderName {
-                inner: HeaderKind::Custom(Vec::from("Pineapple")),
-            }, b"pizza"[..].into()),
+            (
+                HeaderName {
+                    inner: HeaderKind::Custom(Vec::from("Pineapple")),
+                },
+                b"pizza"[..].into()
+            )
         ]));
 
         let mut test_hdrs = Headers::new();
 
         for line in headers_section.split('\n') {
             let trim = line.trim();
-            if trim.is_empty() { break; }
-            let header = Header::parse(trim).unwrap();
+
+            if trim.is_empty() {
+                break;
+            }
+
+            let header = trim.parse::<Header>().unwrap();
             test_hdrs.insert(header.name, header.value);
         }
 
-        // Compare total lengths.
-        assert_eq!(test_hdrs.0.len(), expected_hdrs.0.len());
-
-        // Compare each header name and header value.
-        test_hdrs.0.iter().zip(expected_hdrs.0.iter()).for_each(
-            |((test_name, test_value), (exp_name, exp_value))| {
-                assert_eq!(*test_name, *exp_name);
-                assert_eq!(*test_value, *exp_value); 
-            });
+        assert_eq!(test_hdrs, expected_hdrs); 
     }
 
     #[test]

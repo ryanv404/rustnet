@@ -100,14 +100,6 @@ impl HeaderName {
 
 		title
     }
-
-    /// Parses an optional string slice into a `HeaderName`
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(maybe_name: Option<&str>) -> NetResult<Self> {
-        maybe_name
-            .ok_or_else(|| ParseErrorKind::Header.into())
-            .and_then(Self::from_str)
-    }
 }
 
 /// Header name representation.

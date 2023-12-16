@@ -390,8 +390,14 @@ impl Response {
     }
 
     /// Parses the target type and returns a new `Response` object.
-    #[allow(clippy::missing_errors_doc)]
-    #[allow(clippy::missing_panics_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `fs::read` or `fs::read_to_string` fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `Mutex` in `Target::FnMut` is poisoned.
     pub fn from_target(code: u16, target: &Target) -> NetResult<Self> {
         let mut res = Self::new(code);
 

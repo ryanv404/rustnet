@@ -16,7 +16,6 @@ use crate::{
 
 /// Configures the socket address and the router for a `Server`.
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs
@@ -111,14 +110,16 @@ where
 
         let listener = self.addr
             .as_ref()
-            .and_then(|addr| match Listener::bind(addr) {
-                Ok(listener) => Some(listener),
-                Err(_) => match (self.ip, self.port) {
-                    (Some(ip), Some(port)) => {
-                        Listener::bind_ip_port(ip, port).ok()
+            .and_then(|addr| {
+                match Listener::bind(addr) {
+                    Ok(listener) => Some(listener),
+                    Err(_) => match (self.ip, self.port) {
+                        (Some(ip), Some(port)) => {
+                            Listener::bind_ip_port(ip, port).ok()
+                        },
+                        (_, _) => None,
                     },
-                    (_, _) => None,
-                },
+                }
             })
             .ok_or(IoErrorKind::InvalidInput)?;
 
@@ -135,8 +136,9 @@ where
     /// Builds and starts the server.
     #[allow(clippy::missing_errors_doc)]
     pub fn start(self) -> NetResult<Server> {
-        let server = self.build()?;
-        server.start()
+        let mut server = self.build()?;
+        server.start();
+        Ok(server)
     }
 }
 
@@ -173,9 +175,7 @@ impl Listener {
     /// Returns the server's socket address.
     #[allow(clippy::missing_errors_doc)]
     pub fn local_addr(&self) -> NetResult<SocketAddr> {
-        self.inner
-            .local_addr()
-            .map_err(Into::into)
+        self.inner.local_addr().map_err(Into::into)
     }
 
     /// Returns a `NetReader` instance for each incoming connection.
@@ -249,14 +249,13 @@ impl Server {
     }
 
     /// Activates the server to start listening on its bound address.
-    #[allow(clippy::missing_errors_doc)]
-    #[allow(clippy::missing_panics_doc)]
-    pub fn start(mut self) -> NetResult<Self> {
+    pub fn start(&mut self) {
         if *self.do_logging {
-            let local_addr = self.listener.local_addr()?;
-            let ip = local_addr.ip();
-            let port = local_addr.port();
-            println!("[SERVER] Listening on {ip}:{port}.");
+            if let Ok(addr) = self.listener.local_addr() {
+                let ip = addr.ip();
+                let port = addr.port();
+                println!("[SERVER] Listening at {ip}:{port}.");
+            }
         }
 
         let router = Arc::clone(&self.router);
@@ -327,13 +326,10 @@ impl Server {
         });
 
         self.handle = Some(handle);
-
-        Ok(self)
     }
 
     /// Handles a request from a remote connection.
     #[allow(clippy::missing_errors_doc)]
-    #[allow(clippy::similar_names)]
     pub fn handle_connection(
         reader: NetReader,
         router: &Arc<Router>,
@@ -343,20 +339,20 @@ impl Server {
         let mut req = Request::recv(reader)?;
         let route = req.route();
 
-        let mut res = Response::from_route(&route, router);
-        res.writer = req.reader.take().map(NetWriter::from);
+        let mut resp = Response::from_route(&route, router);
+        resp.writer = req.reader.take().map(NetWriter::from);
 
         if **do_logging {
-            let status = res.status_code();
+            let status = resp.status_code();
             let method = route.method();
             let path = route.path();
 
-            res.remote_ip().map_or_else(
+            resp.remote_ip().map_or_else(
                 || println!("[?|{status}] {method} {path}"),
                 |ip| println!("[{ip}|{status}] {method} {path}"));
         }
 
-        res.send()?;
+        resp.send()?;
 
         // Check for server shutdown signal
         if **use_shutdown_route && route.is_shutdown_route() {
@@ -389,21 +385,15 @@ impl Server {
         println!("[SERVER] Error: {e}");
     }
 
-    /// Logs a server shutdown message to stdout.
-    pub fn log_error_msg(msg: &str) {
-        println!("[SERVER] Error: {msg}");
-    }
-
-    /// Logs a server shutdown message to stdout.
-    pub fn log_shutdown(&self) {
-        println!("[SERVER] Now shutting down.");
-    }
-
     /// Triggers graceful shutdown of the server.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is an error while shutting down the
+    /// underlying `TcpStream`.
     pub fn shutdown(self) -> NetResult<()> {
         if *self.do_logging {
-            self.log_shutdown();
+            println!("[SERVER] Now shutting down.");
         }
 
         // Briefly connect to ourselves to unblock the listener thread.
@@ -420,8 +410,10 @@ impl Server {
     }
 }
 
+/// A task to be executed by a worker thread.
 pub type Task = Box<dyn FnOnce() + Send + 'static>;
 
+/// Holds a handle to a single worker thread.
 pub struct Worker {
     pub id: usize,
     pub handle: Option<JoinHandle<()>>,
@@ -429,7 +421,10 @@ pub struct Worker {
 
 impl Worker {
     /// Spawns a worker thread that receives tasks and executes them.
-    #[allow(clippy::missing_panics_doc)]
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is a problem receiving a `Task`.
     pub fn new(id: usize, receiver: Arc<Mutex<Receiver<Task>>>) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(job) = receiver.lock().unwrap().recv() {
@@ -449,8 +444,11 @@ pub struct ThreadPool {
 
 impl ThreadPool {
     /// Create a new `ThreadPool` with the given number of worker threads.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `size` argument is less than one.
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
         let mut workers = Vec::with_capacity(size);
@@ -467,16 +465,17 @@ impl ThreadPool {
     }
 
     /// Sends a `Task` to a worker thread for executon.
-    #[allow(clippy::missing_panics_doc)]
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is a problem sending the `Task` to the worker thread.
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
     {
-        self.sender
-            .as_ref()
-            .unwrap()
-            .send(Box::new(f))
-            .unwrap();
+        if let Some(tx) = self.sender.as_ref() {
+            tx.send(Box::new(f)).unwrap();
+        }
     }
 }
 

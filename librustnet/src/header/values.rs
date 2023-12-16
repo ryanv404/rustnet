@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 
-use crate::{NetError, NetResult, ParseErrorKind};
+use crate::{NetError, NetResult};
 
 #[derive(Clone, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
@@ -77,13 +77,5 @@ impl HeaderValue {
     #[must_use]
     pub fn as_str(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.0)
-    }
-
-    /// Parses an optional string slice into a `HeaderValue`
-    #[allow(clippy::missing_errors_doc)]
-    pub fn parse(maybe_value: Option<&str>) -> NetResult<Self> {
-        maybe_value
-            .ok_or_else(|| ParseErrorKind::Header.into())
-            .and_then(Self::from_str)
     }
 }

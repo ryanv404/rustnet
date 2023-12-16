@@ -9,6 +9,7 @@
 #![deny(clippy::perf)]
 #![deny(clippy::style)]
 #![deny(clippy::suspicious)]
+#![allow(clippy::module_name_repetitions)]
 
 #[cfg(test)]
 mod tests;
@@ -33,7 +34,7 @@ pub use request::{Request, RequestLine, NetReader};
 pub use response::{Response, StatusLine, NetWriter};
 pub use router::{Route, RouteBuilder, Router, Target};
 pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
-pub use util::{trim_whitespace_bytes, get_datetime};
+pub use util::trim_whitespace_bytes;
 
 pub mod consts {
     pub use crate::header::header_consts::*;
