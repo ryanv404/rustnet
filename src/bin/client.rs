@@ -1,11 +1,11 @@
 use std::env;
-use std::io::{Result as IoResult};
+use std::io::Result as IoResult;
 
-use librustnet::{Client, Method};
-use librustnet::consts::DATE;
+use rustnet::consts::DATE;
+use rustnet::{Client, Method};
 
-mod tui;
-use tui::Browser;
+mod client_tui;
+use client_tui::Browser;
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -116,7 +116,7 @@ fn main() -> IoResult<()> {
         .send_text(&args.next().unwrap_or_default())?;
 
     // Receive the response from the server.
-    client.recv()?;
+    client.recv();
 
     // Ignore Date headers in tests.
     if testing_client || testing_server {
@@ -172,11 +172,7 @@ fn print_output(client: &mut Client) {
     let req = client.req.take().unwrap();
     let res = client.res.take().unwrap();
 
-    let res_color = if res.status_code() >= 400 {
-        RED
-    } else {
-        GRN
-    };
+    let res_color = if res.status_code() >= 400 { RED } else { GRN };
 
     let request_line = req.request_line();
     let req_headers = req.headers_to_string();
@@ -194,30 +190,35 @@ fn print_output(client: &mut Client) {
         (0, 0) => {
             println!(
                 "{PURP}{request_line}{CLR}\n{req_headers}\n\n\
-                {res_color}{status_line}{CLR}\n{res_headers}");
-        },
+                {res_color}{status_line}{CLR}\n{res_headers}"
+            );
+        }
         (_, 0) => {
             println!(
                 "{PURP}{request_line}{CLR}\n{req_headers}\n{req_body}\n\n\
-                {res_color}{status_line}{CLR}\n{res_headers}");
-        },
+                {res_color}{status_line}{CLR}\n{res_headers}"
+            );
+        }
         (0, _) => {
             println!(
                 "{PURP}{request_line}{CLR}\n{req_headers}\n\n\
-                {res_color}{status_line}{CLR}\n{res_headers}\n\n{res_body}");
-        },
+                {res_color}{status_line}{CLR}\n{res_headers}\n\n{res_body}"
+            );
+        }
         (_, _) => {
             println!(
                 "{PURP}{request_line}{CLR}\n{req_headers}\n{req_body}\n\n\
-                {res_color}{status_line}{CLR}\n{res_headers}\n\n{res_body}");
-        },
+                {res_color}{status_line}{CLR}\n{res_headers}\n\n{res_body}"
+            );
+        }
     }
 }
 
 fn show_help() {
     let prog_name = env!("CARGO_BIN_NAME");
 
-    eprintln!("\
+    eprintln!(
+        "\
 {GRN}Usage:{CLR} {prog_name} <URI> [DATA]\n
 {GRN}Arguments:{CLR}
     URI    An HTTP URI to a remote host (e.g. \"httpbin.org/json\").
@@ -228,6 +229,7 @@ fn show_help() {
     --path PATH      Use PATH as the URI path (default: \"/\").
     --tui            Starts the client TUI.\n
 {GRN}Test Options:{CLR}
-    --client-tests   Use output style expected by client tests.
-    --server-tests   Use output style expected by server tests.");
+    --client-tests   Use output style expected for client tests.
+    --server-tests   Use output style expected for server tests."
+    );
 }

@@ -2,23 +2,20 @@ use std::convert::Into;
 use std::error::Error as StdError;
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
-use crate::{
-    Body, Method, NetError, NetReader, NetResult, NetWriter, Request, Response,
-    Route, Router, Target,
-};
+use crate::{NetError, NetReader, NetResult, NetWriter, Response, Route, Router, Target};
 
 /// Configures the socket address and the router for a `Server`.
 #[derive(Debug)]
 pub struct ServerBuilder<A>
 where
-    A: ToSocketAddrs
+    A: ToSocketAddrs,
 {
     pub ip: Option<IpAddr>,
     pub port: Option<u16>,
@@ -30,7 +27,7 @@ where
 
 impl<A> Default for ServerBuilder<A>
 where
-    A: ToSocketAddrs
+    A: ToSocketAddrs,
 {
     fn default() -> Self {
         Self {
@@ -39,14 +36,14 @@ where
             addr: None,
             router: None,
             do_logging: false,
-            use_shutdown_route: false
+            use_shutdown_route: false,
         }
     }
 }
 
 impl<A> ServerBuilder<A>
 where
-    A: ToSocketAddrs
+    A: ToSocketAddrs,
 {
     /// Returns a builder object that is used to build a `Server`.
     #[must_use]
@@ -84,7 +81,7 @@ where
 
     /// Set whether to log connections to stdout (default: disabled).
     #[must_use]
-    pub const fn log(mut self, do_logging: bool) -> Self {
+    pub const fn do_logging(mut self, do_logging: bool) -> Self {
         self.do_logging = do_logging;
         self
     }
@@ -92,7 +89,7 @@ where
     /// Set whether to add a route to gracefully shutdown the server
     /// (default: disabled).
     #[must_use]
-    pub const fn shutdown_route(mut self, use_shutdown_route: bool) -> Self {
+    pub const fn use_shutdown_route(mut self, use_shutdown_route: bool) -> Self {
         self.use_shutdown_route = use_shutdown_route;
         self
     }
@@ -103,23 +100,20 @@ where
         let mut router = self.router.take().unwrap_or_default();
 
         if self.use_shutdown_route {
-            let route = Route::new(Method::Delete, "/__shutdown_server__");
+            let route = Route::Delete("/__shutdown_server__".to_string());
             let target = Target::Text("The server is now shutting down.");
             router.mount(route, target);
         }
 
-        let listener = self.addr
+        let listener = self
+            .addr
             .as_ref()
-            .and_then(|addr| {
-                match Listener::bind(addr) {
-                    Ok(listener) => Some(listener),
-                    Err(_) => match (self.ip, self.port) {
-                        (Some(ip), Some(port)) => {
-                            Listener::bind_ip_port(ip, port).ok()
-                        },
-                        (_, _) => None,
-                    },
-                }
+            .and_then(|addr| match Listener::bind(addr) {
+                Ok(listener) => Some(listener),
+                Err(_) => match (self.ip, self.port) {
+                    (Some(ip), Some(port)) => Listener::bind_ip_port(ip, port).ok(),
+                    (_, _) => None,
+                },
             })
             .ok_or(IoErrorKind::InvalidInput)?;
 
@@ -129,16 +123,15 @@ where
             do_logging: Arc::new(self.do_logging),
             use_shutdown_route: Arc::new(self.use_shutdown_route),
             keep_listening: Arc::new(AtomicBool::new(false)),
-            handle: None
+            handle: None,
         })
     }
 
     /// Builds and starts the server.
     #[allow(clippy::missing_errors_doc)]
     pub fn start(self) -> NetResult<Server> {
-        let mut server = self.build()?;
-        server.start();
-        Ok(server)
+        let server = self.build()?;
+        Ok(server.start())
     }
 }
 
@@ -155,17 +148,17 @@ impl From<TcpListener> for Listener {
 }
 
 impl Listener {
-    /// Bind the listener to the given socket address.
+    /// Bind a `Listener` to a given socket address.
     #[allow(clippy::missing_errors_doc)]
     pub fn bind<A>(addr: A) -> NetResult<Self>
     where
-        A: ToSocketAddrs
+        A: ToSocketAddrs,
     {
         let inner = TcpListener::bind(addr)?;
         Ok(Self { inner })
     }
 
-    /// Bind the listener to the given socket address.
+    /// Bind a `Listener` to the given IP address and port.
     #[allow(clippy::missing_errors_doc)]
     pub fn bind_ip_port(ip: IpAddr, port: u16) -> NetResult<Self> {
         let inner = TcpListener::bind((ip, port))?;
@@ -173,22 +166,26 @@ impl Listener {
     }
 
     /// Returns the server's socket address.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `TcpListener::local_addr` returns an error.
     pub fn local_addr(&self) -> NetResult<SocketAddr> {
         self.inner.local_addr().map_err(Into::into)
     }
 
     /// Returns a `NetReader` instance for each incoming connection.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `TcpStream::try_clone` returns an error.
     pub fn accept(&self) -> NetResult<(NetReader, NetWriter)> {
         self.inner
             .accept()
-            .and_then(|(stream, _)| stream
-                .try_clone()
-                .map(|cloned| (stream, cloned)))
-            .map(|(stream, cloned)| {
-                let reader = NetReader::from(stream);
-                let writer = NetWriter::from(cloned);
+            .and_then(|(stream, _)| Ok((stream.try_clone()?, stream)))
+            .map(|(clone, stream)| {
+                let reader = NetReader::from(clone);
+                let writer = NetWriter::from(stream);
                 (reader, writer)
             })
             .map_err(|e| NetError::ReadError(e.kind()))
@@ -216,7 +213,7 @@ impl Server {
     #[must_use]
     pub fn builder<A>() -> ServerBuilder<A>
     where
-        A: ToSocketAddrs
+        A: ToSocketAddrs,
     {
         ServerBuilder::new()
     }
@@ -225,31 +222,27 @@ impl Server {
     #[must_use]
     pub fn http<A>(addr: A) -> ServerBuilder<A>
     where
-        A: ToSocketAddrs
+        A: ToSocketAddrs,
     {
         ServerBuilder::new().addr(addr)
     }
 
     /// Returns a new `Server` instance.
     #[must_use]
-    pub fn new(
-        router: Router,
-        listener: Listener,
-        use_shutdown_route: bool,
-        do_log: bool
-    ) -> Self {
+    pub fn new(router: Router, listener: Listener, use_shutdown_route: bool, do_log: bool) -> Self {
         Self {
             router: Arc::new(router),
             listener: Arc::new(listener),
             do_logging: Arc::new(do_log),
             use_shutdown_route: Arc::new(use_shutdown_route),
             keep_listening: Arc::new(AtomicBool::new(false)),
-            handle: None
+            handle: None,
         }
     }
 
     /// Activates the server to start listening on its bound address.
-    pub fn start(&mut self) {
+    #[must_use]
+    pub fn start(mut self) -> Self {
         if *self.do_logging {
             if let Ok(addr) = self.listener.local_addr() {
                 let ip = addr.ip();
@@ -285,77 +278,72 @@ impl Server {
                                 reader,
                                 &inner_router,
                                 &do_log,
-                                &do_use_shutdown_rt
+                                &do_use_shutdown_rt,
                             );
 
                             match result {
                                 Ok(do_shutdown) if do_shutdown => {
                                     do_keep_listening.store(false, Ordering::Relaxed);
-                                },
+                                }
                                 Err(err1) => {
-                                    // Send 500 server error response if there's an error.
-                                    let mut res = Response::new(500);
-
+                                    // Send a 500 server error response if there's an error.
                                     let msg = format!("Error: {}", &err1);
-                                    res.body = Body::Text(msg);
 
-                                    res.headers.insert_connection("close");
-                                    res.headers.insert_cache_control("no-cache");
-                                    res.headers.insert_content_length(res.body.len());
-                                    res.headers.insert_content_type("text/plain; charset=utf-8");
-
-                                    match writer.send_response(&mut res) {
+                                    match writer.send_server_error(&msg) {
                                         Ok(()) if *do_log => {
                                             Self::log_error(&err1);
-                                        },
+                                        }
                                         Err(err2) if *do_log => {
                                             Self::log_error(&err1);
                                             Self::log_error(&err2);
-                                        },
-                                        _ => {},
+                                        }
+                                        _ => {}
                                     }
-                                },
-                                _ => {},
+                                }
+                                _ => {}
                             }
                         });
-                    },
+                    }
                     Err(e) if *do_logging => Self::log_error(&e),
-                    _ => {},
+                    _ => {}
                 }
             }
         });
 
         self.handle = Some(handle);
+        self
     }
 
     /// Handles a request from a remote connection.
     #[allow(clippy::missing_errors_doc)]
     pub fn handle_connection(
-        reader: NetReader,
+        mut reader: NetReader,
         router: &Arc<Router>,
         do_logging: &Arc<bool>,
-        use_shutdown_route: &Arc<bool>
+        use_shutdown_route: &Arc<bool>,
     ) -> NetResult<bool> {
-        let mut req = Request::recv(reader)?;
-        let route = req.route();
-
-        let mut resp = Response::from_route(&route, router);
-        resp.writer = req.reader.take().map(NetWriter::from);
+        let req = reader.recv_request()?;
+        let mut resp = Response::from_route(&req.route(), router);
+        let mut writer = NetWriter::from(reader);
 
         if **do_logging {
             let status = resp.status_code();
-            let method = route.method();
-            let path = route.path();
+            let method = req.method();
+            let path = req.path();
 
-            resp.remote_ip().map_or_else(
-                || println!("[?|{status}] {method} {path}"),
-                |ip| println!("[{ip}|{status}] {method} {path}"));
+            writer.get_ref().peer_addr().map_or_else(
+                |_| println!("[?|{status}] {method} {path}"),
+                |sock| {
+                    let ip = sock.ip();
+                    println!("[{ip}|{status}] {method} {path}");
+                },
+            );
         }
 
-        resp.send()?;
+        resp.send(&mut writer)?;
 
         // Check for server shutdown signal
-        if **use_shutdown_route && route.is_shutdown_route() {
+        if **use_shutdown_route && req.route().is_shutdown_route() {
             Ok(true)
         } else {
             Ok(false)
@@ -432,7 +420,10 @@ impl Worker {
             }
         });
 
-        Self { id, handle: Some(handle) }
+        Self {
+            id,
+            handle: Some(handle),
+        }
     }
 }
 

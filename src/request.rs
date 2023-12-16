@@ -1,18 +1,13 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{
-    BufRead, BufReader, ErrorKind as IoErrorKind, Read, Result as IoResult,
-};
+use std::io::{BufRead, BufReader, ErrorKind as IoErrorKind, Read, Result as IoResult};
 use std::net::TcpStream;
 use std::str::{self, FromStr};
 use std::string::ToString;
 
-use crate::consts::{
-    CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS, READER_BUFSIZE,
-};
+use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS, READER_BUFSIZE};
 use crate::{
-    Body, HeaderName, HeaderValue, Header, Headers, Method, NetError,
-    NetResult, NetWriter, ParseErrorKind, Response, Route, StatusLine,
-    Version,
+    Body, Header, HeaderName, HeaderValue, Headers, Method, NetError, NetResult, NetWriter,
+    ParseErrorKind, Response, Route, StatusLine, Version,
 };
 
 /// A buffered reader wrapper around a `TcpStream` instance.
@@ -69,24 +64,30 @@ impl NetReader {
 
     /// Reads an HTTP request from the underlying `TcpStream`.
     #[allow(clippy::missing_errors_doc)]
-    pub fn recv_request(mut reader: Self) -> NetResult<Request> {
-        let request_line = reader.read_request_line()?;
-        let headers = reader.read_headers()?;
-        let body = reader.read_body(&headers)?;
-        let reader = Some(reader);
+    pub fn recv_request(&mut self) -> NetResult<Request> {
+        let request_line = self.read_request_line()?;
+        let headers = self.read_headers()?;
+        let body = self.read_body(&headers)?;
 
-        Ok(Request { request_line, headers, body, reader })
+        Ok(Request {
+            request_line,
+            headers,
+            body,
+        })
     }
 
     /// Reads an HTTP response from the underlying `TcpStream`.
     #[allow(clippy::missing_errors_doc)]
-    pub fn recv_response(mut reader: Self) -> NetResult<Response> {
-        let status_line = reader.read_status_line()?;
-        let headers = reader.read_headers()?;
-        let body = reader.read_body(&headers)?;
-        let writer = Some(NetWriter::from(reader));
+    pub fn recv_response(&mut self) -> NetResult<Response> {
+        let status_line = self.read_status_line()?;
+        let headers = self.read_headers()?;
+        let body = self.read_body(&headers)?;
 
-        Ok(Response { status_line, headers, body, writer })
+        Ok(Response {
+            status_line,
+            headers,
+            body,
+        })
     }
 
     /// Reads a request line from the underlying `TcpStream`.
@@ -157,15 +158,13 @@ impl NetReader {
         let body_len = content_len
             .ok_or(ParseErrorKind::Body)
             .map(ToString::to_string)
-            .and_then(|s| s.trim().parse::<usize>()
-                .map_err(|_| ParseErrorKind::Body))?;
+            .and_then(|s| s.trim().parse::<usize>().map_err(|_| ParseErrorKind::Body))?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
         }
 
-        let num_bytes = u64::try_from(body_len)
-            .map_err(|_| ParseErrorKind::Body)?;
+        let num_bytes = u64::try_from(body_len).map_err(|_| ParseErrorKind::Body)?;
 
         let body_type = content_type
             .map(ToString::to_string)
@@ -179,7 +178,6 @@ impl NetReader {
         let mut reader = self.take(num_bytes);
         let mut buf = Vec::with_capacity(body_len);
 
-        // TODO: handle chunked data and partial reads.
         reader.read_to_end(&mut buf)?;
 
         let mut type_tokens = body_type.splitn(2, '/');
@@ -188,24 +186,20 @@ impl NetReader {
             Some("text") => match type_tokens.next().map(str::trim) {
                 Some(s) if s.starts_with("html") => {
                     Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
-                },
+                }
                 Some(s) if s.starts_with("plain") => {
                     Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
-                },
-                _ => {
-                    Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
-                },
+                }
+                _ => Ok(Body::Text(String::from_utf8_lossy(&buf).to_string())),
             },
             Some("application") => match type_tokens.next().map(str::trim) {
                 Some(s) if s.starts_with("json") => {
                     Ok(Body::Json(String::from_utf8_lossy(&buf).to_string()))
-                },
+                }
                 Some(s) if s.starts_with("xml") => {
                     Ok(Body::Xml(String::from_utf8_lossy(&buf).to_string()))
-                },
-                Some(s) if s.starts_with("octet-stream") => {
-                    Ok(Body::Bytes(buf))
-                },
+                }
+                Some(s) if s.starts_with("octet-stream") => Ok(Body::Bytes(buf)),
                 _ => Ok(Body::Bytes(buf)),
             },
             Some("image") => match type_tokens.next().map(str::trim) {
@@ -233,7 +227,7 @@ impl Default for RequestLine {
         Self {
             method: Method::Get,
             path: String::from("/"),
-            version: Version::OneDotOne
+            version: Version::OneDotOne,
         }
     }
 }
@@ -267,14 +261,22 @@ impl FromStr for RequestLine {
             .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
             .and_then(str::parse)?;
 
-        Ok(Self { method, path, version })
+        Ok(Self {
+            method,
+            path,
+            version,
+        })
     }
 }
 impl RequestLine {
     /// Returns a new `RequestLine` instance.
     #[must_use]
     pub const fn new(method: Method, path: String, version: Version) -> Self {
-        Self { method, path, version }
+        Self {
+            method,
+            path,
+            version,
+        }
     }
 
     /// Returns the HTTP method.
@@ -307,7 +309,6 @@ pub struct Request {
     pub request_line: RequestLine,
     pub headers: Headers,
     pub body: Body,
-    pub reader: Option<NetReader>,
 }
 
 impl PartialEq for Request {
@@ -322,30 +323,29 @@ impl Eq for Request {}
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		// The request line.
-		writeln!(f, "{}", self.request_line)?;
+        // The request line.
+        writeln!(f, "{}", self.request_line)?;
 
-		// The request headers.
-		for (name, value) in &self.headers.0 {
-			writeln!(f, "{name}: {value}")?;
-		}
+        // The request headers.
+        for (name, value) in &self.headers.0 {
+            writeln!(f, "{name}: {value}")?;
+        }
 
         // The request body.
         if !self.body.is_empty() {
             writeln!(f, "{}", &self.body)?;
         }
 
-		Ok(())
+        Ok(())
     }
 }
 
 impl Debug for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		f.debug_struct("Request")
-			.field("request_line", &self.request_line)
-			.field("headers", &self.headers)
+        f.debug_struct("Request")
+            .field("request_line", &self.request_line)
+            .field("headers", &self.headers)
             .field("body", &self.body)
-			.field("reader", &self.reader)
             .finish()
     }
 }
@@ -399,7 +399,7 @@ impl Request {
         self.headers.get(name)
     }
 
-	/// Adds or updates a request header field line.
+    /// Adds or updates a request header field line.
     pub fn insert_header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
     }
@@ -410,32 +410,31 @@ impl Request {
         if self.headers.0.is_empty() {
             String::new()
         } else {
-            self.headers.0.iter().fold(String::new(), 
-                |mut acc, (name, value)| {
+            self.headers
+                .0
+                .iter()
+                .fold(String::new(), |mut acc, (name, value)| {
                     acc.push_str(&format!("{name}: {value}\n"));
                     acc
                 })
         }
     }
 
-	/// Returns a reference to the request body, if present.
-	#[must_use]
-	pub const fn body(&self) -> &Body {
-		&self.body
-	}
+    /// Returns a reference to the request body, if present.
+    #[must_use]
+    pub const fn body(&self) -> &Body {
+        &self.body
+    }
 
     /// Sends an HTTP request to a remote server.
     #[allow(clippy::missing_errors_doc)]
-    pub fn send(&mut self) -> NetResult<()> {
-        match self.reader.take() {
-            Some(reader) => NetWriter::from(reader).send_request(self),
-            None => Err(IoErrorKind::NotConnected)?,
-        }
+    pub fn send(&mut self, writer: &mut NetWriter) -> NetResult<()> {
+        writer.send_request(self)
     }
 
     /// Receives an HTTP request from a remote client.
     #[allow(clippy::missing_errors_doc)]
-    pub fn recv(reader: NetReader) -> NetResult<Self> {
-        NetReader::recv_request(reader)
+    pub fn recv(reader: &mut NetReader) -> NetResult<Self> {
+        reader.recv_request()
     }
 }

@@ -123,8 +123,7 @@ impl FromStr for Status {
             .split_once(' ')
             .ok_or_else(|| ParseErrorKind::Status.into())
             .and_then(|(code, _msg)| {
-                let status_code = code.parse::<u16>()
-                    .map_err(|_| ParseErrorKind::Status)?;
+                let status_code = code.parse::<u16>().map_err(|_| ParseErrorKind::Status)?;
                 Ok(Self(status_code))
             })
     }

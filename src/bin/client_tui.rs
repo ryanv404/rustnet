@@ -1,12 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{
-    self, BufRead, BufWriter, ErrorKind as IoErrorKind, StdinLock, StdoutLock,
-    Write,
-};
+use std::io::{self, BufRead, BufWriter, ErrorKind as IoErrorKind, StdinLock, StdoutLock, Write};
 
-use librustnet::{
-    Client, NetReader, NetResult, NetError, NetWriter, Response, Request
-};
+use rustnet::{Client, NetError, NetReader, NetResult, NetWriter, Request, Response};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -62,7 +57,7 @@ impl<'a> Browser<'a> {
             reader: None,
             writer: None,
             stdin,
-            stdout
+            stdout,
         }
     }
 
@@ -73,7 +68,7 @@ impl<'a> Browser<'a> {
 
         browser.clear_screen()?;
         browser.print_intro_message()?;
-        
+
         if let Err(e) = browser.run() {
             eprintln!("Error: {e}");
         }
@@ -96,34 +91,44 @@ impl<'a> Browser<'a> {
 
             match line.trim() {
                 "" => continue,
-                "body" => { self.set_output_style(OutputStyle::ResBody)?; },
-                "clear" => { self.clear_screen()?; },
+                "body" => {
+                    self.set_output_style(OutputStyle::ResBody)?;
+                }
+                "clear" => {
+                    self.clear_screen()?;
+                }
                 "close" | "quit" => self.is_running = false,
-                "help" => { self.show_help()?; },
-                "home" => { self.set_home_mode()?; },
-                "request" => { self.set_output_style(OutputStyle::Request)?; },
-                "response" => { self.set_output_style(OutputStyle::Response)?; },
-                "status" => { self.set_output_style(OutputStyle::Status)?; },
-                "verbose" => { self.set_output_style(OutputStyle::Verbose)?; },
+                "help" => {
+                    self.show_help()?;
+                }
+                "home" => {
+                    self.set_home_mode()?;
+                }
+                "request" => {
+                    self.set_output_style(OutputStyle::Request)?;
+                }
+                "response" => {
+                    self.set_output_style(OutputStyle::Response)?;
+                }
+                "status" => {
+                    self.set_output_style(OutputStyle::Status)?;
+                }
+                "verbose" => {
+                    self.set_output_style(OutputStyle::Verbose)?;
+                }
                 uri if self.output_style == OutputStyle::Request => {
                     if let Ok((addr, path)) = Client::parse_uri(uri) {
-                        let mut client = Client::builder()
-                            .addr(addr)
-                            .path(&path)
-                            .build()?;
+                        let mut client = Client::builder().addr(addr).path(&path).build()?;
 
                         self.request = client.req.take();
                     }
 
                     self.print_request()?;
                     self.request = None;
-                },
+                }
                 uri => match Client::parse_uri(uri) {
                     Ok((addr, path)) => {
-                        let mut client = Client::builder()
-                            .addr(&addr)
-                            .path(&path)
-                            .build()?;
+                        let mut client = Client::builder().addr(&addr).path(&path).build()?;
 
                         self.reader = client.reader.try_clone().ok();
                         self.writer = client.writer.try_clone().ok();
@@ -141,9 +146,11 @@ impl<'a> Browser<'a> {
                             self.reader = None;
                             self.writer = None;
                         }
-                    },
-                    Err(_) => { self.warn_invalid_input("URI")?; },
-                }
+                    }
+                    Err(_) => {
+                        self.warn_invalid_input("URI")?;
+                    }
+                },
             }
         }
 
@@ -153,16 +160,32 @@ impl<'a> Browser<'a> {
     #[allow(unused)]
     fn check_for_command(&mut self, input: &str) -> NetResult<()> {
         match input {
-            "body" => { self.set_output_style(OutputStyle::ResBody)?; },
-            "clear" => { self.clear_screen()?; },
+            "body" => {
+                self.set_output_style(OutputStyle::ResBody)?;
+            }
+            "clear" => {
+                self.clear_screen()?;
+            }
             "close" | "quit" => self.is_running = false,
-            "help" => { self.show_help()?; },
-            "home" => { self.set_home_mode()?; },
-            "request" => { self.set_output_style(OutputStyle::Request)?; },
-            "response" => { self.set_output_style(OutputStyle::Response)?; },
-            "status" => { self.set_output_style(OutputStyle::Status)?; },
-            "verbose" => { self.set_output_style(OutputStyle::Verbose)?; },
-            _ => {},
+            "help" => {
+                self.show_help()?;
+            }
+            "home" => {
+                self.set_home_mode()?;
+            }
+            "request" => {
+                self.set_output_style(OutputStyle::Request)?;
+            }
+            "response" => {
+                self.set_output_style(OutputStyle::Response)?;
+            }
+            "status" => {
+                self.set_output_style(OutputStyle::Status)?;
+            }
+            "verbose" => {
+                self.set_output_style(OutputStyle::Verbose)?;
+            }
+            _ => {}
         }
 
         Ok(())
@@ -195,20 +218,38 @@ impl<'a> Browser<'a> {
                         self.in_path_mode = self.is_connection_open();
                         self.response = None;
                     }
-                },
-                "body" => { self.set_output_style(OutputStyle::ResBody)?; },
-                "clear" => { self.clear_screen()?; },
+                }
+                "body" => {
+                    self.set_output_style(OutputStyle::ResBody)?;
+                }
+                "clear" => {
+                    self.clear_screen()?;
+                }
                 "close" | "quit" => {
                     self.in_path_mode = false;
                     self.is_running = false;
-                },
-                "help" => { self.show_help()?; },
-                "home" => { self.set_home_mode()?; },
-                "request" => { self.set_output_style(OutputStyle::Request)?; },
-                "response" => { self.set_output_style(OutputStyle::Response)?; },
-                "status" => { self.set_output_style(OutputStyle::Status)?; },
-                "verbose" => { self.set_output_style(OutputStyle::Verbose)?; },
-                _ => { self.warn_invalid_input("path")?; },
+                }
+                "help" => {
+                    self.show_help()?;
+                }
+                "home" => {
+                    self.set_home_mode()?;
+                }
+                "request" => {
+                    self.set_output_style(OutputStyle::Request)?;
+                }
+                "response" => {
+                    self.set_output_style(OutputStyle::Response)?;
+                }
+                "status" => {
+                    self.set_output_style(OutputStyle::Status)?;
+                }
+                "verbose" => {
+                    self.set_output_style(OutputStyle::Verbose)?;
+                }
+                _ => {
+                    self.warn_invalid_input("path")?;
+                }
             }
         }
 
@@ -216,7 +257,7 @@ impl<'a> Browser<'a> {
     }
 
     fn clear_screen(&mut self) -> NetResult<()> {
-		// Clear the screen and move the cursor to the top left.
+        // Clear the screen and move the cursor to the top left.
         self.stdout.write_all(b"\x1b[2J\x1b[1;1H")?;
         self.stdout.flush()?;
         Ok(())
@@ -224,10 +265,11 @@ impl<'a> Browser<'a> {
 
     fn print_intro_message(&mut self) -> NetResult<()> {
         let prog_name = env!("CARGO_BIN_NAME");
-		writeln!(
+        writeln!(
             &mut self.stdout,
             "`{CYAN}{prog_name}{CLR}` is an HTTP client.\n\
-			Enter `{YLW}help{CLR}` to see all options.\n")?;
+			Enter `{YLW}help{CLR}` to see all options.\n"
+        )?;
         self.stdout.flush()?;
         Ok(())
     }
@@ -262,7 +304,9 @@ impl<'a> Browser<'a> {
     }
 
     fn show_help(&mut self) -> NetResult<()> {
-        writeln!(&mut self.stdout,"\n\
+        writeln!(
+            &mut self.stdout,
+            "\n\
 {PURP}HELP:{CLR}
     Enter an HTTP URI ({GRN}HOME{CLR} mode) or a URI path ({YLW}PATH{CLR} mode) to send
     an HTTP request to a remote host.\n
@@ -285,7 +329,8 @@ impl<'a> Browser<'a> {
     request   Print requests (but do not send them).
     response  Print responses (default).
     status    Print response status lines.
-    verbose   Print both the requests and the responses.\n")?;
+    verbose   Print both the requests and the responses.\n"
+        )?;
 
         Ok(())
     }
@@ -297,13 +342,17 @@ impl<'a> Browser<'a> {
     }
 
     fn warn_invalid_input(&mut self, kind: &str) -> NetResult<()> {
-        writeln!(&mut self.stdout, "{RED}Not a valid {kind} or command.{CLR}\n")?;
+        writeln!(
+            &mut self.stdout,
+            "{RED}Not a valid {kind} or command.{CLR}\n"
+        )?;
         self.stdout.flush()?;
         Ok(())
     }
 
     fn send(&mut self) -> NetResult<()> {
-        let mut writer = self.writer
+        let mut writer = self
+            .writer
             .as_ref()
             .ok_or(NetError::IoError(IoErrorKind::NotConnected))
             .and_then(|writer| writer.try_clone())?;
@@ -317,36 +366,35 @@ impl<'a> Browser<'a> {
     }
 
     fn recv(&mut self) -> NetResult<()> {
-        let res = self.reader
-            .as_ref()
-            .and_then(|reader| reader.try_clone().ok())
+        self.response = self
+            .reader
+            .as_mut()
             .ok_or(NetError::IoError(IoErrorKind::NotConnected))
-            .and_then(NetReader::recv_response)?;
+            .and_then(|reader| reader.recv_response())
+            .ok();
 
-        self.response = Some(res);
         Ok(())
     }
 
     fn print_request(&mut self) -> NetResult<()> {
-        let output = self.request
-            .as_ref()
-            .map_or_else(
-                || String::from("No request.\n"),
-                |req| {
-                    let req_line = req.request_line();
-                    let headers = req.headers_to_string();
-                    let headers = headers.trim_end();
+        let output = self.request.as_ref().map_or_else(
+            || String::from("No request.\n"),
+            |req| {
+                let req_line = req.request_line();
+                let headers = req.headers_to_string();
+                let headers = headers.trim_end();
 
-                    if req.body.is_empty() {
-                        format!("\n{PURP}{req_line}{CLR}\n{headers}\n\n")
-                    } else {
-                        let body = req.body.to_string();
-                        format!(
-                            "\n{PURP}{req_line}{CLR}\n{headers}\n\n{}\n\n",
-                            body.trim_end()
-                        )
-                    }
-                });
+                if req.body.is_empty() {
+                    format!("\n{PURP}{req_line}{CLR}\n{headers}\n\n")
+                } else {
+                    let body = req.body.to_string();
+                    format!(
+                        "\n{PURP}{req_line}{CLR}\n{headers}\n\n{}\n\n",
+                        body.trim_end()
+                    )
+                }
+            },
+        );
 
         self.stdout.write_all(output.as_bytes())?;
         self.stdout.flush()?;
@@ -354,18 +402,17 @@ impl<'a> Browser<'a> {
     }
 
     fn print_response_body(&mut self) -> NetResult<()> {
-        let output = self.response
-            .as_ref()
-            .map_or_else(
-                || String::from("No response.\n"),
-                |res| {
-                    if res.body.is_empty() {
-                        String::from("No response body data.\n")
-                    } else {
-                        let body = res.body.to_string();
-                        format!("\n{}\n\n", body.trim_end())
-                    }
-                });
+        let output = self.response.as_ref().map_or_else(
+            || String::from("No response.\n"),
+            |res| {
+                if res.body.is_empty() {
+                    String::from("No response body data.\n")
+                } else {
+                    let body = res.body.to_string();
+                    format!("\n{}\n\n", body.trim_end())
+                }
+            },
+        );
 
         self.stdout.write_all(output.as_bytes())?;
         self.stdout.flush()?;
@@ -373,26 +420,25 @@ impl<'a> Browser<'a> {
     }
 
     fn print_response(&mut self) -> NetResult<()> {
-        let output = self.response
-            .as_ref()
-            .map_or_else(
-                || String::from("No response.\n"),
-                |res| {
-                    let status_line = res.status_line();
-                    let headers = res.headers_to_string();
-                    let headers = headers.trim_end();
-                    let color = if res.status_code() >= 400 { RED } else { GRN };
+        let output = self.response.as_ref().map_or_else(
+            || String::from("No response.\n"),
+            |res| {
+                let status_line = res.status_line();
+                let headers = res.headers_to_string();
+                let headers = headers.trim_end();
+                let color = if res.status_code() >= 400 { RED } else { GRN };
 
-                    if res.body.is_empty() {
-                        format!("\n{color}{status_line}{CLR}\n{headers}\n\n")
-                    } else {
-                        let body = res.body.to_string();
-                        format!(
-                            "\n{color}{status_line}{CLR}\n{headers}\n\n{}\n\n",
-                            body.trim_end()
-                        )
-                    }
-                });
+                if res.body.is_empty() {
+                    format!("\n{color}{status_line}{CLR}\n{headers}\n\n")
+                } else {
+                    let body = res.body.to_string();
+                    format!(
+                        "\n{color}{status_line}{CLR}\n{headers}\n\n{}\n\n",
+                        body.trim_end()
+                    )
+                }
+            },
+        );
 
         self.stdout.write_all(output.as_bytes())?;
         self.stdout.flush()?;
@@ -400,14 +446,13 @@ impl<'a> Browser<'a> {
     }
 
     fn print_status_line(&mut self) -> NetResult<()> {
-        let output = self.response
-            .as_ref()
-            .map_or_else(
-                || String::from("No status line.\n"),
-                |res| {
-                    let color = if res.status_code() >= 400 { RED } else { GRN };
-                    format!("{color}{}{CLR}\n\n", res.status_line())
-                });
+        let output = self.response.as_ref().map_or_else(
+            || String::from("No status line.\n"),
+            |res| {
+                let color = if res.status_code() >= 400 { RED } else { GRN };
+                format!("{color}{}{CLR}\n\n", res.status_line())
+            },
+        );
 
         self.stdout.write_all(output.as_bytes())?;
         self.stdout.flush()?;
@@ -418,27 +463,28 @@ impl<'a> Browser<'a> {
         match self.output_style {
             OutputStyle::Status => {
                 self.print_status_line()?;
-            },
+            }
             OutputStyle::Request => {
                 self.print_request()?;
-            },
+            }
             OutputStyle::ResBody => {
                 self.print_response_body()?;
-            },
+            }
             OutputStyle::Response => {
                 self.print_response()?;
-            },
+            }
             OutputStyle::Verbose => {
                 self.print_request()?;
                 self.print_response()?;
-            },
+            }
         }
 
         Ok(())
     }
 
     fn is_connection_open(&self) -> bool {
-        !self.response
+        !self
+            .response
             .as_ref()
             .map_or(false, |res| res.has_closed_connection_header())
     }

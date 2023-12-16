@@ -1,16 +1,23 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, TEST_HEADERS, USER_AGENT};
+
+use crate::{
+    trim_whitespace_bytes, Body, Client, ClientBuilder, Header, HeaderKind, HeaderName,
+    HeaderValue, Headers, Method, NetError, NetReader, NetResult, NetWriter, ParseErrorKind,
+    Request, RequestLine, Response, Route, RouteBuilder, Router, Server, ServerBuilder, Status,
+    StatusLine, Target, Task, ThreadPool, Version, Worker,
+};
+
 #[cfg(test)]
 mod parse {
-    use crate::{
-        Client, Header, Headers, HeaderKind, HeaderName, HeaderValue,
-        Method, RequestLine, Status, StatusLine, Version,
-    };
-    use crate::consts::{
-        ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, TEST_HEADERS, USER_AGENT
-    };
-    use std::collections::BTreeMap;
+    use super::*;
 
     #[test]
-    fn methods() {
+    fn http_methods() {
         assert_eq!("GET".parse::<Method>(), Ok(Method::Get));
         assert_eq!("HEAD".parse::<Method>(), Ok(Method::Head));
         assert_eq!("POST".parse::<Method>(), Ok(Method::Post));
@@ -26,11 +33,8 @@ mod parse {
     }
 
     #[test]
-    fn status_codes() {
-        assert_eq!(
-            "101 Switching Protocols".parse::<Status>(),
-            Ok(Status(101))
-        );
+    fn http_statuses() {
+        assert_eq!("101 Switching Protocols".parse::<Status>(), Ok(Status(101)));
         assert_eq!("201 Created".parse::<Status>(), Ok(Status(201)));
         assert_eq!("300 Multiple Choices".parse::<Status>(), Ok(Status(300)));
         assert_eq!("400 Bad Request".parse::<Status>(), Ok(Status(400)));
@@ -39,7 +43,7 @@ mod parse {
     }
 
     #[test]
-    fn versions() {
+    fn http_versions() {
         assert_eq!("HTTP/0.9".parse::<Version>(), Ok(Version::ZeroDotNine));
         assert_eq!("HTTP/1.0".parse::<Version>(), Ok(Version::OneDotZero));
         assert_eq!("HTTP/1.1".parse::<Version>(), Ok(Version::OneDotOne));
@@ -107,7 +111,9 @@ mod parse {
         for &(std_header, lowercase) in TEST_HEADERS {
             let lower = String::from_utf8(lowercase.to_vec()).unwrap();
             let upper = lower.to_ascii_uppercase();
-            let expected = HeaderName { inner: HeaderKind::Standard(std_header) };
+            let expected = HeaderName {
+                inner: HeaderKind::Standard(std_header),
+            };
             assert_eq!(lower.parse::<HeaderName>(), Ok(expected.clone()));
             assert_eq!(upper.parse::<HeaderName>(), Ok(expected));
         }
@@ -116,10 +122,10 @@ mod parse {
     #[test]
     fn custom_headers() {
         macro_rules! test_custom_headers {
-            ($name:literal, $value:literal) =>  {{
+            ($name:literal, $value:literal) => {{
                 let test_name = $name.parse::<HeaderName>().unwrap();
                 let expected_name = HeaderName {
-                    inner: HeaderKind::Custom(Vec::from($name))
+                    inner: HeaderKind::Custom(Vec::from($name)),
                 };
 
                 let test_value = $value.parse::<HeaderValue>().unwrap();
@@ -157,8 +163,8 @@ mod parse {
                 HeaderName {
                     inner: HeaderKind::Custom(Vec::from("Pineapple")),
                 },
-                b"pizza"[..].into()
-            )
+                b"pizza"[..].into(),
+            ),
         ]));
 
         let mut test_hdrs = Headers::new();
@@ -174,11 +180,11 @@ mod parse {
             test_hdrs.insert(header.name, header.value);
         }
 
-        assert_eq!(test_hdrs, expected_hdrs); 
+        assert_eq!(test_hdrs, expected_hdrs);
     }
 
     #[test]
-    fn uris() {
+    fn http_uris() {
         macro_rules! test_uri_parser {
             ( $(SHOULD_ERROR: $uri:literal;)+ ) => {{
                 $(
@@ -218,7 +224,7 @@ mod parse {
 
 #[cfg(test)]
 mod utils {
-    use crate::trim_whitespace_bytes;
+    use super::*;
 
     #[test]
     fn trim_whitespace() {
@@ -239,29 +245,23 @@ mod utils {
 
 #[cfg(test)]
 mod resolve_routes {
-    use std::collections::BTreeMap;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-
-    use crate::{
-        Body, Headers, Request, RequestLine, Response, Route, Router,
-        Status, StatusLine, Version, Method, Target,
-    };
+    use super::*;
 
     macro_rules! test_route_resolver {
-        (empty: $( $method:ident $path:literal => $code:literal; )+) => {
+        (empty_targets:
+            $(
+                $method:ident $path:literal => $code:literal;
+            )+
+        ) => {
             #[test]
-            fn empty() {
+            fn empty_targets() {
                 let routes = BTreeMap::from([
-                    $( (Route::new(Method::$method, $path), Target::Empty) ),+
+                    $( (Route::$method($path.to_string()), Target::Empty) ),+
                 ]);
 
                 let router = Arc::new(Router(routes));
 
                 $(
-                    let body = Body::Empty;
-
                     let req = Request {
                         request_line: RequestLine {
                             method: Method::$method,
@@ -269,8 +269,7 @@ mod resolve_routes {
                             version: Version::OneDotOne
                         },
                         headers: Headers::new(),
-                        body: body.clone(),
-                        reader: None
+                        body: Body::Empty
                     };
 
                     let res = Response::from_route(&req.route(), &router);
@@ -281,35 +280,33 @@ mod resolve_routes {
                             status: Status($code)
                         },
                         headers: Headers::new(),
-                        body,
-                        writer: None
+                        body: Body::Empty
                     };
 
                     expect.headers.insert_cache_control("no-cache");
-
                     assert_eq!(res, expect);
                 )+
             }
         };
-        (html:
-            $( $method:ident $path:literal => $file:literal, $code:literal; )+
+        (html_targets:
+            $(
+                $method:ident $path:literal => $file:literal, $code:literal;
+            )+
         ) => {
             #[test]
-            fn html() {
+            fn html_targets() {
                 $(
-                    let mut routes = BTreeMap::new();
-
                     let filepath = concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/../server/static/",
+                        "/static/",
                         $file
                     );
 
-                    routes.insert(
-                        Route::new(Method::$method, $path),
-                        Target::Html(PathBuf::from(filepath))
-                    );
+                    let route = Route::$method($path.to_string());
+                    let target = Target::File(PathBuf::from(filepath));
 
+                    let mut routes = BTreeMap::new();
+                    routes.insert(route, target);
                     let router = Arc::new(Router(routes));
 
                     let req = Request {
@@ -319,16 +316,14 @@ mod resolve_routes {
                             version: Version::OneDotOne
                         },
                         headers: Headers::new(),
-                        body: Body::Empty,
-                        reader: None
+                        body: Body::Empty
                     };
 
                     let body = match fs::read_to_string(filepath) {
                         Ok(content) => Body::Html(content),
                         Err(e) => panic!(
                             "{e}\nError accessing HTML file at: {}",
-                            filepath
-                        ),
+                            filepath),
                     };
 
                     let mut headers = Headers::new();
@@ -338,7 +333,6 @@ mod resolve_routes {
                     );
                     headers.insert_content_length(body.len());
 
-                    
                     let expect = Response {
                         status_line: StatusLine {
                             version: Version::OneDotOne,
@@ -349,35 +343,33 @@ mod resolve_routes {
                             Body::Empty
                         } else {
                             body
-                        },
-                        writer: None
+                        }
                     };
 
                     let res = Response::from_route(&req.route(), &router);
-
                     assert_eq!(res, expect);
                 )+
             }
         };
-        (favicon:
-            $( $method:ident $path:literal => $file:literal, $code:literal; )+
+        (favicon_targets:
+            $(
+                $method:ident $path:literal => $file:literal, $code:literal;
+            )+
         ) => {
             #[test]
-            fn favicon() {
+            fn favicon_targets() {
                 $(
-                    let mut routes = BTreeMap::new();
-
                     let filepath = concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/../server/static/",
+                        "/static/",
                         $file
                     );
 
-                    routes.insert(
-                        Route::new(Method::$method, $path),
-                        Target::Favicon(PathBuf::from(filepath))
-                    );
+                    let route = Route::$method($path.to_string());
+                    let target = Target::Favicon(PathBuf::from(filepath));
 
+                    let mut routes = BTreeMap::new();
+                    routes.insert(route, target);
                     let router = Arc::new(Router(routes));
 
                     let req = Request {
@@ -387,16 +379,14 @@ mod resolve_routes {
                             version: Version::OneDotOne
                         },
                         headers: Headers::new(),
-                        body: Body::Empty,
-                        reader: None
+                        body: Body::Empty
                     };
 
                     let body = match fs::read(filepath) {
                         Ok(content) => Body::Favicon(content),
                         Err(e) => panic!(
                             "{e}\nError accessing HTML file at: {}",
-                            filepath
-                        ),
+                            filepath),
                     };
 
                     let mut headers = Headers::new();
@@ -414,35 +404,33 @@ mod resolve_routes {
                             Body::Empty
                         } else {
                             body
-                        },
-                        writer: None
+                        }
                     };
 
                     let res = Response::from_route(&req.route(), &router);
-
                     assert_eq!(res, expect);
                 )+
             }
         };
-        (file:
-            $( $method:ident $path:literal => $file:literal, $code:literal; )+
+        (file_targets:
+            $(
+                $method:ident $path:literal => $file:literal, $code:literal;
+            )+
         ) => {
             #[test]
-            fn file() {
+            fn file_targets() {
                 $(
-                    let mut routes = BTreeMap::new();
-
                     let filepath = concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/../server/static/",
+                        "/static/",
                         $file
                     );
 
-                    routes.insert(
-                        Route::new(Method::$method, $path),
-                        Target::File(PathBuf::from(filepath))
-                    );
+                    let route = Route::$method($path.to_string());
+                    let target = Target::File(PathBuf::from(filepath));
 
+                    let mut routes = BTreeMap::new();
+                    routes.insert(route, target);
                     let router = Arc::new(Router(routes));
 
                     let req = Request {
@@ -452,16 +440,14 @@ mod resolve_routes {
                             version: Version::OneDotOne
                         },
                         headers: Headers::new(),
-                        body: Body::Empty,
-                        reader: None
+                        body: Body::Empty
                     };
 
                     let body = match fs::read(filepath) {
                         Ok(content) => Body::Bytes(content),
                         Err(e) => panic!(
-                            "{e}\nError accessing HTML file at: {}",
-                            filepath
-                        ),
+                            "{e}\nError accessing file at: {}",
+                            filepath),
                     };
 
                     let mut headers = Headers::new();
@@ -471,7 +457,6 @@ mod resolve_routes {
                     );
                     headers.insert_content_length(body.len());
 
-                    
                     let expect = Response {
                         status_line: StatusLine {
                             version: Version::OneDotOne,
@@ -482,18 +467,16 @@ mod resolve_routes {
                             Body::Empty
                         } else {
                             body
-                        },
-                        writer: None
+                        }
                     };
 
                     let res = Response::from_route(&req.route(), &router);
-
                     assert_eq!(res, expect);
                 )+
             }
         };
         ($label:ident:
-            $( 
+            $(
                 $method:ident $path:literal => $body:ident($inner:expr),
                 $code:literal;
             )+
@@ -501,7 +484,7 @@ mod resolve_routes {
             #[test]
             fn $label() {
                 let routes = BTreeMap::from([
-                    $((Route::new(Method::$method, $path), Target::$body($inner))),+
+                    $((Route::$method($path.to_string()), Target::$body($inner))),+
                 ]);
 
                 let router = Arc::new(Router(routes));
@@ -516,8 +499,7 @@ mod resolve_routes {
                             version: Version::OneDotOne
                         },
                         headers: Headers::new(),
-                        body: body.clone(),
-                        reader: None
+                        body: body.clone()
                     };
 
                     let res = Response::from_route(&req.route(), &router);
@@ -528,23 +510,22 @@ mod resolve_routes {
                             status: Status($code)
                         },
                         headers: Headers::new(),
-                        body,
-                        writer: None
+                        body
                     };
 
                     expect.headers.insert_cache_control("no-cache");
                     expect.headers.insert_content_length(expect.body.len());
 
                     match stringify!($label) {
-                        s if s.eq_ignore_ascii_case("text") => {
+                        s if s.eq_ignore_ascii_case("text_targets") => {
                             expect.headers
                                 .insert_content_type("text/plain; charset=utf-8");
                         },
-                        s if s.eq_ignore_ascii_case("json") => {
+                        s if s.eq_ignore_ascii_case("json_targets") => {
                             expect.headers
                                 .insert_content_type("application/json");
                         },
-                        s if s.eq_ignore_ascii_case("xml") => {
+                        s if s.eq_ignore_ascii_case("xml_targets") => {
                             expect.headers
                                 .insert_content_type("application/xml");
                         },
@@ -562,7 +543,7 @@ mod resolve_routes {
     }
 
     test_route_resolver! {
-        empty:
+        empty_targets:
         Get "/empty1" => 200;
         Head "/empty2" => 200;
         Post "/empty3" => 201;
@@ -575,19 +556,19 @@ mod resolve_routes {
     }
 
     test_route_resolver! {
-        text:
+        text_targets:
         Get "/text1" => Text("test message 1"), 200;
         Head "/text2" => Text("test message 2"), 200;
     }
 
     test_route_resolver! {
-        json:
+        json_targets:
         Get "/json1" => Json("{\n\"data\": \"test data 1\"\n}"), 200;
         Head "/json2" => Json("{\n\"data\": \"test data 2\"\n}"), 200;
     }
 
     test_route_resolver! {
-        xml:
+        xml_targets:
         Get "/xml1" => Xml("\
             <note>
             <to>Cat</to>
@@ -607,7 +588,7 @@ mod resolve_routes {
     }
 
     test_route_resolver! {
-        html:
+        html_targets:
         Get "/index" => "index.html", 200;
         Get "/about" => "about.html", 200;
         Head "/html" => "index.html", 200;
@@ -615,30 +596,24 @@ mod resolve_routes {
     }
 
     test_route_resolver! {
-        favicon:
-        Get "/file1" => "favicon.ico", 200;
-        Head "/file2" => "favicon.ico", 200;
+        favicon_targets:
+        Get "/favicon1" => "favicon.ico", 200;
+        Head "/favicon2" => "favicon.ico", 200;
     }
 
     test_route_resolver! {
-        file:
+        file_targets:
         Get "/file1" => "test_file.dat", 200;
         Head "/file2" => "test_file.dat", 200;
     }
 }
 
 #[cfg(test)]
-mod send_sync {
-    use crate::{
-        Body, Client, ClientBuilder, Header, Headers, HeaderKind, HeaderName,
-        HeaderValue, Method, NetError, NetReader, NetResult, NetWriter,
-        ParseErrorKind, Request, RequestLine, Response, Route, RouteBuilder,
-        Router, Server, ServerBuilder, Status, StatusLine, Target, Task,
-        ThreadPool, Version, Worker,
-    };
+mod send {
+    use super::*;
 
     #[test]
-    const fn send_tests() {
+    const fn types_impl_send() {
         const fn type_is_send<T: Send>() {}
         type_is_send::<Body>();
         type_is_send::<Client>();
@@ -670,9 +645,14 @@ mod send_sync {
         type_is_send::<Version>();
         type_is_send::<Worker>();
     }
+}
+
+#[cfg(test)]
+mod sync {
+    use super::*;
 
     #[test]
-    const fn sync_tests() {
+    const fn types_impl_sync() {
         const fn type_is_sync<T: Sync>() {}
         type_is_sync::<Body>();
         type_is_sync::<Client>();

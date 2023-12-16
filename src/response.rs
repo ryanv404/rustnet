@@ -1,20 +1,13 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::fs;
-use std::io::{
-    BufWriter, ErrorKind as IoErrorKind, Result as IoResult, Write,
-    WriterPanicked,
-};
-use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::io::{BufWriter, Result as IoResult, Write, WriterPanicked};
+use std::net::TcpStream;
 use std::str::FromStr;
 use std::string::ToString;
 
-use crate::consts::{
-    ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE,
-};
+use crate::consts::{ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE};
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, ParseErrorKind, Request, RequestLine, Route, Router, Status,
-    Target, Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader, NetResult, ParseErrorKind,
+    Request, Route, Router, Status, Target, Version,
 };
 
 /// A buffered writer wrapper around a `TcpStream` instance.
@@ -96,29 +89,17 @@ impl NetWriter {
         Ok(())
     }
 
-    /// Writes a dummy HTTP request to the underlying `TcpStream`.
+    /// Writes a server error HTTP response to the underlying `TcpStream` with
+    /// an error message included in the body.
     #[allow(clippy::missing_errors_doc)]
-    pub fn send_dummy_request(&mut self) -> NetResult<()> {
-        let request_line = RequestLine {
-            method: Method::Get,
-            path: String::from("/dummy"),
-            version: Version::OneDotOne
-        };
-
-        let mut headers = Headers::new();
-        headers.insert_connection("close");
-        headers.insert_content_length(0);
-        headers.insert_user_agent();
-
-        let local = self.get_ref().local_addr()?;
-        headers.insert_host(local.ip(), local.port());
-
-        let request_line = format!("{request_line}\r\n");
-        self.write_all(request_line.as_bytes())?;
-        self.write_headers(&headers)?;
-
-        self.flush()?;
-        Ok(())
+    pub fn send_server_error(&mut self, msg: &str) -> NetResult<()> {
+        let mut res = Response::new(500);
+        res.body = Body::Text(msg.to_owned());
+        res.headers.insert_connection("close");
+        res.headers.insert_cache_control("no-cache");
+        res.headers.insert_content_length(res.body.len());
+        res.headers.insert_content_type("text/plain; charset=utf-8");
+        self.send_response(&mut res)
     }
 
     /// Writes a server error response to the underlying `TcpStream`.
@@ -141,7 +122,6 @@ impl NetWriter {
         self.write_all(format!("{}\r\n", &res.status_line).as_bytes())?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
-
         self.flush()?;
         Ok(())
     }
@@ -181,7 +161,7 @@ impl Default for StatusLine {
     fn default() -> Self {
         Self {
             version: Version::OneDotOne,
-            status: Status(200)
+            status: Status(200),
         }
     }
 }
@@ -195,16 +175,18 @@ impl Display for StatusLine {
 impl FromStr for StatusLine {
     type Err = NetError;
 
-    /// Parses a string slice into a `StatusLine` object.
-    #[allow(clippy::missing_errors_doc)]
     fn from_str(line: &str) -> NetResult<Self> {
-        line.trim_start()
-            .split_once(' ')
+        line.find("HTTP")
             .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
-            .and_then(|(token1, token2)| {
-                let version = token1.parse::<Version>()?;
-                let status = token2.parse::<Status>()?;
-                Ok(Self::new(version, status))
+            .and_then(|start| {
+                line[start..]
+                    .split_once(' ')
+                    .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
+                    .and_then(|(token1, token2)| {
+                        let version = token1.parse::<Version>()?;
+                        let status = token2.parse::<Status>()?;
+                        Ok(Self::new(version, status))
+                    })
             })
     }
 }
@@ -245,7 +227,6 @@ pub struct Response {
     pub status_line: StatusLine,
     pub headers: Headers,
     pub body: Body,
-    pub writer: Option<NetWriter>,
 }
 
 impl PartialEq for Response {
@@ -279,13 +260,12 @@ impl Display for Response {
 
 impl Debug for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		f.debug_struct("Response")
+        f.debug_struct("Response")
             .field("status_line", &self.status_line)
             .field("headers", &self.headers)
             .field("body", &self.body)
-            .field("writer", &self.writer)
-			.finish()
-	}
+            .finish()
+    }
 }
 
 impl Response {
@@ -296,9 +276,7 @@ impl Response {
     pub fn from_route(route: &Route, router: &Router) -> Self {
         if router.is_empty() {
             let mut res = Self::new(500);
-            res.body = Body::Text(
-                "This server has no routes configured.".to_string()
-            );
+            res.body = Body::Text("This server has no routes configured.".to_string());
             res.headers.insert_cache_control("no-cache");
             res.headers.insert_connection("close");
             res.headers.insert_content_length(res.body.len());
@@ -310,58 +288,43 @@ impl Response {
         let maybe_target = router.resolve(route);
 
         let maybe_res = match (maybe_target, method) {
-            (Some(target), Method::Get) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Head) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Post) => {
-                Self::from_target(201, target)
-            },
-            (Some(target), Method::Put) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Patch) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Delete) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Trace) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Options) => {
-                Self::from_target(200, target)
-            },
-            (Some(target), Method::Connect) => {
-                Self::from_target(200, target)
-            },
+            (Some(target), Method::Get) => Self::from_target(200, target),
+            (Some(target), Method::Head) => Self::from_target(200, target),
+            (Some(target), Method::Post) => Self::from_target(201, target),
+            (Some(target), Method::Put) => Self::from_target(200, target),
+            (Some(target), Method::Patch) => Self::from_target(200, target),
+            (Some(target), Method::Delete) => Self::from_target(200, target),
+            (Some(target), Method::Trace) => Self::from_target(200, target),
+            (Some(target), Method::Options) => Self::from_target(200, target),
+            (Some(target), Method::Connect) => Self::from_target(200, target),
             (None, Method::Head) => {
                 // Allow HEAD requests for any route configured for a GET request.
-                let get_route = Route::Get(route.path());
+                let get_route = Route::Get(route.path().to_string());
 
                 router.resolve(&get_route).map_or_else(
                     // No route exists for a GET request either.
-                    || router.get_error_404().map_or_else(
-                        || Self::from_target(404, &Target::Empty),
-                        |target| Self::from_target(404, target)),
+                    || {
+                        router.get_error_404().map_or_else(
+                            || Self::from_target(404, &Target::Empty),
+                            |target| Self::from_target(404, target),
+                        )
+                    },
                     // GET route exists so send it as a HEAD response.
-                    |target| Self::from_target(200, target))
-            },
+                    |target| Self::from_target(200, target),
+                )
+            }
             // Handle routes that do not exist.
-            (None, _) => {
-                router.get_error_404().map_or_else(
-                    || Self::from_target(404, &Target::Empty),
-                    |target| Self::from_target(404, target))
-            },
+            (None, _) => router.get_error_404().map_or_else(
+                || Self::from_target(404, &Target::Empty),
+                |target| Self::from_target(404, target),
+            ),
         };
 
         match maybe_res {
             Ok(mut res) if method == Method::Head => {
                 res.body = Body::Empty;
                 res
-            },
+            }
             Ok(res) => res,
             Err(e) => {
                 let mut res = Self::new(500);
@@ -371,7 +334,7 @@ impl Response {
                 res.headers.insert_content_length(res.body.len());
                 res.headers.insert_content_type("text/plain; charset=utf-8");
                 res
-            },
+            }
         }
     }
 
@@ -381,11 +344,10 @@ impl Response {
         Self {
             status_line: StatusLine {
                 status: Status(code),
-                version: Version::OneDotOne
+                version: Version::OneDotOne,
             },
             headers: Headers::new(),
             body: Body::Empty,
-            writer: None
         }
     }
 
@@ -394,10 +356,6 @@ impl Response {
     /// # Errors
     ///
     /// Returns an error if `fs::read` or `fs::read_to_string` fails.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the `Mutex` in `Target::FnMut` is poisoned.
     pub fn from_target(code: u16, target: &Target) -> NetResult<Self> {
         let mut res = Self::new(code);
 
@@ -405,62 +363,24 @@ impl Response {
             res.headers.insert(header.name, header.value);
         }
 
-        match target {
-            Target::Empty => res.headers.insert_cache_control("no-cache"),
-            Target::Text(s) => {
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(s.len());
-                res.body = Body::Text((*s).to_string());
-            },
-            Target::Json(s) => {
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(s.len());
-                res.body = Body::Json((*s).to_string());
-            },
-            Target::Xml(s) => {
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(s.len());
-                res.body = Body::Xml((*s).to_string());
-            },
-            Target::Html(fpath) => {
-                let content = fs::read_to_string(fpath)?;
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(content.len());
-                res.body = Body::Html(content);
-            },
-            Target::File(fpath) => {
-                let content = fs::read(fpath)?;
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(content.len());
-                res.body = Body::Bytes(content);
-            },
-            Target::Favicon(fpath) => {
-                let content = fs::read(fpath)?;
+        res.headers.insert_cache_control("no-cache");
+
+        res.body = match target {
+            Target::Empty => Body::Empty,
+            Target::Text(s) => Body::Text((*s).to_string()),
+            Target::Html(s) => Body::Html((*s).to_string()),
+            Target::Json(s) => Body::Json((*s).to_string()),
+            Target::Xml(s) => Body::Xml((*s).to_string()),
+            Target::File(ref fpath) => Body::try_from(fpath)?,
+            Target::Favicon(ref fpath) => {
                 res.headers.insert_cache_control("max-age=604800");
-                res.headers.insert_content_length(content.len());
-                res.body = Body::Favicon(content);
-            },
-            Target::FnMut(handler) => {
-                // Call the handler to update the response.
-                (handler.lock().unwrap())(&mut res);
-                if !res.body.is_empty() {
-                    res.headers.insert_cache_control("no-cache");
-                    res.headers.insert_content_length(res.body.len());
-                }
-            },
-            // Call the handler to perform an action (with context).
-            Target::Fn(handler) => {
-                (handler)(&res);
-                if !res.body.is_empty() {
-                    res.headers.insert_cache_control("no-cache");
-                    res.headers.insert_content_length(res.body.len());
-                }
-            },
-            Target::Bytes(bytes) => {
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_content_length(bytes.len());
-                res.body = Body::Bytes(bytes.clone());
-            },
+                Body::try_from(fpath)?
+            }
+            Target::Bytes(ref bytes) => Body::Bytes(bytes.clone()),
+        };
+
+        if !res.body.is_empty() {
+            res.headers.insert_content_length(res.body.len());
         }
 
         Ok(res)
@@ -496,47 +416,7 @@ impl Response {
         self.status_line.status.msg()
     }
 
-    /// Returns the `SocketAddr` of the remote half of the connection.
-    #[must_use]
-    pub fn remote_addr(&self) -> Option<SocketAddr> {
-        self.writer
-            .as_ref()
-            .and_then(|writer| writer.0.get_ref().peer_addr().ok())
-    }
-
-    /// Returns the `IpAddr` of the remote half of the connection.
-    #[must_use]
-    pub fn remote_ip(&self) -> Option<IpAddr> {
-        self.remote_addr().map(|sock| sock.ip())
-    }
-
-    /// Returns the port in use by the remote half of the connection.
-    #[must_use]
-    pub fn remote_port(&self) -> Option<u16> {
-        self.remote_addr().map(|sock| sock.port())
-    }
-
-    /// Returns the `SocketAddr` of the local half of the connection.
-    #[must_use]
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.writer
-            .as_ref()
-            .and_then(|writer| writer.0.get_ref().local_addr().ok())
-    }
-
-    /// Returns the `IpAddr` of the local half of the  connection.
-    #[must_use]
-    pub fn local_ip(&self) -> Option<IpAddr> {
-        self.local_addr().map(|sock| sock.ip())
-    }
-
-    /// Returns the port in use by the local half of the connection.
-    #[must_use]
-    pub fn local_port(&self) -> Option<u16> {
-        self.local_addr().map(|sock| sock.port())
-    }
-
-    /// Returns a map of the response's headers.
+    /// Returns the response headers.
     #[must_use]
     pub const fn headers(&self) -> &Headers {
         &self.headers
@@ -565,8 +445,10 @@ impl Response {
         if self.headers.is_empty() {
             String::new()
         } else {
-            self.headers.0.iter().fold(String::new(), 
-                |mut acc, (name, value)| {
+            self.headers
+                .0
+                .iter()
+                .fold(String::new(), |mut acc, (name, value)| {
                     acc.push_str(&format!("{name}: {value}\n"));
                     acc
                 })
@@ -577,7 +459,7 @@ impl Response {
     #[must_use]
     pub fn has_closed_connection_header(&self) -> bool {
         matches!(
-            self.headers.get(&CONNECTION), 
+            self.headers.get(&CONNECTION),
             Some(conn_val) if conn_val.as_str().eq_ignore_ascii_case("close")
         )
     }
@@ -604,16 +486,13 @@ impl Response {
 
     /// Sends an HTTP response to a remote client.
     #[allow(clippy::missing_errors_doc)]
-    pub fn send(&mut self) -> NetResult<()> {
-        match self.writer.take() {
-            Some(mut writer) => writer.send_response(self),
-            None => Err(IoErrorKind::NotConnected)?,
-        }
+    pub fn send(&mut self, writer: &mut NetWriter) -> NetResult<()> {
+        writer.send_response(self)
     }
 
     /// Receives an HTTP response from a remote server.
     #[allow(clippy::missing_errors_doc)]
-    pub fn recv(reader: NetReader) -> NetResult<Self> {
-        NetReader::recv_response(reader)
+    pub fn recv(reader: &mut NetReader) -> NetResult<Self> {
+        reader.recv_response()
     }
 }

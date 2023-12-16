@@ -1,4 +1,8 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fs;
+use std::path::PathBuf;
+
+use crate::{NetError, NetResult};
 
 /// A respresentation of the body content type.
 #[derive(Clone, PartialOrd, Ord)]
@@ -43,15 +47,9 @@ impl Debug for Body {
             Self::Html(ref s) => f.debug_tuple("Html").field(s).finish(),
             Self::Json(ref s) => f.debug_tuple("Json").field(s).finish(),
             Self::Xml(ref s) => f.debug_tuple("Xml").field(s).finish(),
-            Self::Image(_) => {
-                f.debug_tuple("Image").field(&"{ ... }").finish()
-            },
-            Self::Bytes(_) => {
-                f.debug_tuple("Bytes").field(&"{ ... }").finish()
-            },
-            Self::Favicon(_) => {
-                f.debug_tuple("Favicon").field(&"{ ... }").finish()
-            },
+            Self::Image(_) => f.debug_tuple("Image").field(&"{ ... }").finish(),
+            Self::Bytes(_) => f.debug_tuple("Bytes").field(&"{ ... }").finish(),
+            Self::Favicon(_) => f.debug_tuple("Favicon").field(&"{ ... }").finish(),
         }
     }
 }
@@ -66,21 +64,58 @@ impl PartialEq for Body {
             (Self::Html(ref s1), Self::Html(ref s2)) => s1 == s2,
             (Self::Json(ref s1), Self::Json(ref s2)) => s1 == s2,
             (Self::Xml(ref s1), Self::Xml(ref s2)) => s1 == s2,
-            (Self::Image(ref buf1), Self::Image(ref buf2)) => {
-                buf1[..] == buf2[..]
-            },
-            (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => {
-                buf1[..] == buf2[..]
-            },
-            (Self::Favicon(ref buf1), Self::Favicon(ref buf2)) => {
-                buf1[..] == buf2[..]
-            },
+            (Self::Image(ref buf1), Self::Image(ref buf2)) => buf1[..] == buf2[..],
+            (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => buf1[..] == buf2[..],
+            (Self::Favicon(ref buf1), Self::Favicon(ref buf2)) => buf1[..] == buf2[..],
             _ => false,
         }
     }
 }
 
 impl Eq for Body {}
+
+impl TryFrom<&PathBuf> for Body {
+    type Error = NetError;
+
+    fn try_from(filepath: &PathBuf) -> NetResult<Self> {
+        match filepath.extension() {
+            None => {
+                let body = fs::read(filepath)?;
+                Ok(Self::Bytes(body))
+            }
+            Some(ext) => match ext.to_str() {
+                Some("txt") => {
+                    let content = fs::read_to_string(filepath)?;
+                    Ok(Self::Text(content))
+                }
+                Some("html" | "htm") => {
+                    let content = fs::read_to_string(filepath)?;
+                    Ok(Self::Html(content))
+                }
+                Some("json") => {
+                    let content = fs::read_to_string(filepath)?;
+                    Ok(Self::Json(content))
+                }
+                Some("xml") => {
+                    let content = fs::read_to_string(filepath)?;
+                    Ok(Self::Xml(content))
+                }
+                Some("ico") => {
+                    let buf = fs::read(filepath)?;
+                    Ok(Self::Favicon(buf))
+                }
+                Some("jpg" | "jpeg" | "png" | "gif") => {
+                    let buf = fs::read(filepath)?;
+                    Ok(Self::Image(buf))
+                }
+                _ => {
+                    let buf = fs::read(filepath)?;
+                    Ok(Self::Bytes(buf))
+                }
+            },
+        }
+    }
+}
 
 impl Body {
     /// Returns a default `Body` instance.
@@ -122,16 +157,7 @@ impl Body {
     /// Returns true if the body contains a alphanumeric data.
     #[must_use]
     pub const fn is_alphanumeric(&self) -> bool {
-        match self {
-            Self::Text(_)
-                | Self::Html(_)
-                | Self::Json(_) 
-                | Self::Xml(_) => true,
-            Self::Favicon(_)
-                | Self::Bytes(_) 
-                | Self::Image(_)
-                | Self::Empty => false,
-        }
+        !self.is_bytes()
     }
 
     /// Returns the body data as a bytes slice.
@@ -163,13 +189,6 @@ impl Body {
             Self::Image(ref buf) => buf.len(),
             Self::Bytes(ref buf) => buf.len(),
             Self::Favicon(ref buf) => buf.len(),
-        }
-    }
-
-    /// Changes the body to a text type containing the provided string.
-    pub fn text(&mut self, text: &str) {
-        if !text.is_empty() {
-            *self = Self::Text(text.to_string());
         }
     }
 }

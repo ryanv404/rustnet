@@ -3,11 +3,10 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use crate::{NetError, NetResult, ParseErrorKind};
 use crate::consts::{
-    ACCEPT, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
-    LOCATION, SERVER, USER_AGENT, WWW_AUTHENTICATE, X_MORE_INFO,
+    ACCEPT, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER, USER_AGENT,
 };
+use crate::{NetError, NetResult, ParseErrorKind};
 
 pub mod names;
 pub mod values;
@@ -104,6 +103,11 @@ impl Headers {
         self.0.len()
     }
 
+    /// Clears all header field entries.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
     /// Inserts a collection of default server response headers.
     pub fn default_response_headers(&mut self) {
         self.insert_server();
@@ -152,46 +156,4 @@ impl Headers {
     pub fn insert_cache_control(&mut self, value: &str) {
         self.insert(CACHE_CONTROL, value.as_bytes().into());
     }
-
-    /// Updates headers to reflect the httpbin.org style by status code.
-    pub fn update_headers_by_status_code(&mut self, code: u16) {
-        match code {
-            101 => {
-                self.remove(&CONTENT_LENGTH);
-                self.entry(CONNECTION)
-                    .and_modify(|val| *val = b"upgrade"[..].into());
-            },
-            100 | 102 | 103 | 204 => {
-                self.remove(&CONTENT_LENGTH);
-            },
-            301 | 302 | 303 | 305 | 307 => {
-                self.remove(&CONTENT_TYPE);
-                self.insert(LOCATION, b"/redirect/1"[..].into());
-            },
-            304 => {
-                self.remove(&CONTENT_TYPE);
-                self.remove(&CONTENT_LENGTH);
-            },
-            401 => {
-                self.remove(&CONTENT_TYPE);
-                self.insert(WWW_AUTHENTICATE,
-                    br#"Basic realm="Fake Realm""#[..].into());
-            },
-            402 => {
-                self.remove(&CONTENT_TYPE);
-                self.insert(X_MORE_INFO,
-                    b"http://vimeo.com/22053820"[..].into());
-            },
-            407 | 412 => {
-                self.remove(&CONTENT_TYPE);
-            },
-            418 => {
-                self.remove(&CONTENT_TYPE);
-                self.insert(X_MORE_INFO,
-                    b"http://tools.ietf.org/html/rfc2324"[..].into());
-            },
-            _ => {},
-        }
-    }
 }
-

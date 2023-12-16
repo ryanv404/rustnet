@@ -25,8 +25,8 @@ impl Display for HeaderName {
 
 impl Debug for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		Debug::fmt(&self.to_titlecase(), f)
-	}
+        Debug::fmt(&self.to_titlecase(), f)
+    }
 }
 
 impl From<StandardHeader> for HeaderName {
@@ -40,10 +40,10 @@ impl FromStr for HeaderName {
     type Err = NetError;
 
     fn from_str(s: &str) -> NetResult<Self> {
-        let inner = StandardHeader::from_bytes(s.as_bytes())
-            .map_or_else(
-                || HeaderKind::Custom(Vec::from(s.trim())),
-                HeaderKind::Standard);
+        let inner = StandardHeader::from_bytes(s.as_bytes()).map_or_else(
+            || HeaderKind::Custom(Vec::from(s.trim())),
+            HeaderKind::Standard,
+        );
 
         Ok(Self { inner })
     }
@@ -79,26 +79,27 @@ impl HeaderName {
         }
 
         let bytes = self.inner.as_bytes();
-		let mut title = String::with_capacity(bytes.len());
+        let mut title = String::with_capacity(bytes.len());
 
-        bytes.split(|&b| b == b'-')
-			.filter(|&part| !part.is_empty())
-			.for_each(|part| {
-				if let Some((first, rest)) = part.split_first() {
-					// Prepend every part but the first with a hyphen.
-					if !title.is_empty() {
-						title.push('-');
-					}
+        bytes
+            .split(|&b| b == b'-')
+            .filter(|&part| !part.is_empty())
+            .for_each(|part| {
+                if let Some((first, rest)) = part.split_first() {
+                    // Prepend every part but the first with a hyphen.
+                    if !title.is_empty() {
+                        title.push('-');
+                    }
 
-					title.push(first.to_ascii_uppercase() as char);
+                    title.push(first.to_ascii_uppercase() as char);
 
-					if !rest.is_empty() {
-						title.push_str(&String::from_utf8_lossy(rest));
-					}
-				}
-			});
+                    if !rest.is_empty() {
+                        title.push_str(&String::from_utf8_lossy(rest));
+                    }
+                }
+            });
 
-		title
+        title
     }
 }
 
@@ -112,12 +113,8 @@ pub enum HeaderKind {
 impl PartialEq for HeaderKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Standard(ref std1), Self::Standard(ref std2)) => {
-                std1 == std2
-            },
-            (Self::Custom(ref buf1), Self::Custom(ref buf2)) => {
-                buf1[..] == buf2[..]
-            },
+            (Self::Standard(ref std1), Self::Standard(ref std2)) => std1 == std2,
+            (Self::Custom(ref buf1), Self::Custom(ref buf2)) => buf1[..] == buf2[..],
             _ => false,
         }
     }
@@ -131,9 +128,7 @@ impl TryFrom<&[u8]> for HeaderKind {
     fn try_from(b: &[u8]) -> NetResult<Self> {
         match StandardHeader::from_bytes(b) {
             Some(std) => Ok(Self::Standard(std)),
-            None if str::from_utf8(b).is_ok() => {
-                Ok(Self::Custom(b.to_ascii_lowercase()))
-            },
+            None if str::from_utf8(b).is_ok() => Ok(Self::Custom(b.to_ascii_lowercase())),
             None => Err(ParseErrorKind::Header.into()),
         }
     }

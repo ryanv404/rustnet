@@ -4,16 +4,15 @@ use std::net::{TcpStream, ToSocketAddrs};
 
 use crate::consts::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, NetWriter, ParseErrorKind, Response, Request, RequestLine,
-    Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader, NetResult, NetWriter,
+    ParseErrorKind, Request, RequestLine, Response, Version,
 };
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientBuilder<A>
 where
-    A: ToSocketAddrs
+    A: ToSocketAddrs,
 {
     pub method: Method,
     pub ip: Option<String>,
@@ -27,7 +26,7 @@ where
 
 impl<A> Default for ClientBuilder<A>
 where
-    A: ToSocketAddrs
+    A: ToSocketAddrs,
 {
     fn default() -> Self {
         Self {
@@ -45,52 +44,52 @@ where
 
 impl<A> ClientBuilder<A>
 where
-    A: ToSocketAddrs
+    A: ToSocketAddrs,
 {
-	/// Returns a new `ClientBuilder` instance.
-	#[must_use]
+    /// Returns a new `ClientBuilder` instance.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-	/// Sets the HTTP method.
+    /// Sets the HTTP method.
     #[must_use]
     pub const fn method(mut self, method: Method) -> Self {
         self.method = method;
         self
     }
 
-	/// Sets the remote host's IP address.
+    /// Sets the remote host's IP address.
     #[must_use]
     pub fn ip(mut self, ip: &str) -> Self {
         self.ip = Some(ip.to_string());
         self
     }
 
-	/// Sets the remote host's port.
+    /// Sets the remote host's port.
     #[must_use]
     pub const fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
 
-	/// Sets the socket address of the remote server.
+    /// Sets the socket address of the remote server.
     #[must_use]
     pub fn addr(mut self, addr: A) -> Self {
         self.addr = Some(addr);
         self
     }
 
-	/// Sets the URI path to the target resource.
+    /// Sets the URI path to the target resource.
     #[must_use]
     pub fn path(mut self, path: &str) -> Self {
         self.path = Some(path.to_string());
         self
     }
 
-	/// Sets the protocol version.
+    /// Sets the protocol version.
     #[must_use]
-	pub const fn version(mut self, version: Version) -> Self {
+    pub const fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
@@ -102,15 +101,15 @@ where
         self
     }
 
-	/// Returns true if the header is present.
+    /// Returns true if the header is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
         self.headers.contains(name)
     }
 
-	/// Sets the request body, Content-Type header, and Content-Length header.
+    /// Sets the request body, Content-Type header, and Content-Length header.
     #[must_use]
-	pub fn body(mut self, body: Body, content_type: &str) -> Self {
+    pub fn body(mut self, body: Body, content_type: &str) -> Self {
         if body.is_empty() {
             self.headers.insert_content_length(0);
             self.body = Body::Empty;
@@ -121,28 +120,29 @@ where
         }
 
         self
-	}
+    }
 
-	/// Sets a text request body and sets the Content-Type and Content-Length
-	/// headers.
+    /// Sets a text request body and sets the Content-Type and Content-Length
+    /// headers.
     #[must_use]
-	pub fn text(mut self, text: &str) -> Self {
+    pub fn text(mut self, text: &str) -> Self {
         if text.is_empty() {
             self.headers.insert_content_length(0);
             self.body = Body::Empty;
         } else {
             self.body = Body::Text(text.into());
             self.headers.insert_content_length(self.body.len());
-            self.headers.insert_content_type("text/plain; charset=utf-8");
+            self.headers
+                .insert_content_type("text/plain; charset=utf-8");
         }
 
         self
-	}
+    }
 
-	/// Sets a HTML request body and sets the Content-Type and Content-Length
-	/// headers.
+    /// Sets a HTML request body and sets the Content-Type and Content-Length
+    /// headers.
     #[must_use]
-	pub fn html(mut self, html: &str) -> Self {
+    pub fn html(mut self, html: &str) -> Self {
         if html.is_empty() {
             self.headers.insert_content_length(0);
             self.body = Body::Empty;
@@ -153,12 +153,12 @@ where
         }
 
         self
-	}
+    }
 
-	/// Sets a JSON request body and sets the Content-Type and Content-Length
-	/// headers.
+    /// Sets a JSON request body and sets the Content-Type and Content-Length
+    /// headers.
     #[must_use]
-	pub fn json(mut self, json: &str) -> Self {
+    pub fn json(mut self, json: &str) -> Self {
         if json.is_empty() {
             self.headers.insert_content_length(0);
             self.body = Body::Empty;
@@ -169,12 +169,12 @@ where
         }
 
         self
-	}
+    }
 
-	/// Sets a request body comprised of bytes and sets the Content-Type and
-	/// Content-Length headers.
+    /// Sets a request body comprised of bytes and sets the Content-Type and
+    /// Content-Length headers.
     #[must_use]
-	pub fn bytes(mut self, bytes: &[u8]) -> Self {
+    pub fn bytes(mut self, bytes: &[u8]) -> Self {
         if bytes.is_empty() {
             self.headers.insert_content_length(0);
             self.body = Body::Empty;
@@ -184,7 +184,7 @@ where
         }
 
         self
-	}
+    }
 
     /// Builds and returns a new `Client` instance.
     #[allow(clippy::missing_errors_doc)]
@@ -221,11 +221,10 @@ where
             self.headers.insert_user_agent();
         }
 
-        let path = self.path
+        let path = self
+            .path
             .as_ref()
-            .map_or_else(
-                || String::from("/"),
-                ToString::to_string);
+            .map_or_else(|| String::from("/"), ToString::to_string);
 
         let request_line = RequestLine::new(self.method, path, self.version);
 
@@ -233,10 +232,16 @@ where
             request_line,
             headers: self.headers,
             body: self.body,
-            reader: None
         });
 
-        Ok(Client { req, res: None, reader, writer })
+        let res = None;
+
+        Ok(Client {
+            req,
+            res,
+            reader,
+            writer,
+        })
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
@@ -275,10 +280,10 @@ where
 /// An HTTP client that can send and receive messages with a remote server.
 #[derive(Debug)]
 pub struct Client {
-	pub req: Option<Request>,
-	pub res: Option<Response>,
-	pub reader: NetReader,
-	pub writer: NetWriter,
+    pub req: Option<Request>,
+    pub res: Option<Response>,
+    pub reader: NetReader,
+    pub writer: NetWriter,
 }
 
 impl Display for Client {
@@ -292,7 +297,7 @@ impl Display for Client {
         }
 
         Ok(())
-	}
+    }
 }
 
 impl Client {
@@ -300,11 +305,10 @@ impl Client {
     #[must_use]
     pub fn builder<A>() -> ClientBuilder<A>
     where
-        A: ToSocketAddrs
+        A: ToSocketAddrs,
     {
         ClientBuilder::new()
     }
-    
 
     /// Parses a string slice into a host address and a URI path.
     #[allow(clippy::missing_errors_doc)]
@@ -324,27 +328,27 @@ impl Client {
                     Some((addr, path)) if path.is_empty() && addr.contains(':') => {
                         // Example: http://httpbin.org:80/
                         Ok((addr.to_string(), String::from("/")))
-                    },
+                    }
                     Some((addr, path)) if path.is_empty() => {
                         // Example: http://httpbin.org/
                         Ok((format!("{addr}:80"), String::from("/")))
-                    },
+                    }
                     Some((addr, path)) if addr.contains(':') => {
                         // Example: http://httpbin.org:80/json
                         Ok((addr.to_string(), format!("/{path}")))
-                    },
+                    }
                     Some((addr, path)) => {
                         // Example: http://httpbin.org/json
                         Ok((format!("{addr}:80"), format!("/{path}")))
-                    },
+                    }
                     None if rest.contains(':') => {
                         // Example: http://httpbin.org:80
                         Ok((rest.to_string(), String::from("/")))
-                    },
+                    }
                     None => {
                         // Example: http://httpbin.org
                         Ok((format!("{rest}:80"), String::from("/")))
-                    },
+                    }
                 },
                 "https" => Err(NetError::HttpsNotImplemented),
                 _ => Err(ParseErrorKind::Path)?,
@@ -377,18 +381,17 @@ impl Client {
     /// Sends an HTTP request to a remote host.
     #[allow(clippy::missing_errors_doc)]
     pub fn send(&mut self) -> NetResult<()> {
-        let mut writer = self.writer.try_clone()?;
-        self.req.as_mut()
-            .and_then(|req| writer.send_request(req).ok())
-            .ok_or(IoErrorKind::NotConnected)?;
+        self.req
+            .as_mut()
+            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
+            .and_then(|req| req.send(&mut self.writer))?;
+
         Ok(())
     }
 
     /// Receives an HTTP response from the remote host.
     #[allow(clippy::missing_errors_doc)]
-    pub fn recv(&mut self) -> NetResult<()> {
-        let reader = self.reader.try_clone()?;
-        self.res = NetReader::recv_response(reader).ok();
-        Ok(())
+    pub fn recv(&mut self) {
+        self.res = self.reader.recv_response().ok();
     }
 }

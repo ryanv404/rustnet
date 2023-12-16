@@ -88,13 +88,11 @@ impl From<IoErrorKind> for NetError {
 impl From<NetError> for IoError {
     fn from(err: NetError) -> Self {
         match err {
-            NetError::HttpsNotImplemented => {
-                Self::new(IoErrorKind::Unsupported, err.to_string())
-            },
+            NetError::HttpsNotImplemented => Self::new(IoErrorKind::Unsupported, err.to_string()),
             NetError::ParseError(_) => err.into(),
-            NetError::ReadError(kind)
-                | NetError::WriteError(kind) 
-                | NetError::IoError(kind) => Self::from(kind),
+            NetError::ReadError(kind) | NetError::WriteError(kind) | NetError::IoError(kind) => {
+                Self::from(kind)
+            }
         }
     }
 }

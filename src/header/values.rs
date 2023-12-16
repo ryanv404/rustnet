@@ -10,7 +10,7 @@ pub struct HeaderValue(pub Vec<u8>);
 impl PartialEq for HeaderValue {
     fn eq(&self, other: &Self) -> bool {
         self.0[..] == other.0[..]
-	}
+    }
 }
 
 impl Eq for HeaderValue {}
@@ -23,8 +23,8 @@ impl Display for HeaderValue {
 
 impl Debug for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		Debug::fmt(&self.to_string(), f)
-	}
+        Debug::fmt(&self.to_string(), f)
+    }
 }
 
 impl FromStr for HeaderValue {

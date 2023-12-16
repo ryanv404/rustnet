@@ -1,4 +1,4 @@
-name: Rust
+name: Compilation and testing checks
 
 on:
   push:
@@ -11,12 +11,10 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --workspace --all-targets
-    - name: Run tests
-      run: cargo test --workspace --all-targets -- --test-threads=1
+    - name: Build check
+      run: cargo build --all-targets
+    - name: Testing
+      run: cargo test --all-targets -- --test-threads=1

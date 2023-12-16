@@ -1,6 +1,8 @@
-//! `rustnet`
-//! A Rust library for building an HTTP server.
+//! # rustnet
+//!
+//! A Rust library for building an HTTP servers and clients.
 
+#![deny(clippy::all)]
 #![deny(clippy::cargo)]
 #![deny(clippy::complexity)]
 #![deny(clippy::correctness)]
@@ -10,9 +12,7 @@
 #![deny(clippy::style)]
 #![deny(clippy::suspicious)]
 #![allow(clippy::module_name_repetitions)]
-
-#[cfg(test)]
-mod tests;
+#![allow(clippy::similar_names)]
 
 pub mod body;
 pub mod client;
@@ -28,10 +28,10 @@ pub mod util;
 pub use body::Body;
 pub use client::{Client, ClientBuilder};
 pub use errors::{NetError, NetResult, ParseErrorKind};
-pub use header::{Header, HeaderKind, HeaderName, Headers, HeaderValue};
+pub use header::{Header, HeaderKind, HeaderName, HeaderValue, Headers};
 pub use http::{Method, Status, Version};
-pub use request::{Request, RequestLine, NetReader};
-pub use response::{Response, StatusLine, NetWriter};
+pub use request::{NetReader, Request, RequestLine};
+pub use response::{NetWriter, Response, StatusLine};
 pub use router::{Route, RouteBuilder, Router, Target};
 pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
 pub use util::trim_whitespace_bytes;
@@ -46,3 +46,6 @@ pub mod consts {
     #[cfg(test)]
     pub use crate::header::names::TEST_HEADERS;
 }
+
+#[cfg(test)]
+mod tests;
