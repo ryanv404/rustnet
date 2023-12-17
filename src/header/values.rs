@@ -4,26 +4,12 @@ use std::str::FromStr;
 
 use crate::{NetError, NetResult};
 
-#[derive(Clone, Ord, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
-
-impl PartialEq for HeaderValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[..] == other.0[..]
-    }
-}
-
-impl Eq for HeaderValue {}
 
 impl Display for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", String::from_utf8_lossy(self.as_bytes()))
-    }
-}
-
-impl Debug for HeaderValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        Debug::fmt(&self.to_string(), f)
     }
 }
 

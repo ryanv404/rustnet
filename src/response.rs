@@ -190,6 +190,7 @@ impl FromStr for StatusLine {
             })
     }
 }
+
 impl StatusLine {
     /// Returns a new `StatusLine` instance.
     #[must_use]
@@ -223,21 +224,12 @@ impl StatusLine {
 }
 
 /// Represents the components of an HTTP response.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Response {
     pub status_line: StatusLine,
     pub headers: Headers,
     pub body: Body,
 }
-
-impl PartialEq for Response {
-    fn eq(&self, other: &Self) -> bool {
-        self.status_line == other.status_line
-            && self.headers == other.headers
-            && self.body == other.body
-    }
-}
-
-impl Eq for Response {}
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -255,16 +247,6 @@ impl Display for Response {
         }
 
         Ok(())
-    }
-}
-
-impl Debug for Response {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.debug_struct("Response")
-            .field("status_line", &self.status_line)
-            .field("headers", &self.headers)
-            .field("body", &self.body)
-            .finish()
     }
 }
 
@@ -287,25 +269,21 @@ impl Response {
         let method = route.method();
         let maybe_target = router.resolve(route);
 
-        let maybe_res = match (maybe_target, method) {
-            (Some(target), Method::Get) => Self::from_target(200, target),
-            (Some(target), Method::Head) => Self::from_target(200, target),
-            (Some(target), Method::Post) => Self::from_target(201, target),
-            (Some(target), Method::Put) => Self::from_target(200, target),
-            (Some(target), Method::Patch) => Self::from_target(200, target),
-            (Some(target), Method::Delete) => Self::from_target(200, target),
-            (Some(target), Method::Trace) => Self::from_target(200, target),
-            (Some(target), Method::Options) => Self::from_target(200, target),
-            (Some(target), Method::Connect) => Self::from_target(200, target),
-            (None, Method::Head) => {
+        let maybe_res = match maybe_target {
+            Some(target) if method == Method::Post => {
+                Self::from_target(201, target)
+            },
+            Some(target) => Self::from_target(200, target),
+            None if method == Method::Head => {
                 // Allow HEAD requests for any route configured for a GET request.
-                let get_route = Route::Get(route.path().to_string());
+                let path = route.path().to_string();
+                let get_route = Route::Get(path.into());
 
                 router.resolve(&get_route).map_or_else(
                     // No route exists for a GET request either.
                     || {
                         router.get_error_404().map_or_else(
-                            || Self::from_target(404, &Target::Empty),
+                            || Self::from_target(404, Target::Empty),
                             |target| Self::from_target(404, target),
                         )
                     },
@@ -314,8 +292,8 @@ impl Response {
                 )
             }
             // Handle routes that do not exist.
-            (None, _) => router.get_error_404().map_or_else(
-                || Self::from_target(404, &Target::Empty),
+            None => router.get_error_404().map_or_else(
+                || Self::from_target(404, Target::Empty),
                 |target| Self::from_target(404, target),
             ),
         };
@@ -356,7 +334,7 @@ impl Response {
     /// # Errors
     ///
     /// Returns an error if `fs::read` or `fs::read_to_string` fails.
-    pub fn from_target(code: u16, target: &Target) -> NetResult<Self> {
+    pub fn from_target(code: u16, target: Target) -> NetResult<Self> {
         let mut res = Self::new(code);
 
         if let Some(header) = target.as_content_type_header() {
@@ -367,16 +345,16 @@ impl Response {
 
         res.body = match target {
             Target::Empty => Body::Empty,
-            Target::Text(s) => Body::Text((*s).to_string()),
-            Target::Html(s) => Body::Html((*s).to_string()),
-            Target::Json(s) => Body::Json((*s).to_string()),
-            Target::Xml(s) => Body::Xml((*s).to_string()),
-            Target::File(ref fpath) => Body::try_from(fpath)?,
-            Target::Favicon(ref fpath) => {
+            Target::Text(s) => Body::Text(s.to_string()),
+            Target::Html(s) => Body::Html(s.to_string()),
+            Target::Json(s) => Body::Json(s.to_string()),
+            Target::Xml(s) => Body::Xml(s.to_string()),
+            Target::File(fpath) => Body::try_from(fpath)?,
+            Target::Favicon(fpath) => {
                 res.headers.insert_cache_control("max-age=604800");
                 Body::try_from(fpath)?
             }
-            Target::Bytes(ref bytes) => Body::Bytes(bytes.clone()),
+            Target::Bytes(bytes) => Body::Bytes(bytes.to_vec()),
         };
 
         if !res.body.is_empty() {

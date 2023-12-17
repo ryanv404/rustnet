@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, TEST_HEADERS, USER_AGENT};
@@ -256,7 +256,7 @@ mod resolve_routes {
             #[test]
             fn empty_targets() {
                 let routes = BTreeMap::from([
-                    $( (Route::$method($path.to_string()), Target::Empty) ),+
+                    $( (Route::$method($path.into()), Target::Empty) ),+
                 ]);
 
                 let router = Arc::new(Router(routes));
@@ -302,8 +302,8 @@ mod resolve_routes {
                         $file
                     );
 
-                    let route = Route::$method($path.to_string());
-                    let target = Target::File(PathBuf::from(filepath));
+                    let route = Route::$method($path.into());
+                    let target = Target::File(Path::new(filepath));
 
                     let mut routes = BTreeMap::new();
                     routes.insert(route, target);
@@ -365,8 +365,8 @@ mod resolve_routes {
                         $file
                     );
 
-                    let route = Route::$method($path.to_string());
-                    let target = Target::Favicon(PathBuf::from(filepath));
+                    let route = Route::$method($path.into());
+                    let target = Target::Favicon(Path::new(filepath));
 
                     let mut routes = BTreeMap::new();
                     routes.insert(route, target);
@@ -426,8 +426,8 @@ mod resolve_routes {
                         $file
                     );
 
-                    let route = Route::$method($path.to_string());
-                    let target = Target::File(PathBuf::from(filepath));
+                    let route = Route::$method($path.into());
+                    let target = Target::File(Path::new(filepath));
 
                     let mut routes = BTreeMap::new();
                     routes.insert(route, target);
@@ -484,7 +484,7 @@ mod resolve_routes {
             #[test]
             fn $label() {
                 let routes = BTreeMap::from([
-                    $((Route::$method($path.to_string()), Target::$body($inner))),+
+                    $((Route::$method($path.into()), Target::$body($inner))),+
                 ]);
 
                 let router = Arc::new(Router(routes));

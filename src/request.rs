@@ -268,6 +268,7 @@ impl FromStr for RequestLine {
         })
     }
 }
+
 impl RequestLine {
     /// Returns a new `RequestLine` instance.
     #[must_use]
@@ -291,12 +292,6 @@ impl RequestLine {
         &self.path
     }
 
-    /// Returns the `Route` representation of the target resource.
-    #[must_use]
-    pub fn route(&self) -> Route {
-        Route::new(self.method, &self.path)
-    }
-
     /// Returns the HTTP version.
     #[must_use]
     pub const fn version(&self) -> Version {
@@ -305,21 +300,12 @@ impl RequestLine {
 }
 
 /// Represents the components of an HTTP request.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Request {
     pub request_line: RequestLine,
     pub headers: Headers,
     pub body: Body,
 }
-
-impl PartialEq for Request {
-    fn eq(&self, other: &Self) -> bool {
-        self.request_line == other.request_line
-            && self.headers == other.headers
-            && self.body == other.body
-    }
-}
-
-impl Eq for Request {}
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -340,16 +326,6 @@ impl Display for Request {
     }
 }
 
-impl Debug for Request {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.debug_struct("Request")
-            .field("request_line", &self.request_line)
-            .field("headers", &self.headers)
-            .field("body", &self.body)
-            .finish()
-    }
-}
-
 impl Request {
     /// Returns the HTTP method.
     #[must_use]
@@ -363,16 +339,17 @@ impl Request {
         &self.request_line.path
     }
 
-    /// Returns the `Route` representation of the target resource.
-    #[must_use]
-    pub fn route(&self) -> Route {
-        self.request_line.route()
-    }
-
     /// Returns the HTTP version.
     #[must_use]
     pub const fn version(&self) -> Version {
         self.request_line.version
+    }
+
+    /// Returns a `Route` that represents the requested URI path and HTTP
+    /// method.
+    #[must_use]
+    pub fn route(&self) -> Route {
+        Route::from((self.method(), self.path()))
     }
 
     /// Returns the request line as a String.

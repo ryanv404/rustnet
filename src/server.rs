@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::convert::Into;
 use std::error::Error as StdError;
 use std::io::ErrorKind as IoErrorKind;
@@ -9,10 +10,10 @@ use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
-use crate::{NetError, NetReader, NetResult, NetWriter, Response, Route, Router, Target};
+use crate::{Method, NetError, NetReader, NetResult, NetWriter, Response, Route, Router, Target};
 
 /// Configures the socket address and the router for a `Server`.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs,
@@ -100,7 +101,7 @@ where
         let mut router = self.router.take().unwrap_or_default();
 
         if self.use_shutdown_route {
-            let route = Route::Delete("/__shutdown_server__".to_string());
+            let route = Route::Delete(Cow::Borrowed("/__shutdown_server__"));
             let target = Target::Text("The server is now shutting down.");
             router.mount(route, target);
         }
@@ -343,7 +344,10 @@ impl Server {
         resp.send(&mut writer)?;
 
         // Check for server shutdown signal
-        if **use_shutdown_route && req.route().is_shutdown_route() {
+        if **use_shutdown_route &&
+            req.method() == Method::Delete &&
+            req.path() == "/__shutdown_server__"
+        {
             Ok(true)
         } else {
             Ok(false)
@@ -402,6 +406,7 @@ impl Server {
 pub type Task = Box<dyn FnOnce() + Send + 'static>;
 
 /// Holds a handle to a single worker thread.
+#[derive(Debug)]
 pub struct Worker {
     pub id: usize,
     pub handle: Option<JoinHandle<()>>,
@@ -428,6 +433,7 @@ impl Worker {
 }
 
 /// Holds the pool of `Worker` threads.
+#[derive(Debug)]
 pub struct ThreadPool {
     pub workers: Vec<Worker>,
     pub sender: Option<Sender<Task>>,

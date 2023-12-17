@@ -51,6 +51,17 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
     }
 }
 
+// pub fn get_extension(path: &Path) -> Option<&str> {
+//     path.extension()
+//         .and_then(|ext| ext.to_str())
+// }
+
+// pub fn is_file(path: &Path) -> bool {
+//     fs::metadata(path)
+//         .map(|meta| meta.is_file())
+//         .unwrap_or(false)
+// }
+
 //// Determines if byte is a token char.
 //#[allow(dead_code)]
 //#[must_use]

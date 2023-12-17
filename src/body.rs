@@ -1,11 +1,11 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::{NetError, NetResult};
 
 /// A respresentation of the body content type.
-#[derive(Clone, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Body {
     Empty,
     Text(String),
@@ -39,45 +39,10 @@ impl Display for Body {
     }
 }
 
-impl Debug for Body {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            Self::Empty => f.debug_tuple("Empty").finish(),
-            Self::Text(ref s) => f.debug_tuple("Text").field(s).finish(),
-            Self::Html(ref s) => f.debug_tuple("Html").field(s).finish(),
-            Self::Json(ref s) => f.debug_tuple("Json").field(s).finish(),
-            Self::Xml(ref s) => f.debug_tuple("Xml").field(s).finish(),
-            Self::Image(_) => f.debug_tuple("Image").field(&"{ ... }").finish(),
-            Self::Bytes(_) => f.debug_tuple("Bytes").field(&"{ ... }").finish(),
-            Self::Favicon(_) => f.debug_tuple("Favicon").field(&"{ ... }").finish(),
-        }
-    }
-}
-
-impl PartialEq for Body {
-    #[allow(clippy::match_same_arms)]
-    #[allow(clippy::match_like_matches_macro)]
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Empty, Self::Empty) => true,
-            (Self::Text(ref s1), Self::Text(ref s2)) => s1 == s2,
-            (Self::Html(ref s1), Self::Html(ref s2)) => s1 == s2,
-            (Self::Json(ref s1), Self::Json(ref s2)) => s1 == s2,
-            (Self::Xml(ref s1), Self::Xml(ref s2)) => s1 == s2,
-            (Self::Image(ref buf1), Self::Image(ref buf2)) => buf1[..] == buf2[..],
-            (Self::Bytes(ref buf1), Self::Bytes(ref buf2)) => buf1[..] == buf2[..],
-            (Self::Favicon(ref buf1), Self::Favicon(ref buf2)) => buf1[..] == buf2[..],
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Body {}
-
-impl TryFrom<&PathBuf> for Body {
+impl TryFrom<&Path> for Body {
     type Error = NetError;
 
-    fn try_from(filepath: &PathBuf) -> NetResult<Self> {
+    fn try_from(filepath: &Path) -> NetResult<Self> {
         match filepath.extension() {
             None => {
                 let body = fs::read(filepath)?;

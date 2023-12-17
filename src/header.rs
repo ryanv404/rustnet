@@ -43,16 +43,8 @@ impl FromStr for Header {
 }
 
 /// A wrapper around an object that maps header names to header values.
-#[derive(Clone, Debug, Default, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
-
-impl PartialEq for Headers {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for Headers {}
 
 impl Headers {
     /// Returns a new `Headers` instance.

@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// An HTTP request builder object.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientBuilder<A>
 where
     A: ToSocketAddrs,
