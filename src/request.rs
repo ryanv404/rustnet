@@ -1,16 +1,21 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufRead, BufReader, ErrorKind as IoErrorKind, Read, Result as IoResult};
+use std::io::{
+    BufRead, BufReader, ErrorKind as IoErrorKind, Read, Result as IoResult,
+};
 use std::net::TcpStream;
 use std::str::{self, FromStr};
 use std::string::ToString;
 
-use crate::consts::{CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS, READER_BUFSIZE};
+use crate::consts::{
+    CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS, READER_BUFSIZE,
+};
 use crate::{
-    Body, Header, HeaderName, HeaderValue, Headers, Method, NetError, NetResult, NetWriter,
-    ParseErrorKind, Response, Route, StatusLine, Version,
+    Body, Header, HeaderName, HeaderValue, Headers, Method, NetError,
+    NetResult, NetWriter, ParseErrorKind, Response, Route, StatusLine,
+    Version,
 };
 
-/// A buffered reader wrapper around a `TcpStream` instance.
+/// A buffered reader responsible for reading from an inner `TcpStream`.
 #[derive(Debug)]
 pub struct NetReader(pub BufReader<TcpStream>);
 
@@ -43,10 +48,14 @@ impl BufRead for NetReader {
 }
 
 impl NetReader {
-    /// Returns a clone of the current `NetReader` instance.
-    #[allow(clippy::missing_errors_doc)]
+    /// Returns a clone of the current `NetReader`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying call to `TcpStream::try_clone`
+    /// encounters an error.
     pub fn try_clone(&self) -> NetResult<Self> {
-        let stream = self.0.get_ref().try_clone()?;
+        let stream = self.get_ref().try_clone()?;
         Ok(Self::from(stream))
     }
 
@@ -62,81 +71,70 @@ impl NetReader {
         self.0.get_ref()
     }
 
-    /// Reads an HTTP request from the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn recv_request(&mut self) -> NetResult<Request> {
-        let request_line = self.read_request_line()?;
-        let headers = self.read_headers()?;
-        let body = self.read_body(&headers)?;
-
-        Ok(Request {
-            request_line,
-            headers,
-            body,
-        })
-    }
-
-    /// Reads an HTTP response from the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn recv_response(&mut self) -> NetResult<Response> {
-        let status_line = self.read_status_line()?;
-        let headers = self.read_headers()?;
-        let body = self.read_body(&headers)?;
-
-        Ok(Response {
-            status_line,
-            headers,
-            body,
-        })
-    }
-
-    /// Reads a request line from the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses a `RequestLine` from the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
+    /// to read the underlying `TcpStream` returns `Ok(0)`. An error will also
+    /// be returned if parsing of the `RequestLine` fails.
     pub fn read_request_line(&mut self) -> NetResult<RequestLine> {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Err(e) => Err(NetError::ReadError(e.kind())),
             Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
+            Err(e) => Err(NetError::ReadError(e.kind())),
             Ok(_) => line.parse::<RequestLine>(),
         }
     }
 
-    /// Reads a response status line from the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses a `StatusLine` from the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
+    /// to read the underlying `TcpStream` returns `Ok(0)`. An error will also
+    /// be returned if parsing of the `StatusLine` fails.
     pub fn read_status_line(&mut self) -> NetResult<StatusLine> {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Err(e) => Err(NetError::ReadError(e.kind())),
             Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
+            Err(e) => Err(NetError::ReadError(e.kind())),
             Ok(_) => line.parse::<StatusLine>(),
         }
     }
 
-    /// Reads request headers from the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses header entries from the underlying `TcpStream`
+    /// into a `Headers` collection.
+    ///
+    /// # Errors
+    ///
+    /// As with the other readers, an error of kind `ErrorKind::UnexpectedEof`
+    /// is returned if `Ok(0)` is received while reading from the underlying
+    /// `TcpStream`. An error will also be returned if parsing of a `Header`
+    /// entry fails.
     pub fn read_headers(&mut self) -> NetResult<Headers> {
         let mut num_headers = 0;
         let mut headers = Headers::new();
-        let mut buf = String::with_capacity(1024);
+        let mut line = String::with_capacity(1024);
 
         while num_headers <= MAX_HEADERS {
-            match self.read_line(&mut buf) {
-                Err(e) => return Err(NetError::ReadError(e.kind())),
-                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
-                Ok(_) => {
-                    let line = buf.trim();
+            line.clear();
 
-                    if line.is_empty() {
+            match self.read_line(&mut line) {
+                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
+                Err(e) => return Err(NetError::ReadError(e.kind())),
+                Ok(_) => {
+                    let buf = line.trim();
+
+                    if buf.is_empty() {
                         break;
                     }
 
-                    let header = line.parse::<Header>()?;
+                    let header = buf.parse::<Header>()?;
                     headers.insert(header.name, header.value);
-
                     num_headers += 1;
-                    buf.clear();
                 }
             }
         }
@@ -144,9 +142,12 @@ impl NetReader {
         Ok(headers)
     }
 
-    /// Reads and parses the message body based on the value of the
-    /// Content-Length and Content-Type headers.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses a `Body` from the underlying `TcpStream`, if present.
+    ///
+    /// # Errors
+    ///
+    /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
+    /// to read the underlying `TcpStream` returns `Ok(0)`.
     pub fn read_body(&mut self, headers: &Headers) -> NetResult<Body> {
         let content_len = headers.get(&CONTENT_LENGTH);
         let content_type = headers.get(&CONTENT_TYPE);
@@ -158,13 +159,15 @@ impl NetReader {
         let body_len = content_len
             .ok_or(ParseErrorKind::Body)
             .map(ToString::to_string)
-            .and_then(|s| s.trim().parse::<usize>().map_err(|_| ParseErrorKind::Body))?;
+            .and_then(|s| s.trim().parse::<usize>()
+                .map_err(|_| ParseErrorKind::Body))?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
         }
 
-        let num_bytes = u64::try_from(body_len).map_err(|_| ParseErrorKind::Body)?;
+        let num_bytes = u64::try_from(body_len)
+            .map_err(|_| ParseErrorKind::Body)?;
 
         let body_type = content_type
             .map(ToString::to_string)
@@ -177,7 +180,6 @@ impl NetReader {
 
         let mut reader = self.take(num_bytes);
         let mut buf = Vec::with_capacity(body_len);
-
         reader.read_to_end(&mut buf)?;
 
         let mut type_tokens = body_type.splitn(2, '/');
@@ -212,9 +214,45 @@ impl NetReader {
             _ => Ok(Body::Bytes(buf)),
         }
     }
+
+    /// Reads and parses a `Request` from the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to read or parse the
+    /// individual components of the `Request`.
+    pub fn recv_request(&mut self) -> NetResult<Request> {
+        let request_line = self.read_request_line()?;
+        let headers = self.read_headers()?;
+        let body = self.read_body(&headers)?;
+
+        Ok(Request {
+            request_line,
+            headers,
+            body,
+        })
+    }
+
+    /// Reads and parses a `Response` from the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to read or parse the
+    /// individual components of the `Response`.
+    pub fn recv_response(&mut self) -> NetResult<Response> {
+        let status_line = self.read_status_line()?;
+        let headers = self.read_headers()?;
+        let body = self.read_body(&headers)?;
+
+        Ok(Response {
+            status_line,
+            headers,
+            body,
+        })
+    }
 }
 
-/// Represents the first line of an HTTP request.
+/// Contains the components of an HTTP request line.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestLine {
     pub method: Method,
@@ -241,8 +279,13 @@ impl Display for RequestLine {
 impl FromStr for RequestLine {
     type Err = NetError;
 
-    /// Parses a string slice into a `RequestLine` object.
-    #[allow(clippy::missing_errors_doc)]
+    /// Parses a string slice into a `RequestLine`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if a problem is encountered while parsing
+    /// the HTTP `Method`, URI path, or HTTP protocol `Version` that
+    /// together comprise the `RequestLine`.
     fn from_str(line: &str) -> NetResult<Self> {
         let mut tokens = line.trim_start().splitn(3, ' ');
 
@@ -270,36 +313,26 @@ impl FromStr for RequestLine {
 }
 
 impl RequestLine {
-    /// Returns a new `RequestLine` instance.
-    #[must_use]
-    pub const fn new(method: Method, path: String, version: Version) -> Self {
-        Self {
-            method,
-            path,
-            version,
-        }
-    }
-
-    /// Returns the HTTP method.
+    /// Returns the HTTP `Method` for this `RequestLine`.
     #[must_use]
     pub const fn method(&self) -> Method {
         self.method
     }
 
-    /// Returns the URI path to the target resource.
+    /// Returns the requested URI path.
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    /// Returns the HTTP version.
+    /// Returns the HTTP protocol `Version`.
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
     }
 }
 
-/// Represents the components of an HTTP request.
+/// Contains the components of an HTTP request.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Request {
     pub request_line: RequestLine,
@@ -309,15 +342,12 @@ pub struct Request {
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        // The request line.
         writeln!(f, "{}", self.request_line)?;
 
-        // The request headers.
         for (name, value) in &self.headers.0 {
             writeln!(f, "{name}: {value}")?;
         }
 
-        // The request body.
         if !self.body.is_empty() {
             writeln!(f, "{}", &self.body)?;
         }
@@ -327,44 +357,44 @@ impl Display for Request {
 }
 
 impl Request {
-    /// Returns the HTTP method.
+    /// Returns the HTTP `Method` for this `Request`.
     #[must_use]
     pub const fn method(&self) -> Method {
         self.request_line.method
     }
 
-    /// Returns the URI path to the target resource.
+    /// Returns the URI path for this `Request`.
     #[must_use]
     pub fn path(&self) -> &str {
         &self.request_line.path
     }
 
-    /// Returns the HTTP version.
+    /// Returns the HTTP protocol `Version` for this `Request`.
     #[must_use]
     pub const fn version(&self) -> Version {
         self.request_line.version
     }
 
-    /// Returns a `Route` that represents the requested URI path and HTTP
-    /// method.
+    /// Returns a `Route` that represents the URI path and HTTP
+    /// `Method` found in this `Request`.
     #[must_use]
     pub fn route(&self) -> Route {
         Route::from((self.method(), self.path()))
     }
 
-    /// Returns the request line as a String.
+    /// Returns the `RequestLine` for this `Request`.
     #[must_use]
     pub fn request_line(&self) -> String {
         self.request_line.to_string()
     }
 
-    /// Returns a reference to the request headers.
+    /// Returns the headers found in this `Request`.
     #[must_use]
     pub const fn headers(&self) -> &Headers {
         &self.headers
     }
 
-    /// Returns true if the header is present.
+    /// Returns true if the given `HeaderName` key is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
         self.headers.contains(name)
@@ -376,12 +406,12 @@ impl Request {
         self.headers.get(name)
     }
 
-    /// Adds or updates a request header field line.
+    /// Adds or updates a header field line to this `Request`.
     pub fn insert_header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
     }
 
-    /// Returns the request headers as a String.
+    /// Returns the all request headers as a `String`.
     #[must_use]
     pub fn headers_to_string(&self) -> String {
         if self.headers.0.is_empty() {
@@ -397,20 +427,28 @@ impl Request {
         }
     }
 
-    /// Returns a reference to the request body, if present.
+    /// Returns `Body` for this `Request`.
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body
     }
 
-    /// Sends an HTTP request to a remote server.
-    #[allow(clippy::missing_errors_doc)]
+    /// Writes an HTTP request to a remote server.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `NetWriter::send_request` encounters an
+    /// error.
     pub fn send(&mut self, writer: &mut NetWriter) -> NetResult<()> {
         writer.send_request(self)
     }
 
-    /// Receives an HTTP request from a remote client.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses an HTTP request from a remote client.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `NetReader::recv_request` encounters an
+    /// error.
     pub fn recv(reader: &mut NetReader) -> NetResult<Self> {
         reader.recv_request()
     }

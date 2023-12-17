@@ -26,20 +26,36 @@ impl Default for Route {
     }
 }
 
+impl Display for Route {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Get(path) => write!(f, "GET {path}"),
+            Self::Head(path) => write!(f, "HEAD {path}"),
+            Self::Post(path) => write!(f, "POST {path}"),
+            Self::Put(path) => write!(f, "PUT {path}"),
+            Self::Patch(path) => write!(f, "PATCH {path}"),
+            Self::Delete(path) => write!(f, "DELETE {path}"),
+            Self::Trace(path) => write!(f, "TRACE {path}"),
+            Self::Options(path) => write!(f, "OPTIONS {path}"),
+            Self::Connect(path) => write!(f, "CONNECT {path}"),
+        }
+    }
+}
+
 impl From<(Method, &str)> for Route {
     fn from((method, path): (Method, &str)) -> Self {
         let path = path.to_string();
 
         match method {
-            Method::Get => Route::Get(path.into()),
-            Method::Head => Route::Head(path.into()),
-            Method::Post => Route::Post(path.into()),
-            Method::Put => Route::Put(path.into()),
-            Method::Patch => Route::Patch(path.into()),
-            Method::Delete => Route::Delete(path.into()),
-            Method::Trace => Route::Trace(path.into()),
-            Method::Options => Route::Options(path.into()),
-            Method::Connect => Route::Connect(path.into()),
+            Method::Get => Self::Get(path.into()),
+            Method::Head => Self::Head(path.into()),
+            Method::Post => Self::Post(path.into()),
+            Method::Put => Self::Put(path.into()),
+            Method::Patch => Self::Patch(path.into()),
+            Method::Delete => Self::Delete(path.into()),
+            Method::Trace => Self::Trace(path.into()),
+            Method::Options => Self::Options(path.into()),
+            Method::Connect => Self::Connect(path.into()),
         }
     }
 }
@@ -104,7 +120,7 @@ impl Router {
     /// Returns the configured `Target` for the route, if available.
     #[must_use]
     pub fn resolve(&self, route: &Route) -> Option<Target> {
-        self.0.get(route).cloned()
+        self.0.get(route).copied()
     }
 
     /// Returns true if there is an entry associated with `Route`.
@@ -224,10 +240,9 @@ impl Router {
         self.resolve(&Route::Get(Cow::Borrowed("__error")))
     }
 
-    /// Returns a `RouteBuilder` that is used to configure a single URI path to
-    /// respond differently to different HTTP methods.
+    /// Returns a `RouteBuilder`.
     #[must_use]
-    pub fn route(self, uri_path: &'static str) -> RouteBuilder {
+    pub const fn route(self, uri_path: &'static str) -> RouteBuilder {
         RouteBuilder::new(self, uri_path)
     }
 }

@@ -226,10 +226,12 @@ where
             .as_ref()
             .map_or_else(|| String::from("/"), ToString::to_string);
 
-        let request_line = RequestLine::new(self.method, path, self.version);
-
         let req = Some(Request {
-            request_line,
+            request_line: RequestLine {
+                method: self.method,
+                path,
+                version: self.version,
+            },
             headers: self.headers,
             body: self.body,
         });

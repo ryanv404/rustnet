@@ -284,7 +284,7 @@ mod resolve_routes {
                     };
 
                     expect.headers.insert_cache_control("no-cache");
-                    assert_eq!(res, expect);
+                    assert_eq!(res, Ok(expect));
                 )+
             }
         };
@@ -347,7 +347,7 @@ mod resolve_routes {
                     };
 
                     let res = Response::from_route(&req.route(), &router);
-                    assert_eq!(res, expect);
+                    assert_eq!(res, Ok(expect));
                 )+
             }
         };
@@ -408,7 +408,7 @@ mod resolve_routes {
                     };
 
                     let res = Response::from_route(&req.route(), &router);
-                    assert_eq!(res, expect);
+                    assert_eq!(res, Ok(expect));
                 )+
             }
         };
@@ -471,7 +471,7 @@ mod resolve_routes {
                     };
 
                     let res = Response::from_route(&req.route(), &router);
-                    assert_eq!(res, expect);
+                    assert_eq!(res, Ok(expect));
                 )+
             }
         };
@@ -536,7 +536,7 @@ mod resolve_routes {
                         expect.body = Body::Empty;
                     }
 
-                    assert_eq!(res, expect);
+                    assert_eq!(res, Ok(expect));
                 )+
             }
         };

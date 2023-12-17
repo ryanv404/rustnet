@@ -4,13 +4,16 @@ use std::net::TcpStream;
 use std::str::FromStr;
 use std::string::ToString;
 
-use crate::consts::{ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE};
+use crate::consts::{
+    ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE,
+};
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader, NetResult, ParseErrorKind,
-    Request, Route, Router, Status, Target, Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
+    NetResult, ParseErrorKind, Request, RequestLine, Route, Router, Status,
+    Target, Version,
 };
 
-/// A buffered writer wrapper around a `TcpStream` instance.
+/// A buffered writer responsible for writing to an inner `TcpStream`.
 #[derive(Debug)]
 pub struct NetWriter(pub BufWriter<TcpStream>);
 
@@ -41,20 +44,28 @@ impl Write for NetWriter {
 }
 
 impl NetWriter {
-    /// Returns a clone of the current `NetWriter` instance.
-    #[allow(clippy::missing_errors_doc)]
+    /// Returns a clone of the current `NetWriter`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if the underlying call to `TcpStream::try_clone`
+    /// returns an error.
     pub fn try_clone(&self) -> NetResult<Self> {
         let stream = self.get_ref().try_clone()?;
         Ok(Self::from(stream))
     }
 
-    /// Consumes the `NetWriter` and returns the underlying `TcpStream`.
+    /// Consumes the `NetWriter` and returns the components of underlying
+    /// `TcpStream`.
     pub fn into_parts(self) -> (TcpStream, Result<Vec<u8>, WriterPanicked>) {
         self.0.into_parts()
     }
 
     /// Consumes the `NetWriter` and returns the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the inner `TcpStream` could not be returned.
     pub fn into_inner(self) -> NetResult<TcpStream> {
         self.0.into_inner().map_err(|e| e.into_error().into())
     }
@@ -65,8 +76,70 @@ impl NetWriter {
         self.0.get_ref()
     }
 
-    /// Writes an HTTP request to the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
+    /// Writes a `RequestLine` to the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if the `RequestLine` could not be written
+    /// to the `TcpStream` successfully.
+    pub fn write_request_line(
+        &mut self,
+        request_line: &RequestLine
+    ) -> NetResult<()> {
+        self.write_all(format!("{request_line}\r\n").as_bytes())?;
+        Ok(())
+    }
+
+    /// Writes a `StatusLine` to the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if the `StatusLine` could not be written
+    /// to the `TcpStream` successfully.
+    pub fn write_status_line(
+        &mut self,
+        status_line: &StatusLine
+    ) -> NetResult<()> {
+        self.write_all(format!("{status_line}\r\n").as_bytes())?;
+        Ok(())
+    }
+
+    /// Writes all of the header entries in `Headers` to the underlying
+    /// `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if a problem was encountered while writing the
+    /// `Headers` to the `TcpStream`.
+    pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
+        if !headers.is_empty() {
+            for (name, value) in &headers.0 {
+                self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
+            }
+        }
+        self.write_all(b"\r\n")?;
+        Ok(())
+    }
+
+    /// Writes a `Body` to the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if the `Body` could not be written
+    /// to the `TcpStream` successfully.
+    pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
+        if !body.is_empty() {
+            self.write_all(body.as_bytes())?;
+        }
+        Ok(())
+    }
+
+    /// Writes a `Request` to the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to write any of the
+    /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
         if !req.headers.contains(&ACCEPT) {
             req.headers.insert_accept("*/*");
@@ -82,88 +155,67 @@ impl NetWriter {
             req.headers.insert_user_agent();
         }
 
-        self.write_all(format!("{}\r\n", &req.request_line).as_bytes())?;
+        self.write_request_line(&req.request_line)?;
         self.write_headers(&req.headers)?;
         self.write_body(&req.body)?;
+
         self.flush()?;
         Ok(())
     }
 
-    /// Writes a server error HTTP response to the underlying `TcpStream` with
-    /// an error message included in the body.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn send_server_error(&mut self, msg: &str) -> NetResult<()> {
+    /// Writes an internal server error `Response` to the underlying
+    /// `TcpStream` that contains the provided error message.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to write any of the
+    /// individual components of the `Response` to the `TcpStream`.
+    pub fn send_server_error(&mut self, err_msg: &str) -> NetResult<()> {
         let mut res = Response::new(500);
-        res.body = Body::Text(msg.to_owned());
-        res.headers.insert_connection("close");
-        res.headers.insert_cache_control("no-cache");
-        res.headers.insert_content_length(res.body.len());
-        res.headers.insert_content_type("text/plain; charset=utf-8");
-        self.send_response(&mut res)
-    }
 
-    /// Writes a server error response to the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn send_status(&mut self, code: u16) -> NetResult<()> {
-        let mut res = Response::new(code);
-        res.headers.insert_cache_control("no-cache");
+        // Update the response headers.
+        res.headers.insert_server();
         res.headers.insert_connection("close");
-        self.send_response(&mut res)?;
+        res.headers.insert_cache_control("no-cache");
+        res.headers.insert_content_length(err_msg.len());
+        res.headers.insert_content_type("text/plain; charset=utf-8");
+
+        // Include the provided error message.
+        res.body = Body::Text(err_msg.to_owned());
+
+        self.write_status_line(&res.status_line)?;
+        self.write_headers(&res.headers)?;
+        self.write_body(&res.body)?;
+
+        self.flush()?;
         Ok(())
     }
 
-    /// Writes an HTTP response to the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
+    /// Writes a `Response` to the underlying `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to write any of the
+    /// individual components of the `Response` to the `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
         if !res.headers.contains(&SERVER) {
             res.headers.insert_server();
         }
 
-        self.write_all(format!("{}\r\n", &res.status_line).as_bytes())?;
+        self.write_status_line(&res.status_line)?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
+
         self.flush()?;
         Ok(())
     }
-
-    /// Writes the response headers to the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
-        if !headers.is_empty() {
-            for (name, value) in &headers.0 {
-                self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
-            }
-        }
-
-        self.write_all(b"\r\n")?;
-        Ok(())
-    }
-
-    /// Writes the response body to the underlying `TcpStream`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
-        if !body.is_empty() {
-            self.write_all(body.as_bytes())?;
-        }
-
-        Ok(())
-    }
 }
 
-/// Represents the status line of an HTTP response.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// Contains the components of an HTTP status line.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StatusLine {
     pub version: Version,
     pub status: Status,
-}
-
-impl Default for StatusLine {
-    fn default() -> Self {
-        Self {
-            version: Version::OneDotOne,
-            status: Status(200),
-        }
-    }
 }
 
 impl Display for StatusLine {
@@ -179,51 +231,44 @@ impl FromStr for StatusLine {
         line.find("HTTP")
             .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
             .and_then(|start| {
-                line[start..]
-                    .split_once(' ')
-                    .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
-                    .and_then(|(token1, token2)| {
-                        let version = token1.parse::<Version>()?;
-                        let status = token2.parse::<Status>()?;
-                        Ok(Self::new(version, status))
-                    })
+                line[start..].split_once(' ')
+                .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
+            })
+            .and_then(|(token1, token2)| {
+                let version = token1.parse::<Version>()?;
+                let status = token2.parse::<Status>()?;
+                Ok(Self { version, status })
             })
     }
 }
 
 impl StatusLine {
-    /// Returns a new `StatusLine` instance.
-    #[must_use]
-    pub const fn new(version: Version, status: Status) -> Self {
-        Self { version, status }
-    }
-
-    /// Returns the protocol version.
+    /// Returns the HTTP protocol `Version`.
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
     }
 
-    /// Returns the response status.
+    /// Returns the `Status`.
     #[must_use]
     pub const fn status(&self) -> Status {
         self.status
     }
 
-    /// Returns the status code.
+    /// Returns the `Status` code.
     #[must_use]
     pub const fn status_code(&self) -> u16 {
         self.status.code()
     }
 
-    /// Returns the status reason phrase.
+    /// Returns the `Status` reason phrase.
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
         self.status.msg()
     }
 }
 
-/// Represents the components of an HTTP response.
+/// Contains the components of an HTTP response.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Response {
     pub status_line: StatusLine,
@@ -233,15 +278,12 @@ pub struct Response {
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        // The response status line.
         writeln!(f, "{}", self.status_line)?;
 
-        // The response headers.
         for (name, value) in &self.headers.0 {
             writeln!(f, "{name}: {value}")?;
         }
 
-        // The response body.
         if !self.body.is_empty() {
             writeln!(f, "{}", &self.body)?;
         }
@@ -250,73 +292,41 @@ impl Display for Response {
     }
 }
 
-impl Response {
-    /// Resolves a `Route` into a `Response` based on the provided `Router`.
-    #[allow(clippy::missing_errors_doc)]
-    #[allow(clippy::match_same_arms)]
-    #[must_use]
-    pub fn from_route(route: &Route, router: &Router) -> Self {
-        if router.is_empty() {
-            let mut res = Self::new(500);
-            res.body = Body::Text("This server has no routes configured.".to_string());
-            res.headers.insert_cache_control("no-cache");
-            res.headers.insert_connection("close");
-            res.headers.insert_content_length(res.body.len());
-            res.headers.insert_content_type("text/plain; charset=utf-8");
-            return res;
-        }
+impl TryFrom<Target> for Response {
+    type Error = NetError;
 
-        let method = route.method();
-        let maybe_target = router.resolve(route);
+    fn try_from(target: Target) -> NetResult<Self> {
+        let mut res = Self::new(200);
+        res.headers.insert_cache_control("no-cache");
 
-        let maybe_res = match maybe_target {
-            Some(target) if method == Method::Post => {
-                Self::from_target(201, target)
+        res.body = match target {
+            Target::Empty => Body::Empty,
+            Target::Xml(s) => Body::Xml(s.to_string()),
+            Target::Text(s) => Body::Text(s.to_string()),
+            Target::Html(s) => Body::Html(s.to_string()),
+            Target::Json(s) => Body::Json(s.to_string()),
+            Target::Bytes(bytes) => Body::Bytes(bytes.to_vec()),
+            Target::File(filepath) => Body::try_from(filepath)?,
+            Target::Favicon(filepath) => {
+                res.headers.insert_cache_control("max-age=604800");
+                Body::try_from(filepath)?
             },
-            Some(target) => Self::from_target(200, target),
-            None if method == Method::Head => {
-                // Allow HEAD requests for any route configured for a GET request.
-                let path = route.path().to_string();
-                let get_route = Route::Get(path.into());
-
-                router.resolve(&get_route).map_or_else(
-                    // No route exists for a GET request either.
-                    || {
-                        router.get_error_404().map_or_else(
-                            || Self::from_target(404, Target::Empty),
-                            |target| Self::from_target(404, target),
-                        )
-                    },
-                    // GET route exists so send it as a HEAD response.
-                    |target| Self::from_target(200, target),
-                )
-            }
-            // Handle routes that do not exist.
-            None => router.get_error_404().map_or_else(
-                || Self::from_target(404, Target::Empty),
-                |target| Self::from_target(404, target),
-            ),
         };
 
-        match maybe_res {
-            Ok(mut res) if method == Method::Head => {
-                res.body = Body::Empty;
-                res
-            }
-            Ok(res) => res,
-            Err(e) => {
-                let mut res = Self::new(500);
-                res.body = Body::Text(format!("Error: {e}"));
-                res.headers.insert_cache_control("no-cache");
-                res.headers.insert_connection("close");
-                res.headers.insert_content_length(res.body.len());
-                res.headers.insert_content_type("text/plain; charset=utf-8");
-                res
-            }
+        if let Some(header) = target.as_content_type_header() {
+            res.headers.insert(header.name, header.value);
         }
-    }
 
-    /// Parses the target type and returns a new `Response` object.
+        if !res.body.is_empty() {
+            res.headers.insert_content_length(res.body.len());
+        }
+
+        Ok(res)
+    }
+}
+
+impl Response {
+    /// Returns a new `Response` containing the provided status code.
     #[must_use]
     pub fn new(code: u16) -> Self {
         Self {
@@ -329,78 +339,110 @@ impl Response {
         }
     }
 
-    /// Parses the target type and returns a new `Response` object.
+    /// Constructs a new `Response` based on the `Target` of the requested
+    /// `Route`.
     ///
     /// # Errors
     ///
-    /// Returns an error if `fs::read` or `fs::read_to_string` fails.
-    pub fn from_target(code: u16, target: Target) -> NetResult<Self> {
-        let mut res = Self::new(code);
+    /// Returns an error if a `Response` could not be constructed from
+    /// a `Target`.
+    pub fn from_route(route: &Route, router: &Router) -> NetResult<Self> {
+        let method = route.method();
 
-        if let Some(header) = target.as_content_type_header() {
-            res.headers.insert(header.name, header.value);
-        }
+        match router.resolve(route) {
+            Some(target) if method == Method::Head => {
+                // Respond with 200 OK for HEAD routes that exist.
+                let mut res = Self::try_from(target)?;
+                res.status_line.status = Status(200);
+                res.body = Body::Empty;
+                Ok(res)
+            },
+            Some(target) if method == Method::Post => {
+                // Respond with 201 Created for POST routes that exist.
+                let mut res = Self::try_from(target)?;
+                res.status_line.status = Status(201);
+                Ok(res)
+            },
+            Some(target) => {
+                // Respond with 200 OK for all other routes that exist.
+                let mut res = Self::try_from(target)?;
+                res.status_line.status = Status(200);
+                Ok(res)
+            },
+            None if method == Method::Head => {
+                // Check if the requested HEAD route exists as a GET route.
+                let path = route.path().to_string();
 
-        res.headers.insert_cache_control("no-cache");
-
-        res.body = match target {
-            Target::Empty => Body::Empty,
-            Target::Text(s) => Body::Text(s.to_string()),
-            Target::Html(s) => Body::Html(s.to_string()),
-            Target::Json(s) => Body::Json(s.to_string()),
-            Target::Xml(s) => Body::Xml(s.to_string()),
-            Target::File(fpath) => Body::try_from(fpath)?,
-            Target::Favicon(fpath) => {
-                res.headers.insert_cache_control("max-age=604800");
-                Body::try_from(fpath)?
+                match router.resolve(&Route::Get(path.into())) {
+                    Some(target) => {
+                        let mut res = Self::try_from(target)?;
+                        res.status_line.status = Status(200);
+                        res.body = Body::Empty;
+                        Ok(res)
+                    },
+                    None => if let Some(target) = router.get_error_404() {
+                        let mut res = Self::try_from(target)?;
+                        res.status_line.status = Status(404);
+                        res.body = Body::Empty;
+                        Ok(res)
+                    } else {
+                        let mut res = Self::try_from(Target::Empty)?;
+                        res.status_line.status = Status(404);
+                        res.body = Body::Empty;
+                        Ok(res)
+                    }
+                }
             }
-            Target::Bytes(bytes) => Body::Bytes(bytes.to_vec()),
-        };
-
-        if !res.body.is_empty() {
-            res.headers.insert_content_length(res.body.len());
+            // Handle requests for routes that do not exist.
+            None => if let Some(target) = router.get_error_404() {
+                let mut res = Self::try_from(target)?;
+                res.status_line.status = Status(404);
+                Ok(res)
+            } else {
+                let mut res = Self::try_from(Target::Empty)?;
+                res.status_line.status = Status(404);
+                Ok(res)
+            }
         }
-
-        Ok(res)
     }
 
-    /// Returns a String representation of the response's status line.
+    /// Returns the `StatusLine` for this `Response`.
     #[must_use]
-    pub fn status_line(&self) -> String {
-        self.status_line.to_string()
+    pub const fn status_line(&self) -> StatusLine {
+        self.status_line
     }
 
-    /// Returns the protocol version.
+    /// Returns the HTTP protocol `Version`.
     #[must_use]
     pub const fn version(&self) -> Version {
         self.status_line.version
     }
 
-    /// Returns the response's `Status` value.
+    /// Returns the `Status` for this `Response`.
     #[must_use]
     pub const fn status(&self) -> Status {
         self.status_line.status
     }
 
-    /// Returns the status code.
+    /// Returns the `Status` code for this `Response`.
     #[must_use]
     pub const fn status_code(&self) -> u16 {
         self.status_line.status.code()
     }
 
-    /// Returns the status reason phrase.
+    /// Returns the `Status` reason phrase for this `Response`.
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
         self.status_line.status.msg()
     }
 
-    /// Returns the response headers.
+    /// Returns the headers for this `Response`.
     #[must_use]
     pub const fn headers(&self) -> &Headers {
         &self.headers
     }
 
-    /// Returns true if the header is present.
+    /// Returns true if the `HeaderName` key is present.
     #[must_use]
     pub fn has_header(&self, name: &HeaderName) -> bool {
         self.headers.contains(name)
@@ -442,7 +484,7 @@ impl Response {
         )
     }
 
-    /// Returns true if a response body is allowed.
+    /// Returns true if a body is permitted for this `Response`.
     #[must_use]
     pub fn body_is_permitted(&self, method: Method) -> bool {
         match self.status_code() {
@@ -456,20 +498,28 @@ impl Response {
         }
     }
 
-    /// Returns a reference to the message body.
+    /// Returns a reference to the `Body`.
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body
     }
 
-    /// Sends an HTTP response to a remote client.
-    #[allow(clippy::missing_errors_doc)]
+    /// Writes an HTTP response to a remote client.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `NetWriter::send_response` encounters an
+    /// error.
     pub fn send(&mut self, writer: &mut NetWriter) -> NetResult<()> {
         writer.send_response(self)
     }
 
-    /// Receives an HTTP response from a remote server.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses an HTTP response from a remote server.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `NetReader::recv_response` encounters an
+    /// error.
     pub fn recv(reader: &mut NetReader) -> NetResult<Self> {
         reader.recv_response()
     }

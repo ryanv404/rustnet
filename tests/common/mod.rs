@@ -105,6 +105,7 @@ macro_rules! run_server_tests {
                 let output_str = String::from_utf8(output.stdout).unwrap();
                 let output = get_server_test_output(&output_str);
                 let expected = get_expected_server_output($method, $uri_path);
+
                 assert_eq!(output, expected);
             }
         )+
@@ -194,6 +195,7 @@ macro_rules! run_client_test {
             let output_str = String::from_utf8(output.stdout).unwrap();
             let output = get_client_test_output(&output_str);
             let expected = get_expected_client_output($method, $uri_path);
+
             assert_eq!(output, expected);
         }
     };

@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::convert::Into;
 use std::error::Error as StdError;
 use std::io::ErrorKind as IoErrorKind;
-use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{
+    IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -10,7 +12,10 @@ use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
 use crate::consts::NUM_WORKER_THREADS;
-use crate::{Method, NetError, NetReader, NetResult, NetWriter, Response, Route, Router, Target};
+use crate::{
+    NetError, NetReader, NetResult, NetWriter, Response, Route, Router,
+    Target,
+};
 
 /// Configures the socket address and the router for a `Server`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -323,35 +328,27 @@ impl Server {
         do_logging: &Arc<bool>,
         use_shutdown_route: &Arc<bool>,
     ) -> NetResult<bool> {
+        if router.is_empty() {
+            let msg = "This server has no configured routes.";
+            return Err(NetError::Other(msg));
+        }
+
         let req = reader.recv_request()?;
-        let mut resp = Response::from_route(&req.route(), router);
-        let mut writer = NetWriter::from(reader);
+
+        let route = req.route();
+        let mut resp = Response::from_route(&route, router)?;
 
         if **do_logging {
             let status = resp.status_code();
-            let method = req.method();
-            let path = req.path();
-
-            writer.get_ref().peer_addr().map_or_else(
-                |_| println!("[?|{status}] {method} {path}"),
-                |sock| {
-                    let ip = sock.ip();
-                    println!("[{ip}|{status}] {method} {path}");
-                },
-            );
+            reader.get_ref().peer_addr().map_or_else(
+                |_| println!("[?|{status}] {route}"),
+                |sock| println!("[{}|{status}] {route}", sock.ip()));
         }
 
-        resp.send(&mut writer)?;
+        resp.send(&mut NetWriter::from(reader))?;
 
         // Check for server shutdown signal
-        if **use_shutdown_route &&
-            req.method() == Method::Delete &&
-            req.path() == "/__shutdown_server__"
-        {
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        Ok(**use_shutdown_route && route.is_shutdown_route())
     }
 
     /// Returns the local socket address of the server.

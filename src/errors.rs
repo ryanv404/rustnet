@@ -49,6 +49,7 @@ pub enum NetError {
     ReadError(IoErrorKind),
     WriteError(IoErrorKind),
     IoError(IoErrorKind),
+    Other(&'static str),
 }
 
 impl StdError for NetError {}
@@ -61,6 +62,7 @@ impl Display for NetError {
             Self::ReadError(kind) => write!(f, "IO read error: {}", IoError::from(*kind)),
             Self::WriteError(kind) => write!(f, "IO write error: {}", IoError::from(*kind)),
             Self::IoError(kind) => write!(f, "IO error: {}", IoError::from(*kind)),
+            Self::Other(msg) => write!(f, "Error: {msg}"),
         }
     }
 }
@@ -92,7 +94,8 @@ impl From<NetError> for IoError {
             NetError::ParseError(_) => err.into(),
             NetError::ReadError(kind) | NetError::WriteError(kind) | NetError::IoError(kind) => {
                 Self::from(kind)
-            }
+            },
+            NetError::Other(msg) => Self::new(IoErrorKind::Other, msg.to_string()),
         }
     }
 }
