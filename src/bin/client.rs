@@ -149,11 +149,12 @@ fn main() -> IoResult<()> {
         // Only print the status line, response headers, and response body
         // (if it is alphanumeric data) during server testing.
         if let Some(res) = client.res.as_ref() {
+            let body = String::from_utf8_lossy(res.body.as_bytes());
             println!(
                 "{}\n{}\n{}",
                 res.status_line(),
                 res.headers_to_string().trim_end(),
-                res.body.to_string().trim_end()
+                body.trim_end()
             );
         }
     } else {
@@ -173,13 +174,13 @@ fn print_output(client: &mut Client) {
     let request_line = req.request_line();
     let req_headers = req.headers_to_string();
     let req_headers = req_headers.trim_end();
-    let req_body = req.body.to_string();
+    let req_body = String::from_utf8_lossy(req.body.as_bytes());
     let req_body = req_body.trim_end();
 
     let status_line = res.status_line();
     let res_headers = res.headers_to_string();
     let res_headers = res_headers.trim_end();
-    let res_body = res.body.to_string();
+    let res_body = String::from_utf8_lossy(res.body.as_bytes());
     let res_body = res_body.trim_end();
 
     match (req_body.len(), res_body.len()) {

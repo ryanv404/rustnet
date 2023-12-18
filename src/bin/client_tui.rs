@@ -118,7 +118,8 @@ impl<'a> Browser<'a> {
                 }
                 uri if self.output_style == OutputStyle::Request => {
                     if let Ok((addr, path)) = Client::parse_uri(uri) {
-                        let mut client = Client::builder().addr(addr).path(&path).build()?;
+                        let mut client = Client::builder()
+                            .addr(addr).path(&path).build()?;
 
                         self.request = client.req.take();
                     }
@@ -128,7 +129,8 @@ impl<'a> Browser<'a> {
                 }
                 uri => match Client::parse_uri(uri) {
                     Ok((addr, path)) => {
-                        let mut client = Client::builder().addr(&addr).path(&path).build()?;
+                        let mut client = Client::builder()
+                            .addr(&addr).path(&path).build()?;
 
                         self.reader = client.reader.try_clone().ok();
                         self.writer = client.writer.try_clone().ok();
@@ -387,7 +389,7 @@ impl<'a> Browser<'a> {
                 if req.body.is_empty() {
                     format!("\n{PURP}{req_line}{CLR}\n{headers}\n\n")
                 } else {
-                    let body = req.body.to_string();
+                    let body = String::from_utf8_lossy(req.body.as_bytes());
                     format!(
                         "\n{PURP}{req_line}{CLR}\n{headers}\n\n{}\n\n",
                         body.trim_end()
@@ -408,7 +410,7 @@ impl<'a> Browser<'a> {
                 if res.body.is_empty() {
                     String::from("No response body data.\n")
                 } else {
-                    let body = res.body.to_string();
+                    let body = String::from_utf8_lossy(res.body.as_bytes());
                     format!("\n{}\n\n", body.trim_end())
                 }
             },
@@ -431,7 +433,7 @@ impl<'a> Browser<'a> {
                 if res.body.is_empty() {
                     format!("\n{color}{status_line}{CLR}\n{headers}\n\n")
                 } else {
-                    let body = res.body.to_string();
+                    let body = String::from_utf8_lossy(res.body.as_bytes());
                     format!(
                         "\n{color}{status_line}{CLR}\n{headers}\n\n{}\n\n",
                         body.trim_end()
@@ -483,8 +485,7 @@ impl<'a> Browser<'a> {
     }
 
     fn is_connection_open(&self) -> bool {
-        !self
-            .response
+        !self.response
             .as_ref()
             .map_or(false, |res| res.has_closed_connection_header())
     }

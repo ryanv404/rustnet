@@ -54,6 +54,7 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
 }
 
 /// Returns the file extension, if present, of a `Path` value.
+#[must_use]
 pub fn get_extension(path: &Path) -> Option<&str> {
     path.extension().and_then(|ext| ext.to_str())
 }

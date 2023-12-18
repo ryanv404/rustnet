@@ -277,12 +277,12 @@ pub fn add_expected_headers(code: u16, expected: &mut Response) {
 }
 
 pub fn favicon_route_output() -> String {
-    format!("\
+    "\
 HTTP/1.1 200 OK
 Cache-Control: max-age=604800
 Content-Length: 1406
 Content-Type: image/x-icon
-Server: rustnet/0.1.0")
+Server: rustnet/0.1.0".to_string()
 }
 
 pub fn many_methods_output(method: &str) -> String {
@@ -318,14 +318,14 @@ Server: rustnet/0.1.0");
 
 pub fn unknown_route_output(method: &str) -> String {
     if method == "HEAD" {
-        format!("\
+        "\
 HTTP/1.1 404 Not Found
 Cache-Control: no-cache
 Content-Length: 482
 Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0")
+Server: rustnet/0.1.0".to_string()
     } else {
-        format!(r#"HTTP/1.1 404 Not Found
+        r#"HTTP/1.1 404 Not Found
 Cache-Control: no-cache
 Content-Length: 482
 Content-Type: text/html; charset=utf-8
@@ -343,18 +343,18 @@ Server: rustnet/0.1.0
 <p><a href="/" style="color:lightgray; text-decoration:none;">Home</a></p>
 </main>
 </body>
-</html>"#)
+</html>"#.to_string()
     }
 }
 
 pub fn known_route_output(method: &str) -> String {
     if method == "HEAD" {
-        format!("\
+        "\
 HTTP/1.1 200 OK
 Cache-Control: no-cache
 Content-Length: 575
 Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0")
+Server: rustnet/0.1.0".to_string()
     } else {
         format!(r#"HTTP/1.1 {}
 Cache-Control: no-cache
@@ -446,7 +446,7 @@ pub fn get_client_test_output(input: &str) -> String {
             }
         })
         .fold(String::new(), |mut acc, s| {
-            acc.push_str(&s);
+            acc.push_str(s);
             acc.push('\n');
             acc
         });
@@ -463,7 +463,7 @@ pub fn get_server_test_output(input: &str) -> String {
             if line.is_empty() { None } else { Some(line) }
         })
         .fold(String::new(), |mut acc, line| {
-            acc.push_str(&line);
+            acc.push_str(line);
             acc.push('\n');
             acc
         });

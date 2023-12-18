@@ -187,24 +187,18 @@ impl NetReader {
 
         match type_tokens.next().map(str::trim) {
             Some("text") => match type_tokens.next().map(str::trim) {
-                Some(s) if s.starts_with("html") => Ok(Body::Text(buf)),
+                Some(s) if s.starts_with("html") => Ok(Body::Html(buf)),
                 Some(s) if s.starts_with("plain") => Ok(Body::Text(buf)),
                 _ => Ok(Body::Text(buf)),
             },
             Some("application") => match type_tokens.next().map(str::trim) {
                 Some(s) if s.starts_with("json") => Ok(Body::Json(buf)),
                 Some(s) if s.starts_with("xml") => Ok(Body::Xml(buf)),
-                Some(s) if s.starts_with("octet-stream") => {
-                    Ok(Body::Bytes(buf))
-                },
                 _ => Ok(Body::Bytes(buf)),
             },
             Some("image") => match type_tokens.next().map(str::trim) {
                 Some(s) if s.starts_with("x-icon") => Ok(Body::Favicon(buf)),
-                Some(s) if s.starts_with("png") => Ok(Body::Image(buf)),
-                Some(s) if s.starts_with("jpeg") => Ok(Body::Image(buf)),
-                Some(s) if s.starts_with("gif") => Ok(Body::Image(buf)),
-                _ => Ok(Body::Image(buf)),
+                _ => Ok(Body::Bytes(buf)),
             },
             _ => Ok(Body::Bytes(buf)),
         }
@@ -337,14 +331,15 @@ pub struct Request {
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "{}", self.request_line)?;
+        writeln!(f, "{}", &self.request_line)?;
 
         for (name, value) in &self.headers.0 {
             writeln!(f, "{name}: {value}")?;
         }
 
-        if !self.body.is_empty() {
-            writeln!(f, "{}", &self.body)?;
+        if self.body.is_printable() {
+            let body = String::from_utf8_lossy(self.body.as_bytes());
+            writeln!(f, "{body}")?;
         }
 
         Ok(())
@@ -374,7 +369,7 @@ impl Request {
     /// `Method` found in this `Request`.
     #[must_use]
     pub fn route(&self) -> Route {
-        Route::from((self.method(), self.path()))
+        Route::new(self.method(), self.path())
     }
 
     /// Returns the `RequestLine` for this `Request`.

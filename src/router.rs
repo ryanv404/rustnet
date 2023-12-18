@@ -44,8 +44,10 @@ impl Display for Route {
     }
 }
 
-impl From<(Method, &str)> for Route {
-    fn from((method, path): (Method, &str)) -> Self {
+impl Route {
+    /// Returns a new `Route` based on the provided method and URI path.
+    #[must_use]
+    pub fn new(method: Method, path: &str) -> Self {
         let path = path.to_string();
 
         match method {
@@ -60,9 +62,7 @@ impl From<(Method, &str)> for Route {
             Method::Connect => Self::Connect(path.into()),
         }
     }
-}
 
-impl Route {
     /// Returns this route's HTTP method.
     #[must_use]
     pub const fn method(&self) -> Option<Method> {
@@ -94,13 +94,13 @@ impl Route {
 
     /// Returns true if the `Route` is a HEAD route.
     #[must_use]
-    pub fn is_head(&self) -> bool {
+    pub const fn is_head(&self) -> bool {
         matches!(self, Self::Head(_))
     }
 
     /// Returns true if the `Route` is a POST route.
     #[must_use]
-    pub fn is_post(&self) -> bool {
+    pub const fn is_post(&self) -> bool {
         matches!(self, Self::Post(_))
     }
 
@@ -372,7 +372,7 @@ impl Default for Target {
     }
 }
 
-impl Display for Target {
+impl Debug for Target {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => write!(f, "Target::Empty"),
@@ -385,12 +385,6 @@ impl Display for Target {
             Self::Bytes(_) => write!(f, "Target::Bytes(...)"),
             Self::Favicon(_) => write!(f, "Target::Favicon(...)"),
         }
-    }
-}
-
-impl Debug for Target {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.to_string())
     }
 }
 

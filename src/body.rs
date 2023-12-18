@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs;
 use std::path::Path;
 use std::str;
@@ -14,7 +14,6 @@ pub enum Body {
     Html(Vec<u8>),
     Json(Vec<u8>),
     Xml(Vec<u8>),
-    Image(Vec<u8>),
     Bytes(Vec<u8>),
     Favicon(Vec<u8>),
 }
@@ -25,29 +24,20 @@ impl Default for Body {
     }
 }
 
-impl Display for Body {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        if self.is_printable() {
-            if let Some(body) = self.get_ref() {
-                write!(f, "{}", String::from_utf8_lossy(body))?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl Debug for Body {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => write!(f, "Body::Empty"),
-            Self::Xml(_) => write!(f, "Body::Xml({})", self.to_string()),
-            Self::Text(_) => write!(f, "Body::Text({})", self.to_string()),
-            Self::Html(_) => write!(f, "Body::Html({})", self.to_string()),
-            Self::Json(_) => write!(f, "Body::Json({})", self.to_string()),
-            Self::Image(_) => write!(f, "Body::Image(...)"),
             Self::Bytes(_) => write!(f, "Body::Bytes(...)"),
             Self::Favicon(_) => write!(f, "Body::Favicon(...)"),
+            Self::Xml(buf) => write!(f, "Body::Xml({})",
+                String::from_utf8_lossy(buf)),
+            Self::Text(buf) => write!(f, "Body::Text({})",
+                String::from_utf8_lossy(buf)),
+            Self::Html(buf) => write!(f, "Body::Html({})",
+                String::from_utf8_lossy(buf)),
+            Self::Json(buf) => write!(f, "Body::Json({})",
+                String::from_utf8_lossy(buf)),
         }
     }
 }
@@ -106,12 +96,6 @@ impl Body {
         matches!(self, Self::Xml(_))
     }
 
-    /// Returns true if the body type is `Body::Image`.
-    #[must_use]
-    pub const fn is_image(&self) -> bool {
-        matches!(self, Self::Image(_))
-    }
-
     /// Returns true if the body type is `Body::Favicon`.
     #[must_use]
     pub const fn is_favicon(&self) -> bool {
@@ -131,8 +115,8 @@ impl Body {
     pub fn get_ref(&self) -> Option<&[u8]> {
         match self {
             Self::Empty => None,
-            Self::Image(buf) | Self::Bytes(buf) | Self::Favicon(buf)
-                | Self::Text(buf) | Self::Html(buf) | Self::Json(buf)
+            Self::Bytes(buf) | Self::Favicon(buf) | Self::Text(buf)
+                | Self::Html(buf) | Self::Json(buf)
                 | Self::Xml(buf) => Some(buf.as_slice()),
         }
     }
@@ -146,12 +130,12 @@ impl Body {
     /// Returns the length of the `Body`.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.get_ref().map_or(0, |buf| buf.len())
+        self.get_ref().map_or(0, <[u8]>::len)
     }
 
     /// Returns the `Body` as a Content-Type header value, if possible.
     #[must_use]
-    pub fn as_content_type(&self) -> Option<&'static str> {
+    pub const fn as_content_type(&self) -> Option<&'static str> {
         match self {
             Self::Empty => None,
             Self::Text(_) => Some("text/plain; charset=utf-8"),
@@ -160,23 +144,24 @@ impl Body {
             Self::Xml(_) => Some("application/xml"),
             Self::Bytes(_) => Some("application/octet-stream"),
             Self::Favicon(_) => Some("image/x-icon"),
-            Self::Image(_) => Some("image"),
         }
     }
 
     /// Returns a new `Body` instance from a file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the file at `filepath` fails.
     pub fn from_filepath(filepath: &Path) -> NetResult<Self> {
         let data = fs::read(filepath)?;
 
         match get_extension(filepath) {
-            None => Ok(Self::Bytes(data)),
             Some("txt") => Ok(Self::Text(data)),
             Some("html" | "htm") => Ok(Self::Html(data)),
             Some("json") => Ok(Self::Json(data)),
             Some("xml") => Ok(Self::Xml(data)),
             Some("ico") => Ok(Self::Favicon(data)),
-            Some("jpg" | "jpeg" | "png" | "gif") => Ok(Self::Image(data)),
-            Some(_) => Ok(Self::Bytes(data)),
+            Some(_) | None => Ok(Self::Bytes(data)),
         }
     }
 }

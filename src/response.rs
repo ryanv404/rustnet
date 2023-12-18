@@ -279,14 +279,15 @@ pub struct Response {
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "{}", self.status_line)?;
+        writeln!(f, "{}", &self.status_line)?;
 
         for (name, value) in &self.headers.0 {
             writeln!(f, "{name}: {value}")?;
         }
 
-        if !self.body.is_empty() {
-            writeln!(f, "{}", &self.body)?;
+        if self.body.is_printable() {
+            let body = String::from_utf8_lossy(self.body.as_bytes());
+            writeln!(f, "{body}")?;
         }
 
         Ok(())

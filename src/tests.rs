@@ -78,21 +78,24 @@ mod http_version {
 mod request_line {
     use super::*;
 
+    macro_rules! parse_request_line {
+        (SHOULD_ERR: $line:literal) => {
+            let should_err = $line.parse::<RequestLine>();
+            assert!(should_err.is_err());
+        };
+        ($method:ident: $line:literal) => {
+            let req_line = $line.parse::<RequestLine>();
+            let expected = RequestLine {
+                method: Method::$method,
+                path: "/test".to_string(),
+                version: Version::OneDotOne
+            };
+            assert_eq!(req_line, Ok(expected));
+        };
+    }
+
     #[test]
     fn from_str() {
-        macro_rules! parse_request_line {
-            (SHOULD_ERR: $line:literal) => {
-                let should_err = $line.parse::<RequestLine>();
-                assert!(should_err.is_err());
-            };
-            ($method:ident: $line:literal) => {
-                let req_line = $line.parse::<RequestLine>().unwrap();
-                assert_eq!(req_line.method, Method::$method);
-                assert_eq!(req_line.path, "/test".to_string());
-                assert_eq!(req_line.version, Version::OneDotOne);
-            };
-        }
-
         parse_request_line!(Get: "GET /test HTTP/1.1\r\n");
         parse_request_line!(Head: "HEAD /test HTTP/1.1\r\n");
         parse_request_line!(Post: "POST /test HTTP/1.1\r\n");
@@ -534,7 +537,7 @@ mod resolve_routes {
             #[test]
             fn $label() {
                 let routes = BTreeMap::from([
-                    $((Route::$method($path.into()), Target::$body($inner.as_bytes()))),+
+                    $((Route::$method($path.into()), Target::$body($inner))),+
                 ]);
 
                 let router = Arc::new(Router(routes));
@@ -607,19 +610,19 @@ mod resolve_routes {
 
     test_route_resolver! {
         text_targets:
-        Get "/text1" => Text("test message 1"), 200;
-        Head "/text2" => Text("test message 2"), 200;
+        Get "/text1" => Text(b"test message 1"), 200;
+        Head "/text2" => Text(b"test message 2"), 200;
     }
 
     test_route_resolver! {
         json_targets:
-        Get "/json1" => Json("{\n\"data\": \"test data 1\"\n}"), 200;
-        Head "/json2" => Json("{\n\"data\": \"test data 2\"\n}"), 200;
+        Get "/json1" => Json(b"{\n\"data\": \"test data 1\"\n}"), 200;
+        Head "/json2" => Json(b"{\n\"data\": \"test data 2\"\n}"), 200;
     }
 
     test_route_resolver! {
         xml_targets:
-        Get "/xml1" => Xml("\
+        Get "/xml1" => Xml(b"\
             <note>
             <to>Cat</to>
             <from>Dog</from>
@@ -627,7 +630,7 @@ mod resolve_routes {
             <body>Who's a good boy?</body>
             </note>"
         ), 200;
-        Head "/xml2" => Xml("\
+        Head "/xml2" => Xml(b"\
             <note>
             <to>Dog</to>
             <from>Cat</from>
@@ -664,8 +667,8 @@ mod trait_impls {
     macro_rules! trait_impl_test {
         ($label:ident implement $test_trait:ident: $( $test_type:ty ),+) => {
             #[test]
-            fn $label() {
-                fn trait_implementation_test<T: $test_trait>() {}
+            const fn $label() {
+                const fn trait_implementation_test<T: $test_trait>() {}
                 $( trait_implementation_test::<$test_type>(); )+
             }
         };
