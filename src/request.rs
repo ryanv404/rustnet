@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{
-    BufRead, BufReader, ErrorKind as IoErrorKind, Read, Result as IoResult,
+    BufRead, BufReader, Read, Result as IoResult,
 };
 use std::net::TcpStream;
 use std::str::{self, FromStr};
@@ -8,7 +8,7 @@ use std::string::ToString;
 
 use crate::{
     Body, Header, HeaderName, HeaderValue, Headers, Method, NetError,
-    NetResult, NetWriter, ParseErrorKind, Response, Route, StatusLine,
+    NetResult, NetWriter, NetParseError, Response, Route, StatusLine,
     Version, MAX_HEADERS, READER_BUFSIZE,
 };
 
@@ -72,15 +72,15 @@ impl NetReader {
     ///
     /// # Errors
     ///
-    /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
+    /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`. An error will also
     /// be returned if parsing of the `RequestLine` fails.
     pub fn read_request_line(&mut self) -> NetResult<RequestLine> {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
-            Err(e) => Err(NetError::ReadError(e.kind())),
+            Err(e) => Err(NetError::Read(e.kind())),
+            Ok(0) => Err(NetError::UnexpectedEof),
             Ok(_) => line.parse::<RequestLine>(),
         }
     }
@@ -89,15 +89,15 @@ impl NetReader {
     ///
     /// # Errors
     ///
-    /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
+    /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`. An error will also
     /// be returned if parsing of the `StatusLine` fails.
     pub fn read_status_line(&mut self) -> NetResult<StatusLine> {
         let mut line = String::with_capacity(1024);
 
         match self.read_line(&mut line) {
-            Ok(0) => Err(IoErrorKind::UnexpectedEof.into()),
-            Err(e) => Err(NetError::ReadError(e.kind())),
+            Err(e) => Err(NetError::Read(e.kind())),
+            Ok(0) => Err(NetError::UnexpectedEof),
             Ok(_) => line.parse::<StatusLine>(),
         }
     }
@@ -107,7 +107,7 @@ impl NetReader {
     ///
     /// # Errors
     ///
-    /// As with the other readers, an error of kind `ErrorKind::UnexpectedEof`
+    /// As with the other readers, an error of kind `NetError::UnexpectedEof`
     /// is returned if `Ok(0)` is received while reading from the underlying
     /// `TcpStream`. An error will also be returned if parsing of a `Header`
     /// entry fails.
@@ -120,8 +120,8 @@ impl NetReader {
             line.clear();
 
             match self.read_line(&mut line) {
-                Ok(0) => return Err(IoErrorKind::UnexpectedEof)?,
-                Err(e) => return Err(NetError::ReadError(e.kind())),
+                Err(e) => return Err(NetError::Read(e.kind())),
+                Ok(0) => return Err(NetError::UnexpectedEof),
                 Ok(_) => {
                     let buf = line.trim();
 
@@ -143,7 +143,7 @@ impl NetReader {
     ///
     /// # Errors
     ///
-    /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
+    /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`.
     pub fn read_body(&mut self, headers: &Headers) -> NetResult<Body> {
         use crate::header::{CONTENT_LENGTH, CONTENT_TYPE};
@@ -156,29 +156,31 @@ impl NetReader {
         }
 
         let body_len = content_len
-            .ok_or(ParseErrorKind::Body)
+            .ok_or(NetError::Parse(NetParseError::Body))
             .map(ToString::to_string)
-            .and_then(|s| s.trim().parse::<usize>()
-                .map_err(|_| ParseErrorKind::Body))?;
+            .and_then(|s| s.trim()
+                .parse::<usize>()
+                .map_err(|_| NetError::Parse(NetParseError::Body)))?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
         }
 
         let num_bytes = u64::try_from(body_len)
-            .map_err(|_| ParseErrorKind::Body)?;
+            .map_err(|_| NetError::Parse(NetParseError::Body))?;
 
         let body_type = content_type
             .map(ToString::to_string)
-            .ok_or(ParseErrorKind::Body)?;
+            .ok_or(NetError::Parse(NetParseError::Body))?;
 
         if body_type.is_empty() {
             // Return error since content length is greater than zero.
-            return Err(ParseErrorKind::Body)?;
+            return Err(NetError::Parse(NetParseError::Body));
         }
 
         let mut reader = self.take(num_bytes);
         let mut buf = Vec::with_capacity(body_len);
+
         reader.read_to_end(&mut buf)?;
 
         let mut type_tokens = body_type.splitn(2, '/');
@@ -284,17 +286,17 @@ impl FromStr for RequestLine {
 
         let method = tokens
             .next()
-            .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
+            .ok_or(NetError::Parse(NetParseError::Method))
             .and_then(str::parse)?;
 
         let path = tokens
             .next()
             .map(ToString::to_string)
-            .ok_or(ParseErrorKind::RequestLine)?;
+            .ok_or(NetError::Parse(NetParseError::UriPath))?;
 
         let version = tokens
             .next()
-            .ok_or(NetError::ParseError(ParseErrorKind::RequestLine))
+            .ok_or(NetError::Parse(NetParseError::Version))
             .and_then(str::parse)?;
 
         Ok(Self {

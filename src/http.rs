@@ -1,8 +1,7 @@
-use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 
-use crate::{NetError, NetResult, ParseErrorKind};
+use crate::{NetError, NetResult, NetParseError};
 
 /// HTTP methods.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -56,7 +55,7 @@ impl FromStr for Method {
             "DELETE" => Ok(Self::Delete),
             "CONNECT" => Ok(Self::Connect),
             "OPTIONS" => Ok(Self::Options),
-            _ => Err(ParseErrorKind::Method)?,
+            _ => Err(NetError::Parse(NetParseError::Method)),
         }
     }
 }
@@ -73,35 +72,15 @@ impl Method {
             Self::Patch => "PATCH",
             Self::Trace => "TRACE",
             Self::Delete => "DELETE",
-            Self::Connect => "CONNECT",
             Self::Options => "OPTIONS",
+            Self::Connect => "CONNECT",
         }
     }
 }
 
 /// HTTP status code.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Status(pub u16);
-
-impl PartialEq for Status {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for Status {}
-
-impl PartialOrd for Status {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Status {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
 
 impl Default for Status {
     fn default() -> Self {
@@ -121,17 +100,52 @@ impl FromStr for Status {
     fn from_str(s: &str) -> NetResult<Self> {
         s.trim()
             .split_once(' ')
-            .ok_or_else(|| ParseErrorKind::Status.into())
+            .ok_or_else(|| NetError::Parse(NetParseError::StatusCode))
             .and_then(|(code, _msg)| {
-                let status_code = code.parse::<u16>().map_err(|_| ParseErrorKind::Status)?;
+                let status_code = code.parse::<u16>()
+                    .map_err(|_| NetError::Parse(NetParseError::StatusCode))?;
                 Ok(Self(status_code))
             })
     }
 }
 
-impl From<u16> for Status {
-    fn from(code: u16) -> Self {
-        Self(code)
+impl TryFrom<u16> for Status {
+    type Error = NetError;
+
+    fn try_from(code: u16) -> NetResult<Self> {
+        if matches!(code, 100..=999) {
+            Ok(Self(code))
+        } else {
+            Err(NetError::Parse(NetParseError::StatusCode))
+        }
+    }
+}
+
+impl TryFrom<u32> for Status {
+    type Error = NetError;
+
+    fn try_from(code: u32) -> NetResult<Self> {
+        if matches!(code, 100..=999) {
+            let code = u16::try_from(code)
+                .map_err(|_| NetError::Parse(NetParseError::StatusCode))?;
+            Ok(Self(code))
+        } else {
+            Err(NetError::Parse(NetParseError::StatusCode))
+        }
+    }
+}
+
+impl TryFrom<i32> for Status {
+    type Error = NetError;
+
+    fn try_from(code: i32) -> NetResult<Self> {
+        if matches!(code, 100..=999) {
+            let code = u16::try_from(code)
+                .map_err(|_| NetError::Parse(NetParseError::StatusCode))?;
+            Ok(Self(code))
+        } else {
+            Err(NetError::Parse(NetParseError::StatusCode))
+        }
     }
 }
 
@@ -247,13 +261,6 @@ impl Status {
             561 => "Unauthorized",
             598 => "Network Read Timeout Error",
             599 => "Network Connect Timeout Error",
-
-            // Fall back to status ranges if unmatched.
-            100..=199 => "Informational",
-            200..=299 => "Success",
-            300..=399 => "Redirect",
-            400..=499 => "Client Error",
-            500..=599 => "Server Error",
             _ => "",
         }
     }
@@ -304,7 +311,7 @@ impl FromStr for Version {
             "HTTP/1.1" => Ok(Self::OneDotOne),
             "HTTP/2" | "HTTP/2.0" => Ok(Self::TwoDotZero),
             "HTTP/3" | "HTTP/3.0" => Ok(Self::ThreeDotZero),
-            _ => Err(ParseErrorKind::Version.into()),
+            _ => Err(NetError::Parse(NetParseError::Version)),
         }
     }
 }

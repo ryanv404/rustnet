@@ -1,6 +1,6 @@
 //! # rustnet
 //!
-//! A Rust library for building an HTTP servers and clients.
+//! An HTTP networking library for building servers and clients.
 
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
@@ -13,6 +13,9 @@
 #![deny(clippy::suspicious)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::similar_names)]
+
+#[cfg(test)]
+mod tests;
 
 pub mod body;
 pub mod client;
@@ -27,7 +30,7 @@ pub mod util;
 
 pub use body::Body;
 pub use client::{Client, ClientBuilder};
-pub use errors::{NetError, NetResult, ParseErrorKind};
+pub use errors::{NetError, NetResult, NetParseError};
 pub use header::{Header, HeaderKind, HeaderName, HeaderValue, Headers};
 pub use http::{Method, Status, Version};
 pub use request::{NetReader, Request, RequestLine};
@@ -36,9 +39,6 @@ pub use router::{Route, RouteBuilder, Router, Target};
 pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
 
 pub const MAX_HEADERS: u16 = 1024;
-pub const NUM_WORKER_THREADS: usize = 4;
 pub const READER_BUFSIZE: usize = 1024;
 pub const WRITER_BUFSIZE: usize = 1024;
-
-#[cfg(test)]
-mod tests;
+pub const NUM_WORKER_THREADS: usize = 4;

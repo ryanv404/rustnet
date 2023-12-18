@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, ParseErrorKind, Request, RequestLine, Route, Router, Status,
+    NetResult, NetParseError, Request, RequestLine, Route, Router, Status,
     Version, WRITER_BUFSIZE,
 };
 
@@ -113,6 +113,7 @@ impl NetWriter {
                 self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
             }
         }
+
         self.write_all(b"\r\n")?;
         Ok(())
     }
@@ -229,10 +230,10 @@ impl FromStr for StatusLine {
 
     fn from_str(line: &str) -> NetResult<Self> {
         line.find("HTTP")
-            .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
+            .ok_or(NetError::Parse(NetParseError::StatusLine))
             .and_then(|start| {
                 line[start..].split_once(' ')
-                .ok_or(NetError::ParseError(ParseErrorKind::StatusLine))
+                .ok_or(NetError::Parse(NetParseError::StatusLine))
             })
             .and_then(|(token1, token2)| {
                 let version = token1.parse::<Version>()?;

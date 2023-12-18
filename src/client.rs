@@ -3,8 +3,9 @@ use std::io::ErrorKind as IoErrorKind;
 use std::net::{TcpStream, ToSocketAddrs};
 
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader, NetResult, NetWriter,
-    ParseErrorKind, Request, RequestLine, Response, Version,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
+    NetResult, NetWriter, NetParseError, Request, RequestLine, Response,
+    Version,
 };
 
 /// An HTTP request builder object.
@@ -324,7 +325,7 @@ impl Client {
         if let Some((scheme, rest)) = uri.split_once("://") {
             // If "://" is present, we expect a URI like "http://httpbin.org".
             if scheme.is_empty() || rest.is_empty() {
-                return Err(ParseErrorKind::Path.into());
+                return Err(NetError::Parse(NetParseError::UriPath))?;
             }
 
             match scheme {
@@ -356,12 +357,12 @@ impl Client {
                         Ok((format!("{rest}:80"), String::from("/")))
                     }
                 },
-                "https" => Err(NetError::HttpsNotImplemented),
-                _ => Err(ParseErrorKind::Path)?,
+                "https" => Err(NetError::Https),
+                _ => Err(NetError::Parse(NetParseError::UriPath)),
             }
         } else if let Some((addr, path)) = uri.split_once('/') {
             if addr.is_empty() {
-                return Err(ParseErrorKind::Path)?;
+                return Err(NetError::Parse(NetParseError::UriPath));
             }
 
             let addr = if addr.contains(':') {
@@ -389,7 +390,7 @@ impl Client {
     pub fn send(&mut self) -> NetResult<()> {
         self.req
             .as_mut()
-            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
+            .ok_or(NetError::NotConnected)
             .and_then(|req| req.send(&mut self.writer))?;
 
         Ok(())

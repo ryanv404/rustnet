@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use crate::{NetError, NetResult, ParseErrorKind};
+use crate::{NetError, NetResult, NetParseError};
 
 pub mod names;
 pub mod values;
@@ -30,7 +30,7 @@ impl FromStr for Header {
     fn from_str(line: &str) -> NetResult<Self> {
         line.trim()
             .split_once(':')
-            .ok_or(NetError::ParseError(ParseErrorKind::Header))
+            .ok_or(NetError::Parse(NetParseError::Header))
             .and_then(|(name, value)| {
                 let name = name.parse::<HeaderName>()?;
                 let value = value.parse::<HeaderValue>()?;

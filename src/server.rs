@@ -194,7 +194,7 @@ impl Listener {
                 let writer = NetWriter::from(stream);
                 (reader, writer)
             })
-            .map_err(|e| NetError::ReadError(e.kind()))
+            .map_err(|e| NetError::Read(e.kind()))
     }
 }
 
@@ -330,7 +330,7 @@ impl Server {
     ) -> NetResult<bool> {
         if router.is_empty() {
             let msg = "This server has no configured routes.";
-            return Err(NetError::Other(msg));
+            return Err(NetError::Other(msg.to_string()));
         }
 
         let req = reader.recv_request()?;

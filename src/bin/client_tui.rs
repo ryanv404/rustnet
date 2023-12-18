@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{self, BufRead, BufWriter, ErrorKind as IoErrorKind, StdinLock, StdoutLock, Write};
+use std::io::{self, BufRead, BufWriter, StdinLock, StdoutLock, Write};
 
 use rustnet::{Client, NetError, NetReader, NetResult, NetWriter, Request, Response};
 
@@ -354,12 +354,12 @@ impl<'a> Browser<'a> {
         let mut writer = self
             .writer
             .as_ref()
-            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
+            .ok_or(NetError::NotConnected)
             .and_then(|writer| writer.try_clone())?;
 
         self.request
             .as_mut()
-            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
+            .ok_or(NetError::NotConnected)
             .and_then(|req| writer.send_request(req))?;
 
         Ok(())
@@ -369,7 +369,7 @@ impl<'a> Browser<'a> {
         self.response = self
             .reader
             .as_mut()
-            .ok_or(NetError::IoError(IoErrorKind::NotConnected))
+            .ok_or(NetError::NotConnected)
             .and_then(|reader| reader.recv_response())
             .ok();
 

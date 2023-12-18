@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::{
-    Body, Client, ClientBuilder, Header, HeaderKind, HeaderName,
-    HeaderValue, Headers, Method, NetError, NetReader, NetResult, NetWriter, ParseErrorKind,
-    Request, RequestLine, Response, Route, RouteBuilder, Router, Server, ServerBuilder, Status,
-    StatusLine, Target, Task, ThreadPool, Version, Worker,
+    Body, Client, Header, HeaderKind, HeaderName, HeaderValue, Headers,
+    Method, NetError, NetReader, NetResult, NetWriter, NetParseError, Request,
+    RequestLine, Response, Route, RouteBuilder, Router, Server, ServerBuilder,
+    Status, StatusLine, Target, Task, ThreadPool, Version, Worker,
 };
 use crate::header::{
     ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT,
@@ -16,11 +17,11 @@ use crate::header::{
 use crate::util::trim_whitespace_bytes;
 
 #[cfg(test)]
-mod parse {
+mod http_method {
     use super::*;
 
     #[test]
-    fn http_methods() {
+    fn from_str() {
         assert_eq!("GET".parse::<Method>(), Ok(Method::Get));
         assert_eq!("HEAD".parse::<Method>(), Ok(Method::Head));
         assert_eq!("POST".parse::<Method>(), Ok(Method::Post));
@@ -34,9 +35,14 @@ mod parse {
         // HTTP methods are case-sensitive.
         assert!("get".parse::<Method>().is_err());
     }
+}
+
+#[cfg(test)]
+mod http_status {
+    use super::*;
 
     #[test]
-    fn http_statuses() {
+    fn from_str() {
         assert_eq!("101 Switching Protocols".parse::<Status>(), Ok(Status(101)));
         assert_eq!("201 Created".parse::<Status>(), Ok(Status(201)));
         assert_eq!("300 Multiple Choices".parse::<Status>(), Ok(Status(300)));
@@ -46,7 +52,19 @@ mod parse {
     }
 
     #[test]
-    fn http_versions() {
+    fn from_int() {
+        assert_eq!(Status::try_from(101_u16), Ok(Status(101)));
+        assert_eq!(Status::try_from(101_u32), Ok(Status(101)));
+        assert_eq!(Status::try_from(101_i32), Ok(Status(101)));
+    }
+}
+
+#[cfg(test)]
+mod http_version {
+    use super::*;
+
+    #[test]
+    fn from_str() {
         assert_eq!("HTTP/0.9".parse::<Version>(), Ok(Version::ZeroDotNine));
         assert_eq!("HTTP/1.0".parse::<Version>(), Ok(Version::OneDotZero));
         assert_eq!("HTTP/1.1".parse::<Version>(), Ok(Version::OneDotOne));
@@ -54,11 +72,15 @@ mod parse {
         assert_eq!("HTTP/3.0".parse::<Version>(), Ok(Version::ThreeDotZero));
         assert!("HTTP/1.2".parse::<Version>().is_err());
     }
+}
 
-    #[allow(clippy::cognitive_complexity)]
+#[cfg(test)]
+mod request_line {
+    use super::*;
+
     #[test]
-    fn request_lines() {
-        macro_rules! parse_requestline {
+    fn from_str() {
+        macro_rules! parse_request_line {
             (SHOULD_ERR: $line:literal) => {
                 let should_err = $line.parse::<RequestLine>();
                 assert!(should_err.is_err());
@@ -71,23 +93,28 @@ mod parse {
             };
         }
 
-        parse_requestline!(Get: "GET /test HTTP/1.1\r\n");
-        parse_requestline!(Head: "HEAD /test HTTP/1.1\r\n");
-        parse_requestline!(Post: "POST /test HTTP/1.1\r\n");
-        parse_requestline!(Put: "PUT /test HTTP/1.1\r\n");
-        parse_requestline!(Patch: "PATCH /test HTTP/1.1\r\n");
-        parse_requestline!(Delete: "DELETE /test HTTP/1.1\r\n");
-        parse_requestline!(Trace: "TRACE /test HTTP/1.1\r\n");
-        parse_requestline!(Options: "OPTIONS /test HTTP/1.1\r\n");
-        parse_requestline!(Connect: "CONNECT /test HTTP/1.1\r\n");
-        parse_requestline!(SHOULD_ERR: "GET");
-        parse_requestline!(SHOULD_ERR: "GET /test");
-        parse_requestline!(SHOULD_ERR: "FOO bar baz");
+        parse_request_line!(Get: "GET /test HTTP/1.1\r\n");
+        parse_request_line!(Head: "HEAD /test HTTP/1.1\r\n");
+        parse_request_line!(Post: "POST /test HTTP/1.1\r\n");
+        parse_request_line!(Put: "PUT /test HTTP/1.1\r\n");
+        parse_request_line!(Patch: "PATCH /test HTTP/1.1\r\n");
+        parse_request_line!(Delete: "DELETE /test HTTP/1.1\r\n");
+        parse_request_line!(Trace: "TRACE /test HTTP/1.1\r\n");
+        parse_request_line!(Options: "OPTIONS /test HTTP/1.1\r\n");
+        parse_request_line!(Connect: "CONNECT /test HTTP/1.1\r\n");
+        parse_request_line!(SHOULD_ERR: "GET");
+        parse_request_line!(SHOULD_ERR: "GET /test");
+        parse_request_line!(SHOULD_ERR: "FOO bar baz");
     }
+}
+
+#[cfg(test)]
+mod status_line {
+    use super::*;
 
     #[test]
-    fn status_lines() {
-        macro_rules! parse_statusline {
+    fn from_str() {
+        macro_rules! parse_status_line {
             (SHOULD_ERR: $line:literal) => {
                 let should_err = $line.parse::<StatusLine>();
                 assert!(should_err.is_err());
@@ -99,18 +126,23 @@ mod parse {
             };
         }
 
-        parse_statusline!(100: "HTTP/1.1 100 Continue\r\n");
-        parse_statusline!(200: "HTTP/1.1 200 OK\r\n");
-        parse_statusline!(301: "HTTP/1.1 301 Moved Permanently\r\n");
-        parse_statusline!(403: "HTTP/1.1 403 Forbidden\r\n");
-        parse_statusline!(505: "HTTP/1.1 505 HTTP Version Not Supported\r\n");
-        parse_statusline!(SHOULD_ERR: "HTTP/1.1");
-        parse_statusline!(SHOULD_ERR: "200 OK");
-        parse_statusline!(SHOULD_ERR: "FOO bar baz");
+        parse_status_line!(100: "HTTP/1.1 100 Continue\r\n");
+        parse_status_line!(200: "HTTP/1.1 200 OK\r\n");
+        parse_status_line!(301: "HTTP/1.1 301 Moved Permanently\r\n");
+        parse_status_line!(403: "HTTP/1.1 403 Forbidden\r\n");
+        parse_status_line!(505: "HTTP/1.1 505 HTTP Version Not Supported\r\n");
+        parse_status_line!(SHOULD_ERR: "HTTP/1.1");
+        parse_status_line!(SHOULD_ERR: "200 OK");
+        parse_status_line!(SHOULD_ERR: "FOO bar baz");
     }
+}
+
+#[cfg(test)]
+mod standard_header {
+    use super::*;
 
     #[test]
-    fn standard_headers() {
+    fn from_str() {
         for &(std_header, lowercase) in STANDARD_HEADERS {
             let lower = String::from_utf8(lowercase.to_vec()).unwrap();
             let upper = lower.to_ascii_uppercase();
@@ -121,9 +153,14 @@ mod parse {
             assert_eq!(upper.parse::<HeaderName>(), Ok(expected));
         }
     }
+}
+
+#[cfg(test)]
+mod custom_header {
+    use super::*;
 
     #[test]
-    fn custom_headers() {
+    fn from_str() {
         macro_rules! test_custom_headers {
             ($name:literal, $value:literal) => {{
                 let test_name = $name.parse::<HeaderName>().unwrap();
@@ -145,9 +182,14 @@ mod parse {
         test_custom_headers!("Hot", "cold");
         test_custom_headers!("Tired", "awake");
     }
+}
+
+#[cfg(test)]
+mod many_headers {
+    use super::*;
 
     #[test]
-    fn headers_section() {
+    fn from_str() {
         let headers_section = "\
             Accept: */*\r\n\
             Accept-Encoding: gzip, deflate, br\r\n\
@@ -185,9 +227,14 @@ mod parse {
 
         assert_eq!(test_hdrs, expected_hdrs);
     }
+}
+
+#[cfg(test)]
+mod http_uri {
+    use super::*;
 
     #[test]
-    fn http_uris() {
+    fn from_str() {
         macro_rules! test_uri_parser {
             ( $(SHOULD_ERROR: $uri:literal;)+ ) => {{
                 $(
@@ -611,79 +658,33 @@ mod resolve_routes {
     }
 }
 
-#[cfg(test)]
-mod send {
+mod trait_impls {
     use super::*;
 
-    #[test]
-    const fn types_impl_send() {
-        const fn type_is_send<T: Send>() {}
-        type_is_send::<Body>();
-        type_is_send::<Client>();
-        type_is_send::<ClientBuilder<&str>>();
-        type_is_send::<Header>();
-        type_is_send::<Headers>();
-        type_is_send::<HeaderKind>();
-        type_is_send::<HeaderName>();
-        type_is_send::<HeaderValue>();
-        type_is_send::<Method>();
-        type_is_send::<NetError>();
-        type_is_send::<NetReader>();
-        type_is_send::<NetResult<()>>();
-        type_is_send::<NetWriter>();
-        type_is_send::<ParseErrorKind>();
-        type_is_send::<Request>();
-        type_is_send::<RequestLine>();
-        type_is_send::<Response>();
-        type_is_send::<Route>();
-        type_is_send::<RouteBuilder>();
-        type_is_send::<Router>();
-        type_is_send::<Server>();
-        type_is_send::<ServerBuilder<&str>>();
-        type_is_send::<Status>();
-        type_is_send::<StatusLine>();
-        type_is_send::<Target>();
-        type_is_send::<Task>();
-        type_is_send::<ThreadPool>();
-        type_is_send::<Version>();
-        type_is_send::<Worker>();
+    macro_rules! trait_impl_test {
+        ($label:ident implement $test_trait:ident: $( $test_type:ty ),+) => {
+            #[test]
+            fn $label() {
+                fn trait_implementation_test<T: $test_trait>() {}
+                $( trait_implementation_test::<$test_type>(); )+
+            }
+        };
     }
-}
 
-#[cfg(test)]
-mod sync {
-    use super::*;
+    trait_impl_test! [send_types implement Send:
+        Body, Client, Header, Headers, HeaderKind, HeaderName, HeaderValue,
+        Method, NetError, NetReader, NetResult<()>, NetWriter, NetParseError,
+        Request, RequestLine, Response, Route, RouteBuilder, Router, Server,
+        ServerBuilder<&str>, Status, StatusLine, Target, Task, ThreadPool,
+        Version, Worker];
 
-    #[test]
-    const fn types_impl_sync() {
-        const fn type_is_sync<T: Sync>() {}
-        type_is_sync::<Body>();
-        type_is_sync::<Client>();
-        type_is_sync::<ClientBuilder<&str>>();
-        type_is_sync::<Header>();
-        type_is_sync::<Headers>();
-        type_is_sync::<HeaderKind>();
-        type_is_sync::<HeaderName>();
-        type_is_sync::<HeaderValue>();
-        type_is_sync::<Method>();
-        type_is_sync::<NetError>();
-        type_is_sync::<NetReader>();
-        type_is_sync::<NetResult<()>>();
-        type_is_sync::<NetWriter>();
-        type_is_sync::<ParseErrorKind>();
-        type_is_sync::<Request>();
-        type_is_sync::<RequestLine>();
-        type_is_sync::<Response>();
-        type_is_sync::<Route>();
-        type_is_sync::<Router>();
-        type_is_sync::<RouteBuilder>();
-        type_is_sync::<Server>();
-        type_is_sync::<ServerBuilder<&str>>();
-        type_is_sync::<Status>();
-        type_is_sync::<StatusLine>();
-        type_is_sync::<Target>();
-        type_is_sync::<ThreadPool>();
-        type_is_sync::<Version>();
-        type_is_sync::<Worker>();
-    }
+    trait_impl_test! [sync_types implement Sync:
+        Body, Client, Header, Headers, HeaderKind, HeaderName, HeaderValue,
+        Method, NetError, NetReader, NetResult<()>, NetWriter, NetParseError,
+        Request, RequestLine, Response, Route, RouteBuilder, Router, Server,
+        ServerBuilder<&str>, Status, StatusLine, Target, ThreadPool, Version,
+        Worker];
+
+    trait_impl_test! [error_types implement Error:
+        NetError, NetParseError];
 }

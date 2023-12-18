@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
 use crate::util::trim_whitespace_bytes;
-use crate::{NetError, NetResult, ParseErrorKind};
+use crate::{NetError, NetResult, NetParseError};
 
 /// Header field name.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -110,7 +110,7 @@ impl TryFrom<&[u8]> for HeaderKind {
         match StandardHeader::from_bytes(b) {
             Some(std) => Ok(Self::Standard(std)),
             None if str::from_utf8(b).is_ok() => Ok(Self::Custom(b.to_ascii_lowercase())),
-            None => Err(ParseErrorKind::Header.into()),
+            None => Err(NetError::Parse(NetParseError::Header)),
         }
     }
 }
