@@ -3,14 +3,17 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::consts::{ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, TEST_HEADERS, USER_AGENT};
-
 use crate::{
-    trim_whitespace_bytes, Body, Client, ClientBuilder, Header, HeaderKind, HeaderName,
+    Body, Client, ClientBuilder, Header, HeaderKind, HeaderName,
     HeaderValue, Headers, Method, NetError, NetReader, NetResult, NetWriter, ParseErrorKind,
     Request, RequestLine, Response, Route, RouteBuilder, Router, Server, ServerBuilder, Status,
     StatusLine, Target, Task, ThreadPool, Version, Worker,
 };
+use crate::header::{
+    ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT,
+    names::STANDARD_HEADERS,
+};
+use crate::util::trim_whitespace_bytes;
 
 #[cfg(test)]
 mod parse {
@@ -108,7 +111,7 @@ mod parse {
 
     #[test]
     fn standard_headers() {
-        for &(std_header, lowercase) in TEST_HEADERS {
+        for &(std_header, lowercase) in STANDARD_HEADERS {
             let lower = String::from_utf8(lowercase.to_vec()).unwrap();
             let upper = lower.to_ascii_uppercase();
             let expected = HeaderName {
@@ -272,7 +275,7 @@ mod resolve_routes {
                         body: Body::Empty
                     };
 
-                    let res = Response::from_route(&req.route(), &router);
+                    let res = Response::for_route(&req.route(), &router);
 
                     let mut expect = Response {
                         status_line: StatusLine {
@@ -283,7 +286,7 @@ mod resolve_routes {
                         body: Body::Empty
                     };
 
-                    expect.headers.insert_cache_control("no-cache");
+                    expect.headers.cache_control("no-cache");
                     assert_eq!(res, Ok(expect));
                 )+
             }
@@ -319,7 +322,7 @@ mod resolve_routes {
                         body: Body::Empty
                     };
 
-                    let body = match fs::read_to_string(filepath) {
+                    let body = match fs::read(filepath) {
                         Ok(content) => Body::Html(content),
                         Err(e) => panic!(
                             "{e}\nError accessing HTML file at: {}",
@@ -327,11 +330,11 @@ mod resolve_routes {
                     };
 
                     let mut headers = Headers::new();
-                    headers.insert_cache_control("no-cache");
-                    headers.insert_content_type(
+                    headers.cache_control("no-cache");
+                    headers.content_type(
                         "text/html; charset=utf-8"
                     );
-                    headers.insert_content_length(body.len());
+                    headers.content_length(body.len());
 
                     let expect = Response {
                         status_line: StatusLine {
@@ -346,7 +349,7 @@ mod resolve_routes {
                         }
                     };
 
-                    let res = Response::from_route(&req.route(), &router);
+                    let res = Response::for_route(&req.route(), &router);
                     assert_eq!(res, Ok(expect));
                 )+
             }
@@ -390,9 +393,9 @@ mod resolve_routes {
                     };
 
                     let mut headers = Headers::new();
-                    headers.insert_cache_control("max-age=604800");
-                    headers.insert_content_type("image/x-icon");
-                    headers.insert_content_length(body.len());
+                    headers.cache_control("max-age=604800");
+                    headers.content_type("image/x-icon");
+                    headers.content_length(body.len());
 
                     let expect = Response {
                         status_line: StatusLine {
@@ -407,7 +410,7 @@ mod resolve_routes {
                         }
                     };
 
-                    let res = Response::from_route(&req.route(), &router);
+                    let res = Response::for_route(&req.route(), &router);
                     assert_eq!(res, Ok(expect));
                 )+
             }
@@ -451,11 +454,11 @@ mod resolve_routes {
                     };
 
                     let mut headers = Headers::new();
-                    headers.insert_cache_control("no-cache");
-                    headers.insert_content_type(
+                    headers.cache_control("no-cache");
+                    headers.content_type(
                         "application/octet-stream"
                     );
-                    headers.insert_content_length(body.len());
+                    headers.content_length(body.len());
 
                     let expect = Response {
                         status_line: StatusLine {
@@ -470,7 +473,7 @@ mod resolve_routes {
                         }
                     };
 
-                    let res = Response::from_route(&req.route(), &router);
+                    let res = Response::for_route(&req.route(), &router);
                     assert_eq!(res, Ok(expect));
                 )+
             }
@@ -484,13 +487,13 @@ mod resolve_routes {
             #[test]
             fn $label() {
                 let routes = BTreeMap::from([
-                    $((Route::$method($path.into()), Target::$body($inner))),+
+                    $((Route::$method($path.into()), Target::$body($inner.as_bytes()))),+
                 ]);
 
                 let router = Arc::new(Router(routes));
 
                 $(
-                    let body = Body::$body(String::from($inner));
+                    let body = Body::$body($inner.into());
 
                     let req = Request {
                         request_line: RequestLine {
@@ -502,7 +505,7 @@ mod resolve_routes {
                         body: body.clone()
                     };
 
-                    let res = Response::from_route(&req.route(), &router);
+                    let res = Response::for_route(&req.route(), &router);
 
                     let mut expect = Response {
                         status_line: StatusLine {
@@ -513,21 +516,21 @@ mod resolve_routes {
                         body
                     };
 
-                    expect.headers.insert_cache_control("no-cache");
-                    expect.headers.insert_content_length(expect.body.len());
+                    expect.headers.cache_control("no-cache");
+                    expect.headers.content_length(expect.body.len());
 
                     match stringify!($label) {
                         s if s.eq_ignore_ascii_case("text_targets") => {
                             expect.headers
-                                .insert_content_type("text/plain; charset=utf-8");
+                                .content_type("text/plain; charset=utf-8");
                         },
                         s if s.eq_ignore_ascii_case("json_targets") => {
                             expect.headers
-                                .insert_content_type("application/json");
+                                .content_type("application/json");
                         },
                         s if s.eq_ignore_ascii_case("xml_targets") => {
                             expect.headers
-                                .insert_content_type("application/xml");
+                                .content_type("application/xml");
                         },
                         _ => unreachable!(),
                     }

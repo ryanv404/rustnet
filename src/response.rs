@@ -2,15 +2,11 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{BufWriter, Result as IoResult, Write, WriterPanicked};
 use std::net::TcpStream;
 use std::str::FromStr;
-use std::string::ToString;
 
-use crate::consts::{
-    ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT, WRITER_BUFSIZE,
-};
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
     NetResult, ParseErrorKind, Request, RequestLine, Route, Router, Status,
-    Target, Version,
+    Version, WRITER_BUFSIZE,
 };
 
 /// A buffered writer responsible for writing to an inner `TcpStream`.
@@ -141,18 +137,20 @@ impl NetWriter {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
+        use crate::header::{ACCEPT, HOST, USER_AGENT};
+
         if !req.headers.contains(&ACCEPT) {
-            req.headers.insert_accept("*/*");
+            req.headers.accept("*/*");
         }
 
         if !req.headers.contains(&HOST) {
             let stream = self.get_ref();
             let remote = stream.peer_addr()?;
-            req.headers.insert_host(remote.ip(), remote.port());
+            req.headers.host(remote.ip(), remote.port());
         }
 
         if !req.headers.contains(&USER_AGENT) {
-            req.headers.insert_user_agent();
+            req.headers.user_agent();
         }
 
         self.write_request_line(&req.request_line)?;
@@ -174,14 +172,14 @@ impl NetWriter {
         let mut res = Response::new(500);
 
         // Update the response headers.
-        res.headers.insert_server();
-        res.headers.insert_connection("close");
-        res.headers.insert_cache_control("no-cache");
-        res.headers.insert_content_length(err_msg.len());
-        res.headers.insert_content_type("text/plain; charset=utf-8");
+        res.headers.server();
+        res.headers.connection("close");
+        res.headers.cache_control("no-cache");
+        res.headers.content_length(err_msg.len());
+        res.headers.content_type("text/plain; charset=utf-8");
 
         // Include the provided error message.
-        res.body = Body::Text(err_msg.to_owned());
+        res.body = Body::Text(err_msg.into());
 
         self.write_status_line(&res.status_line)?;
         self.write_headers(&res.headers)?;
@@ -198,8 +196,10 @@ impl NetWriter {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
+        use crate::header::SERVER;
+
         if !res.headers.contains(&SERVER) {
-            res.headers.insert_server();
+            res.headers.server();
         }
 
         self.write_status_line(&res.status_line)?;
@@ -292,39 +292,6 @@ impl Display for Response {
     }
 }
 
-impl TryFrom<Target> for Response {
-    type Error = NetError;
-
-    fn try_from(target: Target) -> NetResult<Self> {
-        let mut res = Self::new(200);
-        res.headers.insert_cache_control("no-cache");
-
-        res.body = match target {
-            Target::Empty => Body::Empty,
-            Target::Xml(s) => Body::Xml(s.to_string()),
-            Target::Text(s) => Body::Text(s.to_string()),
-            Target::Html(s) => Body::Html(s.to_string()),
-            Target::Json(s) => Body::Json(s.to_string()),
-            Target::Bytes(bytes) => Body::Bytes(bytes.to_vec()),
-            Target::File(filepath) => Body::try_from(filepath)?,
-            Target::Favicon(filepath) => {
-                res.headers.insert_cache_control("max-age=604800");
-                Body::try_from(filepath)?
-            },
-        };
-
-        if let Some(header) = target.as_content_type_header() {
-            res.headers.insert(header.name, header.value);
-        }
-
-        if !res.body.is_empty() {
-            res.headers.insert_content_length(res.body.len());
-        }
-
-        Ok(res)
-    }
-}
-
 impl Response {
     /// Returns a new `Response` containing the provided status code.
     #[must_use]
@@ -346,64 +313,55 @@ impl Response {
     ///
     /// Returns an error if a `Response` could not be constructed from
     /// a `Target`.
-    pub fn from_route(route: &Route, router: &Router) -> NetResult<Self> {
-        let method = route.method();
+    pub fn for_route(route: &Route, router: &Router) -> NetResult<Self> {
+        let mut target = router.get_target(route);
 
-        match router.resolve(route) {
-            Some(target) if method == Method::Head => {
-                // Respond with 200 OK for HEAD routes that exist.
-                let mut res = Self::try_from(target)?;
-                res.status_line.status = Status(200);
-                res.body = Body::Empty;
-                Ok(res)
-            },
-            Some(target) if method == Method::Post => {
-                // Respond with 201 Created for POST routes that exist.
-                let mut res = Self::try_from(target)?;
-                res.status_line.status = Status(201);
-                Ok(res)
-            },
-            Some(target) => {
-                // Respond with 200 OK for all other routes that exist.
-                let mut res = Self::try_from(target)?;
-                res.status_line.status = Status(200);
-                Ok(res)
-            },
-            None if method == Method::Head => {
-                // Check if the requested HEAD route exists as a GET route.
-                let path = route.path().to_string();
+        // Implement HEAD routes for all GET routes.
+        if target.is_not_found() && route.is_head() {
+            if let Route::Head(path) = route {
+                let path = path.to_string();
+                let get_route = Route::Get(path.into());
+                let get_target = router.get_target(&get_route);
 
-                match router.resolve(&Route::Get(path.into())) {
-                    Some(target) => {
-                        let mut res = Self::try_from(target)?;
-                        res.status_line.status = Status(200);
-                        res.body = Body::Empty;
-                        Ok(res)
-                    },
-                    None => if let Some(target) = router.get_error_404() {
-                        let mut res = Self::try_from(target)?;
-                        res.status_line.status = Status(404);
-                        res.body = Body::Empty;
-                        Ok(res)
-                    } else {
-                        let mut res = Self::try_from(Target::Empty)?;
-                        res.status_line.status = Status(404);
-                        res.body = Body::Empty;
-                        Ok(res)
-                    }
+                if !get_target.is_not_found() {
+                    target = get_target;
                 }
             }
-            // Handle requests for routes that do not exist.
-            None => if let Some(target) = router.get_error_404() {
-                let mut res = Self::try_from(target)?;
-                res.status_line.status = Status(404);
-                Ok(res)
-            } else {
-                let mut res = Self::try_from(Target::Empty)?;
-                res.status_line.status = Status(404);
-                Ok(res)
-            }
         }
+
+        let mut res = if target.is_not_found() {
+            target = router.get_404_target();
+            Self::new(404)
+        } else if route.is_post() {
+            Self::new(201)
+        } else {
+            Self::new(200)
+        };
+
+        res.body = Body::try_from(target)?;
+
+        // Set the Cache-Control header.
+        if res.body.is_favicon() {
+            res.headers.cache_control("max-age=604800");
+        } else {
+            res.headers.cache_control("no-cache");
+        }
+
+        // Set the Content-Type header.
+        if let Some(cont_type) = res.body.as_content_type() {
+            res.headers.content_type(cont_type);
+        }
+
+        // Set the Content-Length header.
+        if !res.body.is_empty() {
+            res.headers.content_length(res.body.len());
+        }
+
+        if route.is_head() {
+            res.body = Body::Empty;
+        }
+
+        Ok(res)
     }
 
     /// Returns the `StatusLine` for this `Response`.
@@ -478,6 +436,8 @@ impl Response {
     /// Returns true if the Connection header is present with the value "close".
     #[must_use]
     pub fn has_closed_connection_header(&self) -> bool {
+        use crate::header::CONNECTION;
+
         matches!(
             self.headers.get(&CONNECTION),
             Some(conn_val) if conn_val.as_str().eq_ignore_ascii_case("close")

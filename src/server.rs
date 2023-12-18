@@ -11,10 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
-use crate::consts::NUM_WORKER_THREADS;
 use crate::{
     NetError, NetReader, NetResult, NetWriter, Response, Route, Router,
-    Target,
+    Target, NUM_WORKER_THREADS,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -107,7 +106,8 @@ where
 
         if self.use_shutdown_route {
             let route = Route::Delete(Cow::Borrowed("/__shutdown_server__"));
-            let target = Target::Text("The server is now shutting down.");
+            let msg = "The server is now shutting down.";
+            let target = Target::Text(msg.as_bytes());
             router.mount(route, target);
         }
 
@@ -336,7 +336,7 @@ impl Server {
         let req = reader.recv_request()?;
 
         let route = req.route();
-        let mut resp = Response::from_route(&route, router)?;
+        let mut resp = Response::for_route(&route, router)?;
 
         if **do_logging {
             let status = resp.status_code();
@@ -348,7 +348,7 @@ impl Server {
         resp.send(&mut NetWriter::from(reader))?;
 
         // Check for server shutdown signal
-        Ok(**use_shutdown_route && route.is_shutdown_route())
+        Ok(**use_shutdown_route && route.is_shutdown())
     }
 
     /// Returns the local socket address of the server.

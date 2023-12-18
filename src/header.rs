@@ -3,15 +3,12 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use crate::consts::{
-    ACCEPT, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER, USER_AGENT,
-};
 use crate::{NetError, NetResult, ParseErrorKind};
 
 pub mod names;
 pub mod values;
 
-pub use names::{header_consts, HeaderKind, HeaderName};
+pub use names::{header_consts::*, HeaderKind, HeaderName};
 pub use values::HeaderValue;
 
 /// Represents a single header field line.
@@ -100,52 +97,57 @@ impl Headers {
         self.0.clear();
     }
 
+    /// Inserts a collection of default request headers.
+    pub fn default_request_headers(&mut self) {
+        todo!();
+    }
+
     /// Inserts a collection of default server response headers.
     pub fn default_response_headers(&mut self) {
-        self.insert_server();
-        self.insert_connection("keep-alive");
-        self.insert_content_length(0);
+        self.server();
+        self.connection("keep-alive");
+        self.content_length(0);
     }
 
     /// Inserts a Host header with the value "ip:port".
-    pub fn insert_host(&mut self, ip: IpAddr, port: u16) {
+    pub fn host(&mut self, ip: IpAddr, port: u16) {
         self.insert(HOST, format!("{ip}:{port}").into());
     }
 
     /// Inserts the default User-Agent header.
-    pub fn insert_user_agent(&mut self) {
+    pub fn user_agent(&mut self) {
         let agent = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
         self.insert(USER_AGENT, agent.as_bytes().into());
     }
 
     /// Inserts an Accept header with the given value.
-    pub fn insert_accept(&mut self, value: &str) {
+    pub fn accept(&mut self, value: &str) {
         self.insert(ACCEPT, value.as_bytes().into());
     }
 
     /// Inserts the default Server header.
-    pub fn insert_server(&mut self) {
+    pub fn server(&mut self) {
         let server = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
         self.insert(SERVER, server.as_bytes().into());
     }
 
-    /// Inserts a Connection header with a value of "keep-alive".
-    pub fn insert_connection(&mut self, value: &str) {
+    /// Inserts a Connection header with the given value.
+    pub fn connection(&mut self, value: &str) {
         self.insert(CONNECTION, value.as_bytes().into());
     }
 
     /// Inserts a Content-Length header with the given value.
-    pub fn insert_content_length(&mut self, len: usize) {
+    pub fn content_length(&mut self, len: usize) {
         self.insert(CONTENT_LENGTH, len.into());
     }
 
     /// Inserts a Content-Type header with the given value.
-    pub fn insert_content_type(&mut self, value: &str) {
+    pub fn content_type(&mut self, value: &str) {
         self.insert(CONTENT_TYPE, value.as_bytes().into());
     }
 
     /// Inserts a Cache-Control header with the given value.
-    pub fn insert_cache_control(&mut self, value: &str) {
+    pub fn cache_control(&mut self, value: &str) {
         self.insert(CACHE_CONTROL, value.as_bytes().into());
     }
 }

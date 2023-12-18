@@ -1,17 +1,19 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::path::Path;
+use std::str;
 
-use crate::{NetError, NetResult};
+use crate::{NetError, NetResult, Target};
+use crate::util::get_extension;
 
-/// A respresentation of the body content type.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// A respresentation of the message body.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Body {
     Empty,
-    Text(String),
-    Html(String),
-    Json(String),
-    Xml(String),
+    Text(Vec<u8>),
+    Html(Vec<u8>),
+    Json(Vec<u8>),
+    Xml(Vec<u8>),
     Image(Vec<u8>),
     Bytes(Vec<u8>),
     Favicon(Vec<u8>),
@@ -24,136 +26,157 @@ impl Default for Body {
 }
 
 impl Display for Body {
-    #[allow(clippy::match_same_arms)]
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        if self.is_printable() {
+            if let Some(body) = self.get_ref() {
+                write!(f, "{}", String::from_utf8_lossy(body))?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Debug for Body {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Empty => Ok(()),
-            Self::Text(s) => write!(f, "{s}"),
-            Self::Html(s) => write!(f, "{s}"),
-            Self::Json(s) => write!(f, "{s}"),
-            Self::Xml(s) => write!(f, "{s}"),
-            Self::Image(_) => write!(f, "Image {{ ... }}"),
-            Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
-            Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
+            Self::Empty => write!(f, "Body::Empty"),
+            Self::Xml(_) => write!(f, "Body::Xml({})", self.to_string()),
+            Self::Text(_) => write!(f, "Body::Text({})", self.to_string()),
+            Self::Html(_) => write!(f, "Body::Html({})", self.to_string()),
+            Self::Json(_) => write!(f, "Body::Json({})", self.to_string()),
+            Self::Image(_) => write!(f, "Body::Image(...)"),
+            Self::Bytes(_) => write!(f, "Body::Bytes(...)"),
+            Self::Favicon(_) => write!(f, "Body::Favicon(...)"),
         }
     }
 }
 
-impl TryFrom<&Path> for Body {
+impl TryFrom<Target> for Body {
     type Error = NetError;
 
-    fn try_from(filepath: &Path) -> NetResult<Self> {
-        match filepath.extension() {
-            None => {
-                let body = fs::read(filepath)?;
-                Ok(Self::Bytes(body))
-            }
-            Some(ext) => match ext.to_str() {
-                Some("txt") => {
-                    let content = fs::read_to_string(filepath)?;
-                    Ok(Self::Text(content))
-                }
-                Some("html" | "htm") => {
-                    let content = fs::read_to_string(filepath)?;
-                    Ok(Self::Html(content))
-                }
-                Some("json") => {
-                    let content = fs::read_to_string(filepath)?;
-                    Ok(Self::Json(content))
-                }
-                Some("xml") => {
-                    let content = fs::read_to_string(filepath)?;
-                    Ok(Self::Xml(content))
-                }
-                Some("ico") => {
-                    let buf = fs::read(filepath)?;
-                    Ok(Self::Favicon(buf))
-                }
-                Some("jpg" | "jpeg" | "png" | "gif") => {
-                    let buf = fs::read(filepath)?;
-                    Ok(Self::Image(buf))
-                }
-                _ => {
-                    let buf = fs::read(filepath)?;
-                    Ok(Self::Bytes(buf))
-                }
-            },
+    fn try_from(target: Target) -> NetResult<Self> {
+        match target {
+            Target::Empty | Target::NotFound => Ok(Self::Empty),
+            Target::Xml(bytes) => Ok(Self::Xml(bytes.to_vec())),
+            Target::Text(bytes) => Ok(Self::Text(bytes.to_vec())),
+            Target::Html(bytes) => Ok(Self::Html(bytes.to_vec())),
+            Target::Json(bytes) => Ok(Self::Json(bytes.to_vec())),
+            Target::Bytes(bytes) => Ok(Self::Bytes(bytes.to_vec())),
+            Target::File(path) => Ok(Self::from_filepath(path)?),
+            Target::Favicon(path) => Ok(Self::from_filepath(path)?),
         }
     }
 }
 
 impl Body {
-    /// Returns a default `Body` instance.
+    /// Returns a new `Body::Empty` instance.
     #[must_use]
     pub const fn new() -> Self {
         Self::Empty
     }
 
-    /// Returns true if the body type is empty.
+    /// Returns true if the body type is `Body::Empty`.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
     }
 
-    /// Returns true if the body type is JSON.
+    /// Returns true if the body type is `Body::Text`.
+    #[must_use]
+    pub const fn is_text(&self) -> bool {
+        matches!(self, Self::Text(_))
+    }
+
+    /// Returns true if the body type is `Body::Json`.
     #[must_use]
     pub const fn is_json(&self) -> bool {
         matches!(self, Self::Json(_))
     }
 
-    /// Returns true if the body type is HTML.
+    /// Returns true if the body type is `Body::Html`.
     #[must_use]
     pub const fn is_html(&self) -> bool {
         matches!(self, Self::Html(_))
     }
 
-    /// Returns true if the body type is XML.
+    /// Returns true if the body type is `Body::Xml`.
     #[must_use]
     pub const fn is_xml(&self) -> bool {
         matches!(self, Self::Xml(_))
     }
 
-    /// Returns true if the URI target is a vector of bytes.
+    /// Returns true if the body type is `Body::Image`.
     #[must_use]
-    pub const fn is_bytes(&self) -> bool {
-        matches!(self, Self::Image(_) | Self::Bytes(_) | Self::Favicon(_))
+    pub const fn is_image(&self) -> bool {
+        matches!(self, Self::Image(_))
     }
 
-    /// Returns true if the body contains a alphanumeric data.
+    /// Returns true if the body type is `Body::Favicon`.
     #[must_use]
-    pub const fn is_alphanumeric(&self) -> bool {
-        !self.is_bytes()
+    pub const fn is_favicon(&self) -> bool {
+        matches!(self, Self::Favicon(_))
     }
 
-    /// Returns the body data as a bytes slice.
+    /// Returns true if the body type is `Body::Favicon`.
     #[must_use]
-    #[allow(clippy::match_same_arms)]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn is_printable(&self) -> bool {
+        matches!(self, Self::Text(_) | Self::Html(_) | Self::Json(_)
+            | Self::Xml(_))
+    }
+
+    /// Returns a reference to the data contained within the `Body`
+    /// instance, if present.
+    #[must_use]
+    pub fn get_ref(&self) -> Option<&[u8]> {
         match self {
-            Self::Empty => &b""[..],
-            Self::Text(ref s) => s.as_bytes(),
-            Self::Html(ref s) => s.as_bytes(),
-            Self::Json(ref s) => s.as_bytes(),
-            Self::Xml(ref s) => s.as_bytes(),
-            Self::Image(ref buf) => buf.as_slice(),
-            Self::Bytes(ref buf) => buf.as_slice(),
-            Self::Favicon(ref buf) => buf.as_slice(),
+            Self::Empty => None,
+            Self::Image(buf) | Self::Bytes(buf) | Self::Favicon(buf)
+                | Self::Text(buf) | Self::Html(buf) | Self::Json(buf)
+                | Self::Xml(buf) => Some(buf.as_slice()),
         }
     }
 
-    /// Returns the size of the body data as number of bytes.
+    /// Returns the `Body` as a slice of bytes.
     #[must_use]
-    #[allow(clippy::match_same_arms)]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.get_ref().unwrap_or(&b""[..])
+    }
+
+    /// Returns the length of the `Body`.
+    #[must_use]
     pub fn len(&self) -> usize {
+        self.get_ref().map_or(0, |buf| buf.len())
+    }
+
+    /// Returns the `Body` as a Content-Type header value, if possible.
+    #[must_use]
+    pub fn as_content_type(&self) -> Option<&'static str> {
         match self {
-            Self::Empty => 0,
-            Self::Text(ref s) => s.len(),
-            Self::Html(ref s) => s.len(),
-            Self::Json(ref s) => s.len(),
-            Self::Xml(ref s) => s.len(),
-            Self::Image(ref buf) => buf.len(),
-            Self::Bytes(ref buf) => buf.len(),
-            Self::Favicon(ref buf) => buf.len(),
+            Self::Empty => None,
+            Self::Text(_) => Some("text/plain; charset=utf-8"),
+            Self::Html(_) => Some("text/html; charset=utf-8"),
+            Self::Json(_) => Some("application/json"),
+            Self::Xml(_) => Some("application/xml"),
+            Self::Bytes(_) => Some("application/octet-stream"),
+            Self::Favicon(_) => Some("image/x-icon"),
+            Self::Image(_) => Some("image"),
+        }
+    }
+
+    /// Returns a new `Body` instance from a file path.
+    pub fn from_filepath(filepath: &Path) -> NetResult<Self> {
+        let data = fs::read(filepath)?;
+
+        match get_extension(filepath) {
+            None => Ok(Self::Bytes(data)),
+            Some("txt") => Ok(Self::Text(data)),
+            Some("html" | "htm") => Ok(Self::Html(data)),
+            Some("json") => Ok(Self::Json(data)),
+            Some("xml") => Ok(Self::Xml(data)),
+            Some("ico") => Ok(Self::Favicon(data)),
+            Some("jpg" | "jpeg" | "png" | "gif") => Ok(Self::Image(data)),
+            Some(_) => Ok(Self::Bytes(data)),
         }
     }
 }

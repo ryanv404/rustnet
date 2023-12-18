@@ -1,7 +1,7 @@
 use std::net::TcpStream;
 use std::process::Command;
 
-use rustnet::consts::DATE;
+use rustnet::header::DATE;
 use rustnet::{
     Body, Headers, Method, NetReader, NetWriter, Request, RequestLine, Response, Status,
     StatusLine, Version,

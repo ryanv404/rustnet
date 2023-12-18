@@ -1,7 +1,8 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
-use crate::{trim_whitespace_bytes, NetError, NetResult, ParseErrorKind};
+use crate::util::trim_whitespace_bytes;
+use crate::{NetError, NetResult, ParseErrorKind};
 
 /// Header field name.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -135,7 +136,7 @@ impl HeaderKind {
     }
 }
 
-macro_rules! impl_header_names {
+macro_rules! impl_standard_headers {
     ($( $bytes:literal => $constant:ident, $variant:ident; )+) => {
         // Standard header names.
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
@@ -188,14 +189,16 @@ macro_rules! impl_header_names {
             }
         }
 
+        // A collection of all `StandardHeader` values that is used during
+        // testing.
         #[cfg(test)]
-        pub const TEST_HEADERS: &'static [(StandardHeader, &'static [u8])] = &[
+        pub const STANDARD_HEADERS: &'static [(StandardHeader, &'static [u8])] = &[
             $( (StandardHeader::$variant, $bytes), )+
         ];
     };
 }
 
-impl_header_names! {
+impl_standard_headers! {
     b"accept" => ACCEPT, Accept;
     b"accept-charset" => ACCEPT_CHARSET, AcceptCharset;
     b"accept-datetime" => ACCEPT_DATETIME, AcceptDatetime;

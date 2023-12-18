@@ -1,7 +1,7 @@
 use std::env;
 use std::io::Result as IoResult;
 
-use rustnet::consts::DATE;
+use rustnet::header::DATE;
 use rustnet::{Client, Method};
 
 mod client_tui;
@@ -150,14 +150,10 @@ fn main() -> IoResult<()> {
         // (if it is alphanumeric data) during server testing.
         if let Some(res) = client.res.as_ref() {
             println!(
-                "{}\n{}{}",
+                "{}\n{}\n{}",
                 res.status_line(),
                 res.headers_to_string().trim_end(),
-                if res.body.is_alphanumeric() {
-                    format!("\n\n{}", res.body)
-                } else {
-                    String::new()
-                }
+                res.body.to_string().trim_end()
             );
         }
     } else {

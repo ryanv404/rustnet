@@ -1,3 +1,5 @@
+use std::path::Path;
+
 // Trims ASCII whitespace bytes from both ends of a slice of bytes.
 #[must_use]
 pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
@@ -51,10 +53,10 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
     }
 }
 
-// pub fn get_extension(path: &Path) -> Option<&str> {
-//     path.extension()
-//         .and_then(|ext| ext.to_str())
-// }
+/// Returns the file extension, if present, of a `Path` value.
+pub fn get_extension(path: &Path) -> Option<&str> {
+    path.extension().and_then(|ext| ext.to_str())
+}
 
 // pub fn is_file(path: &Path) -> bool {
 //     fs::metadata(path)

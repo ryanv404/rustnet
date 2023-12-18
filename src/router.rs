@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::Path;
 
-use crate::consts::CONTENT_TYPE;
-use crate::{Header, HeaderValue, Method};
+use crate::Method;
+use crate::util::get_extension;
 
-/// Represents an endpoint defined by an HTTP method and a URI path.
+/// Represents a server endpoint defined by an HTTP method and a URI path.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Route {
+    NotFound,
     Get(Cow<'static, str>),
     Head(Cow<'static, str>),
     Post(Cow<'static, str>),
@@ -29,6 +30,7 @@ impl Default for Route {
 impl Display for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
+            Self::NotFound => write!(f, "NotFound"),
             Self::Get(path) => write!(f, "GET {path}"),
             Self::Head(path) => write!(f, "HEAD {path}"),
             Self::Post(path) => write!(f, "POST {path}"),
@@ -63,42 +65,50 @@ impl From<(Method, &str)> for Route {
 impl Route {
     /// Returns this route's HTTP method.
     #[must_use]
-    pub const fn method(&self) -> Method {
+    pub const fn method(&self) -> Option<Method> {
         match self {
-            Self::Get(_) => Method::Get,
-            Self::Head(_) => Method::Head,
-            Self::Post(_) => Method::Post,
-            Self::Put(_) => Method::Put,
-            Self::Patch(_) => Method::Patch,
-            Self::Delete(_) => Method::Delete,
-            Self::Trace(_) => Method::Trace,
-            Self::Options(_) => Method::Options,
-            Self::Connect(_) => Method::Connect,
+            Self::NotFound => None,
+            Self::Get(_) => Some(Method::Get),
+            Self::Head(_) => Some(Method::Head),
+            Self::Post(_) => Some(Method::Post),
+            Self::Put(_) => Some(Method::Put),
+            Self::Patch(_) => Some(Method::Patch),
+            Self::Delete(_) => Some(Method::Delete),
+            Self::Trace(_) => Some(Method::Trace),
+            Self::Options(_) => Some(Method::Options),
+            Self::Connect(_) => Some(Method::Connect),
         }
     }
 
     /// Returns URI path component for this `Route`.
     #[must_use]
-    #[allow(clippy::match_same_arms)]
-    pub fn path(&self) -> Cow<'_, str> {
+    pub fn path(&self) -> Option<Cow<'_, str>> {
         match self {
-            Self::Get(path) => path.clone(),
-            Self::Head(path) => path.clone(),
-            Self::Post(path) => path.clone(),
-            Self::Put(path) => path.clone(),
-            Self::Patch(path) => path.clone(),
-            Self::Delete(path) => path.clone(),
-            Self::Trace(path) => path.clone(),
-            Self::Options(path) => path.clone(),
-            Self::Connect(path) => path.clone(),
+            Self::NotFound => None,
+            Self::Get(path) | Self::Head(path) | Self::Post(path)
+                | Self::Put(path) | Self::Patch(path) | Self::Delete(path)
+                | Self::Trace(path) | Self::Options(path)
+                | Self::Connect(path) => Some(path.clone()),
         }
+    }
+
+    /// Returns true if the `Route` is a HEAD route.
+    #[must_use]
+    pub fn is_head(&self) -> bool {
+        matches!(self, Self::Head(_))
+    }
+
+    /// Returns true if the `Route` is a POST route.
+    #[must_use]
+    pub fn is_post(&self) -> bool {
+        matches!(self, Self::Post(_))
     }
 
     /// Returns true if this `Route` is the server shutdown route.
     #[must_use]
-    pub fn is_shutdown_route(&self) -> bool {
-        matches!(self, Self::Delete(path)
-            if path.eq_ignore_ascii_case("/__shutdown_server__"))
+    pub fn is_shutdown(&self) -> bool {
+        self.path().map_or(false,
+            |path| path.eq_ignore_ascii_case("/__shutdown_server__"))
     }
 }
 
@@ -112,15 +122,21 @@ impl Router {
         Self::default()
     }
 
-    /// Adds a new route to the router.
+    /// Mounts a new route to the router.
     pub fn mount(&mut self, route: Route, target: Target) {
         self.0.insert(route, target);
     }
 
-    /// Returns the configured `Target` for the route, if available.
+    /// Returns the `Target` of the given `Route`, if present.
     #[must_use]
-    pub fn resolve(&self, route: &Route) -> Option<Target> {
-        self.0.get(route).copied()
+    pub fn get_target(&self, route: &Route) -> Target {
+        self.0.get(route).copied().unwrap_or(Target::NotFound)
+    }
+
+    /// Returns the `Target` for non-existent routes.
+    #[must_use]
+    pub fn get_404_target(&self) -> Target {
+        self.0.get(&Route::NotFound).copied().unwrap_or(Target::Empty)
     }
 
     /// Returns true if there is an entry associated with `Route`.
@@ -225,19 +241,14 @@ impl Router {
         self
     }
 
-    /// Sets the static file path to an HTML page returned by 404 responses.
+    /// Sets the file path to a static resource to return with 404 Not Found
+    /// responses.
     #[must_use]
-    pub fn error_404(mut self, file_path: &'static str) -> Self {
-        let route = Route::Get("__error".into());
+    pub fn not_found(mut self, file_path: &'static str) -> Self {
+        let route = Route::NotFound;
         let target = Target::File(file_path.as_ref());
         self.mount(route, target);
         self
-    }
-
-    /// Sets the static file path to an HTML page returned by 404 responses.
-    #[must_use]
-    pub fn get_error_404(&self) -> Option<Target> {
-        self.resolve(&Route::Get(Cow::Borrowed("__error")))
     }
 
     /// Returns a `RouteBuilder`.
@@ -341,14 +352,15 @@ impl RouteBuilder {
     }
 }
 
-/// Target resources used by server end-points.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// Target resources served by routes in a `Router`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Empty,
-    Text(&'static str),
-    Html(&'static str),
-    Json(&'static str),
-    Xml(&'static str),
+    NotFound,
+    Text(&'static [u8]),
+    Html(&'static [u8]),
+    Json(&'static [u8]),
+    Xml(&'static [u8]),
     Bytes(&'static [u8]),
     File(&'static Path),
     Favicon(&'static Path),
@@ -361,113 +373,118 @@ impl Default for Target {
 }
 
 impl Display for Target {
-    #[allow(clippy::match_same_arms)]
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Empty => Ok(()),
-            Self::Text(s) => write!(f, "{s}"),
-            Self::Html(s) => write!(f, "{s}"),
-            Self::Json(s) => write!(f, "{s}"),
-            Self::Xml(s) => write!(f, "{s}"),
-            Self::Bytes(_) => write!(f, "Bytes {{ ... }}"),
-            Self::File(_) => write!(f, "File {{ ... }}"),
-            Self::Favicon(_) => write!(f, "Favicon {{ ... }}"),
+            Self::Empty => write!(f, "Target::Empty"),
+            Self::NotFound => write!(f, "Target::NotFound"),
+            Self::Text(s) => write!(f, "Target::Text({})", String::from_utf8_lossy(s)),
+            Self::Html(s) => write!(f, "Target::Html({})", String::from_utf8_lossy(s)),
+            Self::Json(s) => write!(f, "Target::Json({})", String::from_utf8_lossy(s)),
+            Self::Xml(s) => write!(f, "Target::Xml({})", String::from_utf8_lossy(s)),
+            Self::File(_) => write!(f, "Target::File(...)"),
+            Self::Bytes(_) => write!(f, "Target::Bytes(...)"),
+            Self::Favicon(_) => write!(f, "Target::Favicon(...)"),
         }
     }
 }
 
+impl Debug for Target {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.to_string())
+    }
+}
+
 impl Target {
-    /// Returns a default `Target` instance.
+    /// Returns a new `Target::Empty` instance.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns true if the URI target type is empty.
+    /// Returns true if the target type is `Target::Empty`.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
     }
 
-    /// Returns true if the URI target is plain text.
+    /// Returns true if the target type is `Target::NotFound`.
+    #[must_use]
+    pub const fn is_not_found(&self) -> bool {
+        matches!(self, Self::NotFound)
+    }
+
+    /// Returns true if the target type is `Target::Text`.
     #[must_use]
     pub const fn is_text(&self) -> bool {
         matches!(self, Self::Text(_))
     }
 
-    /// Returns true if the URI target is JSON.
+    /// Returns true if the target type is `Target::Json`.
     #[must_use]
     pub const fn is_json(&self) -> bool {
         matches!(self, Self::Json(_))
     }
 
-    /// Returns true if the URI target is HTML.
+    /// Returns true if the target type is `Target::Html`.
     #[must_use]
     pub const fn is_html(&self) -> bool {
         matches!(self, Self::Html(_))
     }
 
-    /// Returns true if the URI target is a XML.
+    /// Returns true if the target type is `Target::Xml`.
     #[must_use]
     pub const fn is_xml(&self) -> bool {
         matches!(self, Self::Xml(_))
     }
 
-    /// Returns true if the URI target is a file.
+    /// Returns true if the target type is `Target::File`.
     #[must_use]
     pub const fn is_file(&self) -> bool {
         matches!(self, Self::File(_))
     }
 
-    /// Returns true if the URI target is a vector of bytes.
+    /// Returns true if the target type is `Target::Bytes`.
     #[must_use]
     pub const fn is_bytes(&self) -> bool {
         matches!(self, Self::Bytes(_))
     }
 
-    /// Returns a Content-Type `Header` based on the `Target` variant.
+    /// Returns true if the target type is `Target::Favicon`.
     #[must_use]
-    #[allow(clippy::match_same_arms)]
-    pub fn as_content_type_header(&self) -> Option<Header> {
-        if self.is_empty() {
-            return None;
-        }
-
-        let value: HeaderValue = match self {
-            Self::Text(_) => b"text/plain; charset=utf-8"[..].into(),
-            Self::Html(_) => b"text/html; charset=utf-8"[..].into(),
-            Self::Json(_) => b"application/json"[..].into(),
-            Self::Xml(_) => b"application/xml"[..].into(),
-            Self::Bytes(_) => b"application/octet-stream"[..].into(),
-            Self::File(path) | Self::Favicon(path) => {
-                Self::get_content_type_from_path(path)
-            }
-            Self::Empty => unreachable!(),
-        };
-
-        Some(Header {
-            name: CONTENT_TYPE,
-            value,
-        })
+    pub const fn is_favicon(&self) -> bool {
+        matches!(self, Self::Favicon(_))
     }
 
-    /// Infers a Content-Type header value based on the file extension.
+    /// Returns the `Target` as a Content-Type header value, if possible.
     #[must_use]
-    pub fn get_content_type_from_path(path: &Path) -> HeaderValue {
-        path.extension().map_or_else(
-            || b"application/octet-stream"[..].into(),
-            |ext| match ext.to_str() {
-                Some("html" | "htm") => b"text/html; charset=utf-8"[..].into(),
-                Some("txt") => b"text/plain; charset=utf-8"[..].into(),
-                Some("json") => b"application/json"[..].into(),
-                Some("xml") => b"application/xml"[..].into(),
-                Some("pdf") => b"application/pdf"[..].into(),
-                Some("ico") => b"image/x-icon"[..].into(),
-                Some("jpg" | "jpeg") => b"image/jpeg"[..].into(),
-                Some("png") => b"image/png"[..].into(),
-                Some("gif") => b"image/gif"[..].into(),
-                _ => b"application/octet-stream"[..].into(),
+    pub fn as_content_type(&self) -> Option<&'static str> {
+        match self {
+            Self::Empty | Self::NotFound => None,
+            Self::Text(_) => Some("text/plain; charset=utf-8"),
+            Self::Html(_) => Some("text/html; charset=utf-8"),
+            Self::Json(_) => Some("application/json"),
+            Self::Xml(_) => Some("application/xml"),
+            Self::Bytes(_) => Some("application/octet-stream"),
+            Self::File(path) | Self::Favicon(path) => {
+                Self::content_type_from_ext(path)
             },
-        )
+        }
+    }
+
+    /// Returns a Content-Type header value from a file extension, if present.
+    #[must_use]
+    pub fn content_type_from_ext(path: &Path) -> Option<&'static str> {
+        get_extension(path).and_then(|ext| match ext {
+            "html" | "htm" => Some("text/html; charset=utf-8"),
+            "txt" => Some("text/plain; charset=utf-8"),
+            "json" => Some("application/json"),
+            "xml" => Some("application/xml"),
+            "pdf" => Some("application/pdf"),
+            "ico" => Some("image/x-icon"),
+            "jpg" | "jpeg" => Some("image/jpeg"),
+            "png" => Some("image/png"),
+            "gif" => Some("image/gif"),
+            _ => None,
+        })
     }
 }

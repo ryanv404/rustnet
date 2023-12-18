@@ -4,12 +4,18 @@ use std::str::FromStr;
 
 use crate::{NetError, NetResult};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
 
 impl Display for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", String::from_utf8_lossy(self.as_bytes()))
+    }
+}
+
+impl Debug for HeaderValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{:#}", self.to_string())
     }
 }
 

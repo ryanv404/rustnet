@@ -2,7 +2,6 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{TcpStream, ToSocketAddrs};
 
-use crate::consts::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader, NetResult, NetWriter,
     ParseErrorKind, Request, RequestLine, Response, Version,
@@ -111,12 +110,12 @@ where
     #[must_use]
     pub fn body(mut self, body: Body, content_type: &str) -> Self {
         if body.is_empty() {
-            self.headers.insert_content_length(0);
+            self.headers.content_length(0);
             self.body = Body::Empty;
         } else {
             self.body = body;
-            self.headers.insert_content_length(self.body.len());
-            self.headers.insert_content_type(content_type);
+            self.headers.content_length(self.body.len());
+            self.headers.content_type(content_type);
         }
 
         self
@@ -127,13 +126,12 @@ where
     #[must_use]
     pub fn text(mut self, text: &str) -> Self {
         if text.is_empty() {
-            self.headers.insert_content_length(0);
+            self.headers.content_length(0);
             self.body = Body::Empty;
         } else {
             self.body = Body::Text(text.into());
-            self.headers.insert_content_length(self.body.len());
-            self.headers
-                .insert_content_type("text/plain; charset=utf-8");
+            self.headers.content_length(self.body.len());
+            self.headers.content_type("text/plain; charset=utf-8");
         }
 
         self
@@ -144,12 +142,12 @@ where
     #[must_use]
     pub fn html(mut self, html: &str) -> Self {
         if html.is_empty() {
-            self.headers.insert_content_length(0);
+            self.headers.content_length(0);
             self.body = Body::Empty;
         } else {
             self.body = Body::Html(html.into());
-            self.headers.insert_content_length(self.body.len());
-            self.headers.insert_content_type("text/html; charset=utf-8");
+            self.headers.content_length(self.body.len());
+            self.headers.content_type("text/html; charset=utf-8");
         }
 
         self
@@ -160,12 +158,12 @@ where
     #[must_use]
     pub fn json(mut self, json: &str) -> Self {
         if json.is_empty() {
-            self.headers.insert_content_length(0);
+            self.headers.content_length(0);
             self.body = Body::Empty;
         } else {
             self.body = Body::Json(json.into());
-            self.headers.insert_content_length(self.body.len());
-            self.headers.insert_content_type("application/json");
+            self.headers.content_length(self.body.len());
+            self.headers.content_type("application/json");
         }
 
         self
@@ -176,11 +174,11 @@ where
     #[must_use]
     pub fn bytes(mut self, bytes: &[u8]) -> Self {
         if bytes.is_empty() {
-            self.headers.insert_content_length(0);
+            self.headers.content_length(0);
             self.body = Body::Empty;
         } else {
             self.body = Body::Bytes(bytes.to_vec());
-            self.headers.insert_content_type("application/octet-stream");
+            self.headers.content_type("application/octet-stream");
         }
 
         self
@@ -189,10 +187,16 @@ where
     /// Builds and returns a new `Client` instance.
     #[allow(clippy::missing_errors_doc)]
     pub fn build(mut self) -> NetResult<Client> {
+        use crate::header::{
+            ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT,
+        };
+
         let stream = match self.addr.as_ref() {
             Some(addr) => TcpStream::connect(addr)?,
             None => match (self.ip.as_ref(), self.port.as_ref()) {
-                (Some(ip), Some(port)) => TcpStream::connect((ip.as_str(), *port))?,
+                (Some(ip), Some(port)) => {
+                    TcpStream::connect((ip.as_str(), *port))?
+                },
                 (_, _) => return Err(IoErrorKind::InvalidInput.into()),
             },
         };
@@ -201,24 +205,24 @@ where
         let writer = NetWriter::from(stream);
 
         if !self.headers.contains(&ACCEPT) {
-            self.headers.insert_accept("*/*");
+            self.headers.accept("*/*");
         }
 
         if !self.headers.contains(&CONTENT_LENGTH) {
-            self.headers.insert_content_length(self.body.len());
+            self.headers.content_length(self.body.len());
         }
 
         if !self.headers.contains(&CONTENT_TYPE) && !self.body.is_empty() {
-            self.headers.insert_content_type("text/plain");
+            self.headers.content_type("text/plain");
         }
 
         if !self.headers.contains(&HOST) {
             let remote = reader.get_ref().peer_addr()?;
-            self.headers.insert_host(remote.ip(), remote.port());
+            self.headers.host(remote.ip(), remote.port());
         }
 
         if !self.headers.contains(&USER_AGENT) {
-            self.headers.insert_user_agent();
+            self.headers.user_agent();
         }
 
         let path = self

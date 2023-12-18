@@ -1,7 +1,7 @@
 use std::env::{self, Args};
 use std::process;
 
-use rustnet::{NetResult, Router, Server, Target};
+use rustnet::{NetResult, Router, Server, Target::Text};
 
 fn main() -> NetResult<()> {
     // Handle command-line options.
@@ -20,21 +20,20 @@ fn main() -> NetResult<()> {
         .options("/options", "static/index.html")
         .connect("/connect", "static/index.html")
         .favicon("static/favicon.ico")
-        .error_404("static/error.html");
+        .not_found("static/error.html");
 
     // Add a single path that serves different resources depending on
     // the HTTP method that is used.
-    let router = router
-        .route("/many_methods")
-        .get(Target::Text("Hi from the GET route!"))
-        .head(Target::Text("Hi from the HEAD route!"))
-        .post(Target::Text("Hi from the POST route!"))
-        .put(Target::Text("Hi from the PUT route!"))
-        .patch(Target::Text("Hi from the PATCH route!"))
-        .delete(Target::Text("Hi from the DELETE route!"))
-        .trace(Target::Text("Hi from the TRACE route!"))
-        .options(Target::Text("Hi from the OPTIONS route!"))
-        .connect(Target::Text("Hi from the CONNECT route!"))
+    let router = router.route("/many_methods")
+        .get(Text(b"Hi from the GET route!"))
+        .head(Text(b"Hi from the HEAD route!"))
+        .post(Text(b"Hi from the POST route!"))
+        .put(Text(b"Hi from the PUT route!"))
+        .patch(Text(b"Hi from the PATCH route!"))
+        .delete(Text(b"Hi from the DELETE route!"))
+        .trace(Text(b"Hi from the TRACE route!"))
+        .options(Text(b"Hi from the OPTIONS route!"))
+        .connect(Text(b"Hi from the CONNECT route!"))
         .apply();
 
     // Start the HTTP server.

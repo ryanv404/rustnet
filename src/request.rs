@@ -6,13 +6,10 @@ use std::net::TcpStream;
 use std::str::{self, FromStr};
 use std::string::ToString;
 
-use crate::consts::{
-    CONTENT_LENGTH, CONTENT_TYPE, MAX_HEADERS, READER_BUFSIZE,
-};
 use crate::{
     Body, Header, HeaderName, HeaderValue, Headers, Method, NetError,
     NetResult, NetWriter, ParseErrorKind, Response, Route, StatusLine,
-    Version,
+    Version, MAX_HEADERS, READER_BUFSIZE,
 };
 
 /// A buffered reader responsible for reading from an inner `TcpStream`.
@@ -149,6 +146,8 @@ impl NetReader {
     /// An error of kind `ErrorKind::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`.
     pub fn read_body(&mut self, headers: &Headers) -> NetResult<Body> {
+        use crate::header::{CONTENT_LENGTH, CONTENT_TYPE};
+
         let content_len = headers.get(&CONTENT_LENGTH);
         let content_type = headers.get(&CONTENT_TYPE);
 
@@ -186,22 +185,16 @@ impl NetReader {
 
         match type_tokens.next().map(str::trim) {
             Some("text") => match type_tokens.next().map(str::trim) {
-                Some(s) if s.starts_with("html") => {
-                    Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
-                }
-                Some(s) if s.starts_with("plain") => {
-                    Ok(Body::Text(String::from_utf8_lossy(&buf).to_string()))
-                }
-                _ => Ok(Body::Text(String::from_utf8_lossy(&buf).to_string())),
+                Some(s) if s.starts_with("html") => Ok(Body::Text(buf)),
+                Some(s) if s.starts_with("plain") => Ok(Body::Text(buf)),
+                _ => Ok(Body::Text(buf)),
             },
             Some("application") => match type_tokens.next().map(str::trim) {
-                Some(s) if s.starts_with("json") => {
-                    Ok(Body::Json(String::from_utf8_lossy(&buf).to_string()))
-                }
-                Some(s) if s.starts_with("xml") => {
-                    Ok(Body::Xml(String::from_utf8_lossy(&buf).to_string()))
-                }
-                Some(s) if s.starts_with("octet-stream") => Ok(Body::Bytes(buf)),
+                Some(s) if s.starts_with("json") => Ok(Body::Json(buf)),
+                Some(s) if s.starts_with("xml") => Ok(Body::Xml(buf)),
+                Some(s) if s.starts_with("octet-stream") => {
+                    Ok(Body::Bytes(buf))
+                },
                 _ => Ok(Body::Bytes(buf)),
             },
             Some("image") => match type_tokens.next().map(str::trim) {

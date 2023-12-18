@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::net::TcpStream;
 
-use rustnet::consts::{
+use rustnet::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC, ACCESS_CONTROL_ALLOW_ORIGIN as ACAO,
     CONNECTION as CONN, CONTENT_LENGTH as CL, CONTENT_TYPE as CT, LOCATION, SERVER,
     WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE,
