@@ -122,8 +122,15 @@ impl Router {
         Self::default()
     }
 
-    /// Mounts a new route to the router.
+    /// Mount a new route to the router.
     pub fn mount(&mut self, route: Route, target: Target) {
+        self.0.insert(route, target);
+    }
+
+    /// Mount a shutdown route.
+    pub fn mount_shutdown_route(&mut self) {
+        let route = Route::Delete(Cow::Borrowed("/__shutdown_server__"));
+        let target = Target::Empty;
         self.0.insert(route, target);
     }
 

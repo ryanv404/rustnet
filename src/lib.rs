@@ -36,7 +36,10 @@ pub use http::{Method, Status, Version};
 pub use request::{NetReader, Request, RequestLine};
 pub use response::{NetWriter, Response, StatusLine};
 pub use router::{Route, RouteBuilder, Router, Target};
-pub use server::{Server, ServerBuilder, Task, ThreadPool, Worker};
+pub use server::{
+    Connection, Server, ServerConfig, ServerBuilder, ServerHandle, ThreadPool,
+    Worker,
+};
 
 pub const MAX_HEADERS: u16 = 1024;
 pub const READER_BUFSIZE: usize = 1024;

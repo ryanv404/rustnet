@@ -1,11 +1,12 @@
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
 
 #[macro_use]
 mod common;
 
-use common::{get_expected_server_output, get_server_test_output, is_server_live, LOCAL_ADDR};
+use common::{
+    get_expected_server_output, get_server_test_output,
+    server_is_live,
+};
 
 mod a {
     use super::*;

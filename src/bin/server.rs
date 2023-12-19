@@ -37,17 +37,14 @@ fn main() -> NetResult<()> {
         .apply();
 
     // Start the HTTP server.
-    let mut server = Server::http(&cli.addr)
+    let server = Server::http(&cli.addr)
         .router(router)
         .do_logging(cli.do_logging)
-        .use_shutdown_route(cli.use_shutdown_route)
+        .has_shutdown_route(cli.has_shutdown_route)
         .start()?;
 
     // Wait for the server to exit.
-    if let Some(handle) = server.handle.take() {
-        handle.join().unwrap();
-        server.shutdown()?;
-    }
+    server.join()?;
 
     Ok(())
 }
@@ -68,7 +65,7 @@ OPTIONS:
 #[derive(Debug)]
 struct Cli {
     do_logging: bool,
-    use_shutdown_route: bool,
+    has_shutdown_route: bool,
     addr: String,
 }
 
@@ -76,7 +73,7 @@ impl Default for Cli {
     fn default() -> Self {
         Self {
             do_logging: false,
-            use_shutdown_route: false,
+            has_shutdown_route: false,
             addr: "127.0.0.1:7878".to_string(),
         }
     }
@@ -91,8 +88,8 @@ impl Cli {
         self.do_logging = true;
     }
 
-    fn use_shutdown_route(&mut self) {
-        self.use_shutdown_route = true;
+    fn has_shutdown_route(&mut self) {
+        self.has_shutdown_route = true;
     }
 
     fn set_addr(&mut self, addr: &str) {
@@ -111,7 +108,7 @@ impl Cli {
 
             match opt {
                 "--log" => cli.do_logging(),
-                "--shutdown" => cli.use_shutdown_route(),
+                "--shutdown" => cli.has_shutdown_route(),
                 "--help" => {
                     print_help();
                     process::exit(0);

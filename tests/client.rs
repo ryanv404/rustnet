@@ -10,7 +10,9 @@ use rustnet::{
 #[macro_use]
 mod common;
 
-use common::{add_expected_headers, get_client_test_output, get_expected_client_output};
+use common::{
+    add_expected_headers, get_client_test_output, get_expected_client_output,
+};
 
 mod get {
     use super::*;

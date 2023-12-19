@@ -5,10 +5,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::{
-    Body, Client, Header, HeaderKind, HeaderName, HeaderValue, Headers,
-    Method, NetError, NetReader, NetResult, NetWriter, NetParseError, Request,
-    RequestLine, Response, Route, RouteBuilder, Router, Server, ServerBuilder,
-    Status, StatusLine, Target, Task, ThreadPool, Version, Worker,
+    Body, Client, Connection, Header, HeaderKind, HeaderName, HeaderValue,
+    Headers, Method, NetError, NetReader, NetResult, NetWriter, NetParseError,
+    Request, RequestLine, Response, Route, RouteBuilder, Router, Server,
+    ServerBuilder, ServerConfig, ServerHandle, Status, StatusLine, Target,
+    ThreadPool, Version, Worker,
 };
 use crate::header::{
     ACCEPT, ACCEPT_ENCODING, CONNECTION, HOST, USER_AGENT,
@@ -675,18 +676,18 @@ mod trait_impls {
     }
 
     trait_impl_test! [send_types implement Send:
-        Body, Client, Header, Headers, HeaderKind, HeaderName, HeaderValue,
-        Method, NetError, NetReader, NetResult<()>, NetWriter, NetParseError,
+        Body, Client, Connection, Header, HeaderKind, HeaderName, HeaderValue,
+        Headers, Method, NetError, NetReader, NetResult<()>, NetWriter, NetParseError,
         Request, RequestLine, Response, Route, RouteBuilder, Router, Server,
-        ServerBuilder<&str>, Status, StatusLine, Target, Task, ThreadPool,
-        Version, Worker];
+        ServerBuilder<&str>, ServerConfig, ServerHandle<()>, Status,
+        StatusLine, Target, ThreadPool, Version, Worker];
 
     trait_impl_test! [sync_types implement Sync:
-        Body, Client, Header, Headers, HeaderKind, HeaderName, HeaderValue,
-        Method, NetError, NetReader, NetResult<()>, NetWriter, NetParseError,
-        Request, RequestLine, Response, Route, RouteBuilder, Router, Server,
-        ServerBuilder<&str>, Status, StatusLine, Target, ThreadPool, Version,
-        Worker];
+        Body, Client, Connection, Header, HeaderKind, HeaderName, HeaderValue,
+        Headers, Method, NetError, NetReader, NetResult<()>, NetWriter,
+        NetParseError, Request, RequestLine, Response, Route, RouteBuilder,
+        Router, Server, ServerBuilder<&str>, ServerConfig, ServerHandle<()>,
+        Status, StatusLine, Target, ThreadPool, Version, Worker];
 
     trait_impl_test! [error_types implement Error:
         NetError, NetParseError];

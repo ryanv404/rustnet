@@ -1,7 +1,9 @@
 #![allow(unused)]
 
 use std::collections::BTreeMap;
-use std::net::TcpStream;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::thread;
+use std::time::Duration;
 
 use rustnet::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC, ACCESS_CONTROL_ALLOW_ORIGIN as ACAO,
@@ -9,8 +11,6 @@ use rustnet::header::{
     WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE,
 };
 use rustnet::{Headers, Response};
-
-pub const LOCAL_ADDR: &str = "127.0.0.1:7878";
 
 macro_rules! run_server_tests {
     (START_TEST_SERVER) => {
@@ -24,25 +24,17 @@ macro_rules! run_server_tests {
                     "--",
                     "--shutdown",
                     "--",
-                    LOCAL_ADDR
+                    "127.0.0.1:7878"
                 ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap();
 
-            let mut attempt_num = 0;
-
-            while attempt_num < 5 {
-                if is_server_live(LOCAL_ADDR) {
-                    return;
-                } else {
-                    thread::sleep(Duration::from_millis(300));
-                    attempt_num += 1;
-                }
+            // Test fails if server is not live.
+            if !server_is_live(false) {
+                assert!(false);
             }
-
-            panic!("Server took too long to go live.");
         }
     };
     (SHUTDOWN_TEST_SERVER) => {
@@ -60,25 +52,17 @@ macro_rules! run_server_tests {
                     "/__shutdown_server__",
                     "--server-tests",
                     "--",
-                    LOCAL_ADDR
+                    "127.0.0.1:7878"
                 ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
                 .unwrap();
 
-            let mut attempt_num = 0;
-
-            while attempt_num < 5 {
-                if is_server_live(LOCAL_ADDR) {
-                    thread::sleep(Duration::from_millis(200));
-                    attempt_num += 1;
-                } else {
-                    break;
-                }
+            // Test fails if server is still live.
+            if server_is_live(true) {
+                assert!(false);
             }
-
-            assert!(!is_server_live(LOCAL_ADDR));
         }
     };
     ($( $label:ident: $method:literal, $uri_path:literal; )+) => {
@@ -97,7 +81,7 @@ macro_rules! run_server_tests {
                         $uri_path,
                         "--server-tests",
                         "--",
-                        LOCAL_ADDR
+                        "127.0.0.1:7878"
                     ])
                     .output()
                     .unwrap();
@@ -201,8 +185,33 @@ macro_rules! run_client_test {
     };
 }
 
-pub fn is_server_live(addr: &str) -> bool {
-    TcpStream::connect(addr).is_ok()
+pub fn server_is_live(is_shutting_down: bool) -> bool {
+    let timeout = Duration::from_millis(200);
+    let socket = SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        7878);
+
+    for _ in 0..5 {
+        if TcpStream::connect_timeout(&socket, timeout).is_ok() {
+            if !is_shutting_down {
+                return true;
+            } else {
+                thread::sleep(timeout);
+            }
+        } else {
+            if is_shutting_down {
+                return false;
+            } else {
+                thread::sleep(timeout);
+            }
+        }
+    }
+
+    if is_shutting_down {
+        true
+    } else {
+        false
+    }
 }
 
 pub fn add_expected_headers(code: u16, expected: &mut Response) {

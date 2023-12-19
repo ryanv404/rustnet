@@ -30,12 +30,18 @@ impl Display for NetParseError {
     }
 }
 
+impl From<NetParseError> for IoError {
+    fn from(err: NetParseError) -> Self {
+        Self::new(IoErrorKind::Other, err)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetError {
     Https,
     Io(IoErrorKind),
     NotConnected,
-    Other(String),
+    Other(&'static str),
     Parse(NetParseError),
     Read(IoErrorKind),
     UnexpectedEof,
@@ -50,7 +56,7 @@ impl Display for NetError {
             Self::Https => f.write_str("HTTPS is not implemented"),
             Self::Io(kind) => write!(f, "I/O error: {kind}"),
             Self::NotConnected => f.write_str("No active TCP stream found"),
-            Self::Other(ref msg) => write!(f, "Error: {msg}"),
+            Self::Other(msg) => write!(f, "Error: {msg}"),
             Self::Parse(kind) => write!(f, "Parsing error: {kind}"),
             Self::Read(kind) => write!(f, "Read error: {kind}"),
             Self::UnexpectedEof => f.write_str("Received an unexpected EOF"),
@@ -82,12 +88,6 @@ impl From<IoErrorKind> for NetError {
 impl From<NetParseError> for NetError {
     fn from(err: NetParseError) -> Self {
         Self::Parse(err)
-    }
-}
-
-impl From<NetParseError> for IoError {
-    fn from(err: NetParseError) -> Self {
-        Self::new(IoErrorKind::Other, err)
     }
 }
 
