@@ -24,6 +24,11 @@ fn main() -> NetResult<()> {
         .path(&cli.path)
         .build()?;
 
+    // Apply any command line headers.
+    if !cli.headers.is_empty() {
+        todo!();
+    }
+
     // Send request and receive response.
     if cli.do_send {
         client.send()?;
