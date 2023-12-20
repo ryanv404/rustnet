@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
 use crate::util::trim_whitespace_bytes;
-use crate::{NetError, NetResult, NetParseError};
+use crate::{NetError, NetParseError, NetResult};
 
 /// Header field name.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,6 +42,20 @@ impl FromStr for HeaderName {
     }
 }
 
+impl From<&str> for HeaderName {
+    fn from(s: &str) -> Self {
+        let s = s.trim();
+        let bytes = s.as_bytes();
+
+        Self {
+            inner: match StandardHeader::from_bytes(bytes) {
+                Some(std) => HeaderKind::Standard(std),
+                None => HeaderKind::Custom(Vec::from(s)),
+            }
+        }
+    }
+}
+
 impl TryFrom<&[u8]> for HeaderName {
     type Error = NetError;
 
@@ -52,10 +66,22 @@ impl TryFrom<&[u8]> for HeaderName {
 }
 
 impl HeaderName {
-    /// Creates a new `HeaderName` from the given `HeaderKind`.
+    /// Returns a standard `HeaderName` with an inner `HeaderKind::Standard`
+    /// from the given string slice, if possible.
     #[must_use]
-    pub const fn new(inner: HeaderKind) -> Self {
-        Self { inner }
+    pub fn standard(name: &str) -> Option<Self> {
+        StandardHeader::from_bytes(name.as_bytes()).map(|hdr| Self {
+            inner: HeaderKind::Standard(hdr),
+        })
+    }
+
+    /// Returns a custom `HeaderName` with an inner `HeaderKind::Custom` from
+    /// the given string slice.
+    #[must_use]
+    pub fn custom(name: &str) -> Self {
+        Self {
+            inner: HeaderKind::Custom(Vec::from(name)),
+        }
     }
 
     /// Returns the header name as a byte slice.
@@ -109,7 +135,9 @@ impl TryFrom<&[u8]> for HeaderKind {
     fn try_from(b: &[u8]) -> NetResult<Self> {
         match StandardHeader::from_bytes(b) {
             Some(std) => Ok(Self::Standard(std)),
-            None if str::from_utf8(b).is_ok() => Ok(Self::Custom(b.to_ascii_lowercase())),
+            None if str::from_utf8(b).is_ok() => {
+                Ok(Self::Custom(b.to_ascii_lowercase()))
+            },
             None => Err(NetError::Parse(NetParseError::Header)),
         }
     }

@@ -1,13 +1,12 @@
-use std::env::{self, Args};
-use std::process;
+use std::env;
 
-use rustnet::{NetResult, Router, Server, Target::Text};
+use rustnet::{NetResult, Router, Server, ServerCli};
 
 fn main() -> NetResult<()> {
     // Handle command-line options.
-    let cli = Cli::parse(env::args());
+    let cli = ServerCli::parse(env::args());
 
-    // Add some static routes and handle 404 situations.
+    // Add some static HTML routes and handle Error 404 situations.
     let router = Router::new()
         .get("/", "static/index.html")
         .get("/about", "static/about.html")
@@ -24,109 +23,29 @@ fn main() -> NetResult<()> {
 
     // Add a single path that serves different resources depending on
     // the HTTP method that is used.
-    let router = router.route("/many_methods")
-        .get(Text(b"Hi from the GET route!"))
-        .head(Text(b"Hi from the HEAD route!"))
-        .post(Text(b"Hi from the POST route!"))
-        .put(Text(b"Hi from the PUT route!"))
-        .patch(Text(b"Hi from the PATCH route!"))
-        .delete(Text(b"Hi from the DELETE route!"))
-        .trace(Text(b"Hi from the TRACE route!"))
-        .options(Text(b"Hi from the OPTIONS route!"))
-        .connect(Text(b"Hi from the CONNECT route!"))
+    let router = router
+        .route("/many_methods")
+        .get("Hi from the GET route!".into())
+        .head("Hi from the HEAD route!".into())
+        .post("Hi from the POST route!".into())
+        .put("Hi from the PUT route!".into())
+        .patch("Hi from the PATCH route!".into())
+        .delete("Hi from the DELETE route!".into())
+        .trace("Hi from the TRACE route!".into())
+        .options("Hi from the OPTIONS route!".into())
+        .connect("Hi from the CONNECT route!".into())
         .apply();
 
     // Start the HTTP server.
-    let server = Server::http(&cli.addr)
+    let server = Server::new()
+        .log(cli.log)
         .router(router)
-        .do_logging(cli.do_logging)
-        .has_shutdown_route(cli.has_shutdown_route)
+        .addr(&cli.addr)
+        .add_shutdown_route(cli.shutdown_route)
         .start()?;
 
     // Wait for the server to exit.
     server.join()?;
 
     Ok(())
-}
-
-fn print_help() {
-    println!(
-        "\
-USAGE:
-    server [OPTIONS] <SERVER ADDRESS>\n
-SERVER ADDRESS:
-    IP:PORT      The server's IP address and port (default: 127.0.0.1:7878).\n
-OPTIONS:
-    --log        Enables logging of connections to the terminal.
-    --shutdown   Adds a server shutdown route for testing."
-    );
-}
-
-#[derive(Debug)]
-struct Cli {
-    do_logging: bool,
-    has_shutdown_route: bool,
-    addr: String,
-}
-
-impl Default for Cli {
-    fn default() -> Self {
-        Self {
-            do_logging: false,
-            has_shutdown_route: false,
-            addr: "127.0.0.1:7878".to_string(),
-        }
-    }
-}
-
-impl Cli {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn do_logging(&mut self) {
-        self.do_logging = true;
-    }
-
-    fn has_shutdown_route(&mut self) {
-        self.has_shutdown_route = true;
-    }
-
-    fn set_addr(&mut self, addr: &str) {
-        self.addr = addr.to_string();
-    }
-
-    fn parse(args: Args) -> Self {
-        let mut cli = Self::new();
-
-        let mut args = args.skip(1);
-
-        while let Some(opt) = args.next().as_deref() {
-            if opt.is_empty() {
-                return cli;
-            }
-
-            match opt {
-                "--log" => cli.do_logging(),
-                "--shutdown" => cli.has_shutdown_route(),
-                "--help" => {
-                    print_help();
-                    process::exit(0);
-                }
-                "--" => {
-                    if let Some(addr) = args.next().as_deref() {
-                        cli.set_addr(addr);
-                    }
-                }
-                unk if unk.starts_with("--") => {
-                    eprintln!("Unknown option: \"{unk}\".\n");
-                    print_help();
-                    process::exit(1);
-                }
-                addr => cli.set_addr(addr),
-            }
-        }
-
-        cli
-    }
 }

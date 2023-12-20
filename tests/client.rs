@@ -3,8 +3,8 @@ use std::process::Command;
 
 use rustnet::header::DATE;
 use rustnet::{
-    Body, Headers, Method, NetReader, NetWriter, Request, RequestLine, Response, Status,
-    StatusLine, Version,
+    Body, Headers, Method, NetReader, NetWriter, Request, RequestLine,
+    Response, Status, StatusLine, Version,
 };
 
 #[macro_use]

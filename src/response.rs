@@ -3,10 +3,11 @@ use std::io::{BufWriter, Result as IoResult, Write, WriterPanicked};
 use std::net::TcpStream;
 use std::str::FromStr;
 
+use crate::header::{ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT};
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, NetParseError, Request, RequestLine, Route, Router, Status,
-    Version, WRITER_BUFSIZE,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetParseError,
+    NetReader, NetResult, Request, RequestLine, Status, Target, Version,
+    WRITER_BUFSIZE,
 };
 
 /// A buffered writer responsible for writing to an inner `TcpStream`.
@@ -80,7 +81,7 @@ impl NetWriter {
     /// to the `TcpStream` successfully.
     pub fn write_request_line(
         &mut self,
-        request_line: &RequestLine
+        request_line: &RequestLine,
     ) -> NetResult<()> {
         self.write_all(format!("{request_line}\r\n").as_bytes())?;
         Ok(())
@@ -94,7 +95,7 @@ impl NetWriter {
     /// to the `TcpStream` successfully.
     pub fn write_status_line(
         &mut self,
-        status_line: &StatusLine
+        status_line: &StatusLine,
     ) -> NetResult<()> {
         self.write_all(format!("{status_line}\r\n").as_bytes())?;
         Ok(())
@@ -138,8 +139,6 @@ impl NetWriter {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
-        use crate::header::{ACCEPT, HOST, USER_AGENT};
-
         if !req.headers.contains(&ACCEPT) {
             req.headers.accept("*/*");
         }
@@ -147,17 +146,16 @@ impl NetWriter {
         if !req.headers.contains(&HOST) {
             let stream = self.get_ref();
             let remote = stream.peer_addr()?;
-            req.headers.host(remote.ip(), remote.port());
+            req.headers.host(&remote.to_string());
         }
 
         if !req.headers.contains(&USER_AGENT) {
-            req.headers.user_agent();
+            req.headers.default_user_agent();
         }
 
         self.write_request_line(&req.request_line)?;
         self.write_headers(&req.headers)?;
         self.write_body(&req.body)?;
-
         self.flush()?;
         Ok(())
     }
@@ -169,11 +167,11 @@ impl NetWriter {
     ///
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
-    pub fn send_server_error(&mut self, err_msg: &str) -> NetResult<()> {
+    pub fn send_error(&mut self, err_msg: &str) -> NetResult<()> {
         let mut res = Response::new(500);
 
         // Update the response headers.
-        res.headers.server();
+        res.headers.default_server();
         res.headers.connection("close");
         res.headers.cache_control("no-cache");
         res.headers.content_length(err_msg.len());
@@ -185,7 +183,6 @@ impl NetWriter {
         self.write_status_line(&res.status_line)?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
-
         self.flush()?;
         Ok(())
     }
@@ -197,16 +194,13 @@ impl NetWriter {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
-        use crate::header::SERVER;
-
         if !res.headers.contains(&SERVER) {
-            res.headers.server();
+            res.headers.default_server();
         }
 
         self.write_status_line(&res.status_line)?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
-
         self.flush()?;
         Ok(())
     }
@@ -229,12 +223,12 @@ impl FromStr for StatusLine {
     type Err = NetError;
 
     fn from_str(line: &str) -> NetResult<Self> {
-        line.find("HTTP")
+        let start = line.find("HTTP")
+            .ok_or(NetError::Parse(NetParseError::StatusLine))?;
+
+        line[start..]
+            .split_once(' ')
             .ok_or(NetError::Parse(NetParseError::StatusLine))
-            .and_then(|start| {
-                line[start..].split_once(' ')
-                .ok_or(NetError::Parse(NetParseError::StatusLine))
-            })
             .and_then(|(token1, token2)| {
                 let version = token1.parse::<Version>()?;
                 let status = token2.parse::<Status>()?;
@@ -244,6 +238,15 @@ impl FromStr for StatusLine {
 }
 
 impl StatusLine {
+    /// Returns a new `StatusLine` instance from the provided status code.
+    #[must_use]
+    pub const fn new(code: u16) -> Self {
+        Self {
+            version: Version::OneDotOne,
+            status: Status(code),
+        }
+    }
+
     /// Returns the HTTP protocol `Version`.
     #[must_use]
     pub const fn version(&self) -> Version {
@@ -266,6 +269,27 @@ impl StatusLine {
     #[must_use]
     pub const fn status_msg(&self) -> &'static str {
         self.status.msg()
+    }
+
+    /// Returns the `StatusLine` as a `String` with plain formatting.
+    #[must_use]
+    pub fn to_string_plain(&self) -> String {
+        self.to_string()
+    }
+
+    /// Returns the `StatusLine` as a `String` with color formatting.
+    #[must_use]
+    pub fn to_string_color(&self) -> String {
+        const RED: &str = "\x1b[91m";
+        const GRN: &str = "\x1b[92m";
+        const CYAN: &str = "\x1b[96m";
+        const CLR: &str = "\x1b[0m";
+
+        if matches!(self.status.code(), 100..=399) {
+            format!("{CYAN}{}{CLR} {GRN}{}{CLR}", &self.version, &self.status)
+        } else {
+            format!("{CYAN}{}{CLR} {RED}{}{CLR}", &self.version, &self.status)
+        }
     }
 }
 
@@ -299,10 +323,7 @@ impl Response {
     #[must_use]
     pub fn new(code: u16) -> Self {
         Self {
-            status_line: StatusLine {
-                status: Status(code),
-                version: Version::OneDotOne,
-            },
+            status_line: StatusLine::new(code),
             headers: Headers::new(),
             body: Body::Empty,
         }
@@ -315,30 +336,8 @@ impl Response {
     ///
     /// Returns an error if a `Response` could not be constructed from
     /// a `Target`.
-    pub fn for_route(route: &Route, router: &Router) -> NetResult<Self> {
-        let mut target = router.get_target(route);
-
-        // Implement HEAD routes for all GET routes.
-        if target.is_not_found() && route.is_head() {
-            if let Route::Head(path) = route {
-                let path = path.to_string();
-                let get_route = Route::Get(path.into());
-                let get_target = router.get_target(&get_route);
-
-                if !get_target.is_not_found() {
-                    target = get_target;
-                }
-            }
-        }
-
-        let mut res = if target.is_not_found() {
-            target = router.get_404_target();
-            Self::new(404)
-        } else if route.is_post() {
-            Self::new(201)
-        } else {
-            Self::new(200)
-        };
+    pub fn from_target(target: Target, status: u16) -> NetResult<Self> {
+        let mut res = Self::new(status);
 
         res.body = Body::try_from(target)?;
 
@@ -359,17 +358,13 @@ impl Response {
             res.headers.content_length(res.body.len());
         }
 
-        if route.is_head() {
-            res.body = Body::Empty;
-        }
-
         Ok(res)
     }
 
     /// Returns the `StatusLine` for this `Response`.
     #[must_use]
-    pub const fn status_line(&self) -> StatusLine {
-        self.status_line
+    pub const fn status_line(&self) -> &StatusLine {
+        &self.status_line
     }
 
     /// Returns the HTTP protocol `Version`.
@@ -404,46 +399,19 @@ impl Response {
 
     /// Returns true if the `HeaderName` key is present.
     #[must_use]
-    pub fn has_header(&self, name: &HeaderName) -> bool {
+    pub fn contains(&self, name: &HeaderName) -> bool {
         self.headers.contains(name)
     }
 
     /// Adds or modifies the header field represented by `HeaderName`.
-    pub fn insert_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
     }
 
-    /// Returns the `Header` entry for the given `HeaderName`, if present.
+    /// Returns true if the Connection header's value is "close".
     #[must_use]
-    pub fn get_header(&self, name: &HeaderName) -> Option<&HeaderValue> {
-        self.headers.get(name)
-    }
-
-    /// Returns the response headers as a String.
-    #[must_use]
-    pub fn headers_to_string(&self) -> String {
-        if self.headers.is_empty() {
-            String::new()
-        } else {
-            self.headers
-                .0
-                .iter()
-                .fold(String::new(), |mut acc, (name, value)| {
-                    acc.push_str(&format!("{name}: {value}\n"));
-                    acc
-                })
-        }
-    }
-
-    /// Returns true if the Connection header is present with the value "close".
-    #[must_use]
-    pub fn has_closed_connection_header(&self) -> bool {
-        use crate::header::CONNECTION;
-
-        matches!(
-            self.headers.get(&CONNECTION),
-            Some(conn_val) if conn_val.as_str().eq_ignore_ascii_case("close")
-        )
+    pub fn has_close_connection_header(&self) -> bool {
+        self.headers.get(&CONNECTION) == Some(&HeaderValue::from("close"))
     }
 
     /// Returns true if a body is permitted for this `Response`.

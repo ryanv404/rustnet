@@ -1,15 +1,13 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{
-    BufRead, BufReader, Read, Result as IoResult,
-};
+use std::io::{BufRead, BufReader, Read, Result as IoResult};
 use std::net::TcpStream;
 use std::str::{self, FromStr};
 use std::string::ToString;
 
 use crate::{
     Body, Header, HeaderName, HeaderValue, Headers, Method, NetError,
-    NetResult, NetWriter, NetParseError, Response, Route, StatusLine,
-    Version, MAX_HEADERS, READER_BUFSIZE,
+    NetParseError, NetResult, NetWriter, Response, Route, StatusLine, Version,
+    MAX_HEADERS, READER_BUFSIZE,
 };
 
 /// A buffered reader responsible for reading from an inner `TcpStream`.
@@ -132,7 +130,7 @@ impl NetReader {
                     let header = buf.parse::<Header>()?;
                     headers.insert(header.name, header.value);
                     num_headers += 1;
-                }
+                },
             }
         }
 
@@ -158,9 +156,11 @@ impl NetReader {
         let body_len = content_len
             .ok_or(NetError::Parse(NetParseError::Body))
             .map(ToString::to_string)
-            .and_then(|s| s.trim()
-                .parse::<usize>()
-                .map_err(|_| NetError::Parse(NetParseError::Body)))?;
+            .and_then(|s| {
+                s.trim()
+                    .parse::<usize>()
+                    .map_err(|_| NetError::Parse(NetParseError::Body))
+            })?;
 
         if body_len == 0 {
             return Ok(Body::Empty);
@@ -302,6 +302,17 @@ impl FromStr for RequestLine {
 }
 
 impl RequestLine {
+    /// Returns a new `RequestLine` instance from the provided HTTP method
+    /// and URI path.
+    #[must_use]
+    pub fn new(method: Method, path: &str) -> Self {
+        Self {
+            method,
+            path: path.to_string(),
+            version: Version::OneDotOne,
+        }
+    }
+
     /// Returns the HTTP `Method` for this `RequestLine`.
     #[must_use]
     pub const fn method(&self) -> Method {
@@ -318,6 +329,27 @@ impl RequestLine {
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
+    }
+
+    /// Returns the `RequestLine` as a `String` with plain formatting.
+    #[must_use]
+    pub fn to_string_plain(&self) -> String {
+        self.to_string()
+    }
+
+    /// Returns the `RequestLine` as a `String` with color formatting.
+    #[must_use]
+    pub fn to_string_color(&self) -> String {
+        const PURP: &str = "\x1b[95m";
+        const CYAN: &str = "\x1b[96m";
+        const CLR: &str = "\x1b[0m";
+
+        format!(
+            "{CYAN}{}{CLR} {PURP}{}{CLR} {CYAN}{}{CLR}",
+            &self.method,
+            &self.path,
+            &self.version
+        )
     }
 }
 
@@ -365,8 +397,7 @@ impl Request {
         self.request_line.version
     }
 
-    /// Returns a `Route` that represents the URI path and HTTP
-    /// `Method` found in this `Request`.
+    /// Returns the requested `Route`.
     #[must_use]
     pub fn route(&self) -> Route {
         Route::new(self.method(), self.path())
@@ -374,8 +405,8 @@ impl Request {
 
     /// Returns the `RequestLine` for this `Request`.
     #[must_use]
-    pub fn request_line(&self) -> String {
-        self.request_line.to_string()
+    pub fn request_line(&self) -> &RequestLine {
+        &self.request_line
     }
 
     /// Returns the headers found in this `Request`.
@@ -386,35 +417,13 @@ impl Request {
 
     /// Returns true if the given `HeaderName` key is present.
     #[must_use]
-    pub fn has_header(&self, name: &HeaderName) -> bool {
+    pub fn contains(&self, name: &HeaderName) -> bool {
         self.headers.contains(name)
     }
 
-    /// Returns the header value for the given `HeaderName`, if present.
-    #[must_use]
-    pub fn get_header(&self, name: &HeaderName) -> Option<&HeaderValue> {
-        self.headers.get(name)
-    }
-
     /// Adds or updates a header field line to this `Request`.
-    pub fn insert_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
-    }
-
-    /// Returns the all request headers as a `String`.
-    #[must_use]
-    pub fn headers_to_string(&self) -> String {
-        if self.headers.0.is_empty() {
-            String::new()
-        } else {
-            self.headers
-                .0
-                .iter()
-                .fold(String::new(), |mut acc, (name, value)| {
-                    acc.push_str(&format!("{name}: {value}\n"));
-                    acc
-                })
-        }
     }
 
     /// Returns `Body` for this `Request`.

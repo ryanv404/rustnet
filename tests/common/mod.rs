@@ -6,8 +6,9 @@ use std::thread;
 use std::time::Duration;
 
 use rustnet::header::{
-    ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC, ACCESS_CONTROL_ALLOW_ORIGIN as ACAO,
-    CONNECTION as CONN, CONTENT_LENGTH as CL, CONTENT_TYPE as CT, LOCATION, SERVER,
+    ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
+    ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION as CONN,
+    CONTENT_LENGTH as CL, CONTENT_TYPE as CT, LOCATION, SERVER,
     WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE,
 };
 use rustnet::{Headers, Response};
@@ -50,7 +51,8 @@ macro_rules! run_server_tests {
                     "DELETE",
                     "--path",
                     "/__shutdown_server__",
-                    "--server-tests",
+                    "--output",
+                    "z",
                     "--",
                     "127.0.0.1:7878"
                 ])
@@ -65,10 +67,13 @@ macro_rules! run_server_tests {
             }
         }
     };
-    ($( $label:ident: $method:literal, $uri_path:literal; )+) => {
-        $(
-            #[test]
-            fn $label() {
+    (
+        $label:ident:
+        $( $method:literal, $uri_path:literal; )+
+    ) => {
+        #[test]
+        fn $label() {
+            $(
                 let output = Command::new("cargo")
                     .args([
                         "run",
@@ -79,7 +84,8 @@ macro_rules! run_server_tests {
                         $method,
                         "--path",
                         $uri_path,
-                        "--server-tests",
+                        "--output",
+                        "z",
                         "--",
                         "127.0.0.1:7878"
                     ])
@@ -89,10 +95,9 @@ macro_rules! run_server_tests {
                 let output_str = String::from_utf8(output.stdout).unwrap();
                 let output = get_server_test_output(&output_str);
                 let expected = get_expected_server_output($method, $uri_path);
-
                 assert_eq!(output, expected);
-            }
-        )+
+            )+
+        }
     };
 }
 
@@ -169,7 +174,8 @@ macro_rules! run_client_test {
                     $method,
                     "--path",
                     $uri_path,
-                    "--client-tests",
+                    "--output",
+                    "c",
                     "--",
                     "httpbin.org:80",
                 ])
@@ -179,7 +185,6 @@ macro_rules! run_client_test {
             let output_str = String::from_utf8(output.stdout).unwrap();
             let output = get_client_test_output(&output_str);
             let expected = get_expected_client_output($method, $uri_path);
-
             assert_eq!(output, expected);
         }
     };
@@ -187,31 +192,26 @@ macro_rules! run_client_test {
 
 pub fn server_is_live(is_shutting_down: bool) -> bool {
     let timeout = Duration::from_millis(200);
-    let socket = SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        7878);
+    let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7878);
 
     for _ in 0..5 {
         if TcpStream::connect_timeout(&socket, timeout).is_ok() {
             if !is_shutting_down {
+                // Returns success state for a server starting up.
                 return true;
-            } else {
-                thread::sleep(timeout);
             }
-        } else {
-            if is_shutting_down {
-                return false;
-            } else {
-                thread::sleep(timeout);
-            }
+        } else if is_shutting_down {
+            // Returns success state for a server shutting down.
+            return false;
         }
+
+        thread::sleep(timeout);
     }
 
-    if is_shutting_down {
-        true
-    } else {
-        false
-    }
+    // Returns the fail state:
+    // True (server is live) if server is shutting down.
+    // False (server is not live) if server is starting up.
+    is_shutting_down
 }
 
 pub fn add_expected_headers(code: u16, expected: &mut Response) {
@@ -219,69 +219,54 @@ pub fn add_expected_headers(code: u16, expected: &mut Response) {
     expected.headers.clear();
 
     // Add default headers.
-    expected.headers.insert(CL, b"0"[..].into());
-    expected.headers.insert(ACAO, b"*"[..].into());
-    expected.headers.insert(ACAC, b"true"[..].into());
-    expected.headers.insert(CONN, b"keep-alive"[..].into());
-    expected.headers.insert(SERVER, b"gunicorn/19.9.0"[..].into());
-    expected.headers.insert(CT, b"text/html; charset=utf-8"[..].into());
+    expected.headers.content_length(0);
+    expected.headers.insert(ACAO, "*".into());
+    expected.headers.connection("keep-alive");
+    expected.headers.server("gunicorn/19.9.0");
+    expected.headers.insert(ACAC, "true".into());
+    expected.headers.content_type("text/html; charset=utf-8");
 
     // Update headers based on the status code.
     match code {
         101 => {
             expected.headers.remove(&CL);
-            expected
-                .headers
-                .entry(CONN)
-                .and_modify(|v| *v = b"upgrade"[..].into());
-        }
+            expected.headers.connection("upgrade");
+        },
         100 | 102 | 103 | 204 => expected.headers.remove(&CL),
         301 | 302 | 303 | 305 | 307 => {
             expected.headers.remove(&CT);
-            expected.headers.insert(LOCATION, b"/redirect/1"[..].into());
-        }
+            expected.headers.insert(LOCATION, "/redirect/1".into());
+        },
         304 => {
             expected.headers.remove(&CT);
             expected.headers.remove(&CL);
-        }
+        },
         401 => {
             expected.headers.remove(&CT);
             expected
                 .headers
-                .insert(WWW, br#"Basic realm="Fake Realm""#[..].into());
-        }
+                .insert(WWW, r#"Basic realm="Fake Realm""#.into());
+        },
         402 => {
             expected.headers.remove(&CT);
+            expected.headers.content_length(17);
             expected
                 .headers
-                .insert(XMORE, b"http://vimeo.com/22053820"[..].into());
-            expected
-                .headers
-                .entry(CL)
-                .and_modify(|v| *v = b"17"[..].into());
-        }
+                .insert(XMORE, "http://vimeo.com/22053820".into());
+        },
         406 => {
-            expected
-                .headers
-                .entry(CL)
-                .and_modify(|v| *v = b"142"[..].into());
-            expected
-                .headers
-                .entry(CT)
-                .and_modify(|v| *v = b"application/json"[..].into());
-        }
+            expected.headers.content_length(142);
+            expected.headers.content_type("application/json");
+        },
         407 => expected.headers.remove(&CT),
         418 => {
             expected.headers.remove(&CT);
+            expected.headers.content_length(135);
             expected
                 .headers
-                .entry(CL)
-                .and_modify(|v| *v = b"135"[..].into());
-            expected
-                .headers
-                .insert(XMORE, b"http://tools.ietf.org/html/rfc2324"[..].into());
-        }
-        _ => {}
+                .insert(XMORE, "http://tools.ietf.org/html/rfc2324".into());
+        },
+        _ => {},
     }
 }
 
@@ -291,7 +276,8 @@ HTTP/1.1 200 OK
 Cache-Control: max-age=604800
 Content-Length: 1406
 Content-Type: image/x-icon
-Server: rustnet/0.1.0".to_string()
+Server: rustnet/0.1.0"
+        .to_string()
 }
 
 pub fn many_methods_output(method: &str) -> String {
@@ -311,12 +297,14 @@ pub fn many_methods_output(method: &str) -> String {
         _ => unreachable!(),
     };
 
-    let mut output = format!("\
+    let mut output = format!(
+        "\
 HTTP/1.1 {status}
 Cache-Control: no-cache
 Content-Length: {len}
 Content-Type: text/plain; charset=utf-8
-Server: rustnet/0.1.0");
+Server: rustnet/0.1.0"
+    );
 
     if method != "HEAD" {
         output.push_str(&format!("\nHi from the {method} route!"));
@@ -332,7 +320,8 @@ HTTP/1.1 404 Not Found
 Cache-Control: no-cache
 Content-Length: 482
 Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0".to_string()
+Server: rustnet/0.1.0"
+            .to_string()
     } else {
         r#"HTTP/1.1 404 Not Found
 Cache-Control: no-cache
@@ -352,7 +341,8 @@ Server: rustnet/0.1.0
 <p><a href="/" style="color:lightgray; text-decoration:none;">Home</a></p>
 </main>
 </body>
-</html>"#.to_string()
+</html>"#
+            .to_string()
     }
 }
 
@@ -363,9 +353,11 @@ HTTP/1.1 200 OK
 Cache-Control: no-cache
 Content-Length: 575
 Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0".to_string()
+Server: rustnet/0.1.0"
+            .to_string()
     } else {
-        format!(r#"HTTP/1.1 {}
+        format!(
+            r#"HTTP/1.1 {}
 Cache-Control: no-cache
 Content-Length: 575
 Content-Type: text/html; charset=utf-8
@@ -387,7 +379,12 @@ Server: rustnet/0.1.0
 </main>
 </body>
 </html>"#,
-        if method == "POST" { "201 Created" } else { "200 OK" })
+            if method == "POST" {
+                "201 Created"
+            } else {
+                "200 OK"
+            }
+        )
     }
 }
 
@@ -415,7 +412,8 @@ pub fn get_expected_client_output(method: &str, path: &str) -> String {
         _ => unreachable!(),
     };
 
-    format!("\
+    format!(
+        "\
 {method} {path} HTTP/1.1
 Accept: */*
 Content-Length: 0
@@ -427,7 +425,8 @@ Access-Control-Allow-Origin: *
 Connection: keep-alive
 Content-Length: {len}
 Content-Type: {contype}
-Server: gunicorn/19.9.0")
+Server: gunicorn/19.9.0"
+    )
 }
 
 pub fn get_expected_server_output(method: &str, path: &str) -> String {
@@ -435,8 +434,8 @@ pub fn get_expected_server_output(method: &str, path: &str) -> String {
         "/foo" => unknown_route_output(method),
         "/favicon.ico" => favicon_route_output(),
         "/many_methods" => many_methods_output(method),
-        "/" | "/head" | "/post" | "/put" | "/patch" | "/delete" | "/trace" |
-            "/options" | "/connect" => known_route_output(method),
+        "/" | "/head" | "/post" | "/put" | "/patch" | "/delete" | "/trace"
+        | "/options" | "/connect" => known_route_output(method),
         _ => unreachable!(),
     }
 }
@@ -469,7 +468,11 @@ pub fn get_server_test_output(input: &str) -> String {
         .split('\n')
         .filter_map(|line| {
             let line = line.trim();
-            if line.is_empty() { None } else { Some(line) }
+            if line.is_empty() {
+                None
+            } else {
+                Some(line)
+            }
         })
         .fold(String::new(), |mut acc, line| {
             acc.push_str(line);

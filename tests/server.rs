@@ -4,8 +4,7 @@ use std::process::{Command, Stdio};
 mod common;
 
 use common::{
-    get_expected_server_output, get_server_test_output,
-    server_is_live,
+    get_expected_server_output, get_server_test_output, server_is_live,
 };
 
 mod a {
@@ -13,91 +12,75 @@ mod a {
     run_server_tests!(START_TEST_SERVER);
 }
 
-mod get {
+mod serve {
     use super::*;
-    run_server_tests! {
-        known_route: "GET", "/";
-        unknown_route: "GET", "/foo";
-    }
-}
 
-mod head {
-    use super::*;
     run_server_tests! {
-        known_route: "HEAD", "/head";
-        unknown_route: "HEAD", "/foo";
-        favicon: "HEAD", "/favicon.ico";
+        get_routes:
+        "GET", "/";
+        "GET", "/foo";
     }
-}
 
-mod post {
-    use super::*;
     run_server_tests! {
-        known_route: "POST", "/post";
-        unknown_route: "POST", "/foo";
+        head_routes:
+        "HEAD", "/head";
+        "HEAD", "/foo";
+        "HEAD", "/favicon.ico";
     }
-}
 
-mod put {
-    use super::*;
     run_server_tests! {
-        known_route: "PUT", "/put";
-        unknown_route: "PUT", "/foo";
+        post_routes:
+        "POST", "/post";
+        "POST", "/foo";
     }
-}
 
-mod patch {
-    use super::*;
     run_server_tests! {
-        known_route: "PATCH", "/patch";
-        unknown_route: "PATCH", "/foo";
+        put_routes:
+        "PUT", "/put";
+        "PUT", "/foo";
     }
-}
 
-mod delete {
-    use super::*;
     run_server_tests! {
-        known_route: "DELETE", "/delete";
-        unknown_route: "DELETE", "/foo";
+        patch_routes:
+        "PATCH", "/patch";
+        "PATCH", "/foo";
     }
-}
 
-mod trace {
-    use super::*;
     run_server_tests! {
-        known_route: "TRACE", "/trace";
-        unknown_route: "TRACE", "/foo";
+        delete_routes:
+        "DELETE", "/delete";
+        "DELETE", "/foo";
     }
-}
 
-mod options {
-    use super::*;
     run_server_tests! {
-        known_route: "OPTIONS", "/options";
-        unknown_route: "OPTIONS", "/foo";
+        trace_routes:
+        "TRACE", "/trace";
+        "TRACE", "/foo";
     }
-}
 
-mod connect {
-    use super::*;
     run_server_tests! {
-        known_route: "CONNECT", "/connect";
-        unknown_route: "CONNECT", "/foo";
+        options_routes:
+        "OPTIONS", "/options";
+        "OPTIONS", "/foo";
     }
-}
 
-mod many_methods_same_path {
-    use super::*;
     run_server_tests! {
-        get: "GET", "/many_methods";
-        head: "HEAD", "/many_methods";
-        post: "POST", "/many_methods";
-        put: "PUT", "/many_methods";
-        patch: "PATCH", "/many_methods";
-        delete: "DELETE", "/many_methods";
-        trace: "TRACE", "/many_methods";
-        options: "OPTIONS", "/many_methods";
-        connect: "CONNECT", "/many_methods";
+        connect_routes:
+        "CONNECT", "/connect";
+        "CONNECT", "/foo";
+    }
+
+    run_server_tests! {
+        many_methods_one_path:
+        "GET", "/many_methods";
+        "HEAD", "/many_methods";
+        "POST", "/many_methods";
+        "PUT", "/many_methods";
+        "PATCH", "/many_methods";
+        "DELETE", "/many_methods";
+        "TRACE", "/many_methods";
+        "OPTIONS", "/many_methods";
+        "CONNECT", "/many_methods";
     }
 }
 

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{self, BufRead, BufWriter, StdinLock, StdoutLock, Write};
 
-use rustnet::{Client, NetError, NetReader, NetResult, NetWriter, Request, Response};
+use rustnet::{Client, Connection, NetError, NetResult, Request, Response};
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
@@ -40,8 +40,7 @@ pub struct Browser<'a> {
     output_style: OutputStyle,
     request: Option<Request>,
     response: Option<Response>,
-    reader: Option<NetReader>,
-    writer: Option<NetWriter>,
+    conn: Option<Connection>,
     stdin: StdinLock<'a>,
     stdout: BufWriter<StdoutLock<'a>>,
 }
@@ -54,8 +53,7 @@ impl<'a> Browser<'a> {
             output_style: OutputStyle::Response,
             request: None,
             response: None,
-            reader: None,
-            writer: None,
+            conn: None,
             stdin,
             stdout,
         }
@@ -93,47 +91,48 @@ impl<'a> Browser<'a> {
                 "" => continue,
                 "body" => {
                     self.set_output_style(OutputStyle::ResBody)?;
-                }
+                },
                 "clear" => {
                     self.clear_screen()?;
-                }
+                },
                 "close" | "quit" => self.is_running = false,
                 "help" => {
                     self.show_help()?;
-                }
+                },
                 "home" => {
                     self.set_home_mode()?;
-                }
+                },
                 "request" => {
                     self.set_output_style(OutputStyle::Request)?;
-                }
+                },
                 "response" => {
                     self.set_output_style(OutputStyle::Response)?;
-                }
+                },
                 "status" => {
                     self.set_output_style(OutputStyle::Status)?;
-                }
+                },
                 "verbose" => {
                     self.set_output_style(OutputStyle::Verbose)?;
-                }
+                },
                 uri if self.output_style == OutputStyle::Request => {
                     if let Ok((addr, path)) = Client::parse_uri(uri) {
-                        let mut client = Client::builder()
-                            .addr(addr).path(&path).build()?;
+                        let mut client =
+                            Client::builder().addr(addr).path(&path).build()?;
 
                         self.request = client.req.take();
                     }
 
                     self.print_request()?;
                     self.request = None;
-                }
+                },
                 uri => match Client::parse_uri(uri) {
                     Ok((addr, path)) => {
                         let mut client = Client::builder()
-                            .addr(&addr).path(&path).build()?;
+                            .addr(&addr)
+                            .path(&path)
+                            .build()?;
 
-                        self.reader = client.reader.try_clone().ok();
-                        self.writer = client.writer.try_clone().ok();
+                        self.conn = client.conn.try_clone().ok();
                         self.request = client.req.take();
 
                         self.send()?;
@@ -145,13 +144,12 @@ impl<'a> Browser<'a> {
                         } else {
                             self.request = None;
                             self.response = None;
-                            self.reader = None;
-                            self.writer = None;
+                            self.conn = None;
                         }
-                    }
+                    },
                     Err(_) => {
                         self.warn_invalid_input("URI")?;
-                    }
+                    },
                 },
             }
         }
@@ -164,30 +162,30 @@ impl<'a> Browser<'a> {
         match input {
             "body" => {
                 self.set_output_style(OutputStyle::ResBody)?;
-            }
+            },
             "clear" => {
                 self.clear_screen()?;
-            }
+            },
             "close" | "quit" => self.is_running = false,
             "help" => {
                 self.show_help()?;
-            }
+            },
             "home" => {
                 self.set_home_mode()?;
-            }
+            },
             "request" => {
                 self.set_output_style(OutputStyle::Request)?;
-            }
+            },
             "response" => {
                 self.set_output_style(OutputStyle::Response)?;
-            }
+            },
             "status" => {
                 self.set_output_style(OutputStyle::Status)?;
-            }
+            },
             "verbose" => {
                 self.set_output_style(OutputStyle::Verbose)?;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         Ok(())
@@ -217,41 +215,41 @@ impl<'a> Browser<'a> {
                         self.send()?;
                         self.recv()?;
                         self.print_output()?;
-                        self.in_path_mode = self.is_connection_open();
+                        self.in_path_mode = !self.has_close_connection_header();
                         self.response = None;
                     }
-                }
+                },
                 "body" => {
                     self.set_output_style(OutputStyle::ResBody)?;
-                }
+                },
                 "clear" => {
                     self.clear_screen()?;
-                }
+                },
                 "close" | "quit" => {
                     self.in_path_mode = false;
                     self.is_running = false;
-                }
+                },
                 "help" => {
                     self.show_help()?;
-                }
+                },
                 "home" => {
                     self.set_home_mode()?;
-                }
+                },
                 "request" => {
                     self.set_output_style(OutputStyle::Request)?;
-                }
+                },
                 "response" => {
                     self.set_output_style(OutputStyle::Response)?;
-                }
+                },
                 "status" => {
                     self.set_output_style(OutputStyle::Status)?;
-                }
+                },
                 "verbose" => {
                     self.set_output_style(OutputStyle::Verbose)?;
-                }
+                },
                 _ => {
                     self.warn_invalid_input("path")?;
-                }
+                },
             }
         }
 
@@ -354,10 +352,10 @@ impl<'a> Browser<'a> {
 
     fn send(&mut self) -> NetResult<()> {
         let mut writer = self
-            .writer
+            .conn
             .as_ref()
             .ok_or(NetError::NotConnected)
-            .and_then(|writer| writer.try_clone())?;
+            .and_then(|conn| conn.writer.try_clone())?;
 
         self.request
             .as_mut()
@@ -369,10 +367,10 @@ impl<'a> Browser<'a> {
 
     fn recv(&mut self) -> NetResult<()> {
         self.response = self
-            .reader
+            .conn
             .as_mut()
             .ok_or(NetError::NotConnected)
-            .and_then(|reader| reader.recv_response())
+            .and_then(|conn| conn.reader.recv_response())
             .ok();
 
         Ok(())
@@ -465,28 +463,31 @@ impl<'a> Browser<'a> {
         match self.output_style {
             OutputStyle::Status => {
                 self.print_status_line()?;
-            }
+            },
             OutputStyle::Request => {
                 self.print_request()?;
-            }
+            },
             OutputStyle::ResBody => {
                 self.print_response_body()?;
-            }
+            },
             OutputStyle::Response => {
                 self.print_response()?;
-            }
+            },
             OutputStyle::Verbose => {
                 self.print_request()?;
                 self.print_response()?;
-            }
+            },
         }
 
         Ok(())
     }
 
-    fn is_connection_open(&self) -> bool {
-        !self.response
-            .as_ref()
-            .map_or(false, |res| res.has_closed_connection_header())
+    fn has_close_connection_header(&self) -> bool {
+        if let Some(res) = self.response.as_ref() {
+            return res.has_close_connection_header();
+        }
+
+        // If there is no response, then the connection is already closed.
+        true
     }
 }

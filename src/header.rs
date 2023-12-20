@@ -1,9 +1,8 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::net::IpAddr;
 use std::str::FromStr;
 
-use crate::{NetError, NetResult, NetParseError};
+use crate::{NetError, NetParseError, NetResult};
 
 pub mod names;
 pub mod values;
@@ -31,11 +30,17 @@ impl FromStr for Header {
         line.trim()
             .split_once(':')
             .ok_or(NetError::Parse(NetParseError::Header))
-            .and_then(|(name, value)| {
-                let name = name.parse::<HeaderName>()?;
-                let value = value.parse::<HeaderValue>()?;
-                Ok(Self { name, value })
-            })
+            .map(|(name, value)| Self::new(name, value))
+    }
+}
+
+impl Header {
+    /// Returns a new `Header` from the provided name and value.
+    #[must_use]
+    pub fn new(name: &str, value: &str) -> Self {
+        let name = HeaderName::from(name);
+        let value = HeaderValue::from(value);
+        Self { name, value }
     }
 }
 
@@ -70,7 +75,10 @@ impl Headers {
 
     /// Returns the entry for associated with the given `HeaderName` key.
     #[must_use]
-    pub fn entry(&mut self, name: HeaderName) -> Entry<HeaderName, HeaderValue> {
+    pub fn entry(
+        &mut self,
+        name: HeaderName,
+    ) -> Entry<HeaderName, HeaderValue> {
         self.0.entry(name)
     }
 
@@ -104,36 +112,50 @@ impl Headers {
 
     /// Inserts a collection of default server response headers.
     pub fn default_response_headers(&mut self) {
-        self.server();
+        self.default_server();
         self.connection("keep-alive");
-        self.content_length(0);
+    }
+
+    /// Inserts a new header with the given name and value.
+    pub fn add_header(&mut self, name: &str, value: &str) {
+        self.insert(HeaderName::from(name), HeaderValue::from(value));
     }
 
     /// Inserts a Host header with the value "ip:port".
-    pub fn host(&mut self, ip: IpAddr, port: u16) {
-        self.insert(HOST, format!("{ip}:{port}").into());
+    pub fn host(&mut self, value: &str) {
+        self.insert(HOST, value.into());
     }
 
     /// Inserts the default User-Agent header.
-    pub fn user_agent(&mut self) {
+    pub fn user_agent(&mut self, value: &str) {
+        self.insert(USER_AGENT, value.into());
+    }
+
+    /// Inserts the default User-Agent header.
+    pub fn default_user_agent(&mut self) {
         let agent = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
-        self.insert(USER_AGENT, agent.as_bytes().into());
+        self.insert(USER_AGENT, agent.into());
     }
 
     /// Inserts an Accept header with the given value.
     pub fn accept(&mut self, value: &str) {
-        self.insert(ACCEPT, value.as_bytes().into());
+        self.insert(ACCEPT, value.into());
+    }
+
+    /// Inserts an Accept-Encoding header with the given value.
+    pub fn accept_encoding(&mut self, value: &str) {
+        self.insert(ACCEPT_ENCODING, value.into());
     }
 
     /// Inserts the default Server header.
-    pub fn server(&mut self) {
+    pub fn default_server(&mut self) {
         let server = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
-        self.insert(SERVER, server.as_bytes().into());
+        self.insert(SERVER, server.into());
     }
 
     /// Inserts a Connection header with the given value.
     pub fn connection(&mut self, value: &str) {
-        self.insert(CONNECTION, value.as_bytes().into());
+        self.insert(CONNECTION, value.into());
     }
 
     /// Inserts a Content-Length header with the given value.
@@ -143,11 +165,51 @@ impl Headers {
 
     /// Inserts a Content-Type header with the given value.
     pub fn content_type(&mut self, value: &str) {
-        self.insert(CONTENT_TYPE, value.as_bytes().into());
+        self.insert(CONTENT_TYPE, value.into());
     }
 
     /// Inserts a Cache-Control header with the given value.
     pub fn cache_control(&mut self, value: &str) {
-        self.insert(CACHE_CONTROL, value.as_bytes().into());
+        self.insert(CACHE_CONTROL, value.into());
+    }
+
+    /// Returns the headers as a `String` with plain formatting.
+    #[must_use]
+    pub fn to_string_plain(&self) -> String {
+        let mut buf = String::new();
+
+        if !self.is_empty() {
+            self.0.iter().for_each(|(name, value)| {
+                let header = format!("{name}: {value}\n");
+                buf.push_str(&header);
+            });
+
+            // Remove final newline.
+            buf.pop();
+        }
+
+        buf
+    }
+
+    /// Returns the headers as a `String` with color formatting.
+    #[must_use]
+    pub fn to_string_color(&self) -> String {
+        const BLU: &str = "\x1b[94m";
+        const YLW: &str = "\x1b[96m";
+        const CLR: &str = "\x1b[0m";
+
+        let mut buf = String::new();
+
+        if !self.is_empty() {
+            self.0.iter().for_each(|(name, value)| {
+                let header = format!("{BLU}{name}{CLR}: {YLW}{value}{CLR}\n");
+                buf.push_str(&header);
+            });
+
+            // Remove final newline.
+            buf.pop();
+        }
+
+        buf
     }
 }

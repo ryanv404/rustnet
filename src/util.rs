@@ -11,7 +11,7 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
     match len {
         1 if bytes[0].is_ascii_whitespace() => return EMPTY,
         0 | 1 => return bytes,
-        _ => {}
+        _ => {},
     }
 
     let mut first: usize = 0;

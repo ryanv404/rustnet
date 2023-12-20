@@ -1,11 +1,12 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::ErrorKind as IoErrorKind;
 use std::net::{TcpStream, ToSocketAddrs};
 
+use crate::header::{
+    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, DATE, HOST, USER_AGENT,
+};
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetReader,
-    NetResult, NetWriter, NetParseError, Request, RequestLine, Response,
-    Version,
+    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
+    NetParseError, NetResult, Request, RequestLine, Response, Version,
 };
 
 /// An HTTP request builder object.
@@ -15,8 +16,6 @@ where
     A: ToSocketAddrs,
 {
     pub method: Method,
-    pub ip: Option<String>,
-    pub port: Option<u16>,
     pub addr: Option<A>,
     pub path: Option<String>,
     pub version: Version,
@@ -31,8 +30,6 @@ where
     fn default() -> Self {
         Self {
             method: Method::Get,
-            ip: None,
-            port: None,
             addr: None,
             path: None,
             version: Version::OneDotOne,
@@ -59,20 +56,6 @@ where
         self
     }
 
-    /// Sets the remote host's IP address.
-    #[must_use]
-    pub fn ip(mut self, ip: &str) -> Self {
-        self.ip = Some(ip.to_string());
-        self
-    }
-
-    /// Sets the remote host's port.
-    #[must_use]
-    pub const fn port(mut self, port: u16) -> Self {
-        self.port = Some(port);
-        self
-    }
-
     /// Sets the socket address of the remote server.
     #[must_use]
     pub fn addr(mut self, addr: A) -> Self {
@@ -96,7 +79,7 @@ where
 
     /// Sets a request header field line.
     #[must_use]
-    pub fn insert_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+    pub fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
@@ -188,22 +171,13 @@ where
     /// Builds and returns a new `Client` instance.
     #[allow(clippy::missing_errors_doc)]
     pub fn build(mut self) -> NetResult<Client> {
-        use crate::header::{
-            ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT,
-        };
-
-        let stream = match self.addr.as_ref() {
-            Some(addr) => TcpStream::connect(addr)?,
-            None => match (self.ip.as_ref(), self.port.as_ref()) {
-                (Some(ip), Some(port)) => {
-                    TcpStream::connect((ip.as_str(), *port))?
-                },
-                (_, _) => return Err(IoErrorKind::InvalidInput.into()),
+        let conn = self.addr.as_ref().ok_or(NetError::NotConnected).and_then(
+            |addr| {
+                TcpStream::connect(addr)
+                    .map_err(|_| NetError::NotConnected)
+                    .and_then(Connection::try_from)
             },
-        };
-
-        let reader = NetReader::from(stream.try_clone()?);
-        let writer = NetWriter::from(stream);
+        )?;
 
         if !self.headers.contains(&ACCEPT) {
             self.headers.accept("*/*");
@@ -218,12 +192,11 @@ where
         }
 
         if !self.headers.contains(&HOST) {
-            let remote = reader.get_ref().peer_addr()?;
-            self.headers.host(remote.ip(), remote.port());
+            self.headers.host(&conn.remote_addr.to_string());
         }
 
         if !self.headers.contains(&USER_AGENT) {
-            self.headers.user_agent();
+            self.headers.default_user_agent();
         }
 
         let path = self
@@ -231,24 +204,21 @@ where
             .as_ref()
             .map_or_else(|| String::from("/"), ToString::to_string);
 
+        let request_line = RequestLine {
+            method: self.method,
+            path,
+            version: self.version,
+        };
+
         let req = Some(Request {
-            request_line: RequestLine {
-                method: self.method,
-                path,
-                version: self.version,
-            },
+            request_line,
             headers: self.headers,
             body: self.body,
         });
 
         let res = None;
 
-        Ok(Client {
-            req,
-            res,
-            reader,
-            writer,
-        })
+        Ok(Client { req, res, conn })
     }
 
     /// Sends an HTTP request and then returns a `Client` instance.
@@ -284,13 +254,12 @@ where
     }
 }
 
-/// An HTTP client that can send and receive messages with a remote server.
+/// An HTTP client.
 #[derive(Debug)]
 pub struct Client {
     pub req: Option<Request>,
     pub res: Option<Response>,
-    pub reader: NetReader,
-    pub writer: NetWriter,
+    pub conn: Connection,
 }
 
 impl Display for Client {
@@ -332,30 +301,32 @@ impl Client {
                 "http" => match rest.split_once('/') {
                     // Next "/" after the scheme, if present, starts the
                     // path segment.
-                    Some((addr, path)) if path.is_empty() && addr.contains(':') => {
+                    Some((addr, path))
+                        if path.is_empty() && addr.contains(':') =>
+                    {
                         // Example: http://httpbin.org:80/
                         Ok((addr.to_string(), String::from("/")))
-                    }
+                    },
                     Some((addr, path)) if path.is_empty() => {
                         // Example: http://httpbin.org/
                         Ok((format!("{addr}:80"), String::from("/")))
-                    }
+                    },
                     Some((addr, path)) if addr.contains(':') => {
                         // Example: http://httpbin.org:80/json
                         Ok((addr.to_string(), format!("/{path}")))
-                    }
+                    },
                     Some((addr, path)) => {
                         // Example: http://httpbin.org/json
                         Ok((format!("{addr}:80"), format!("/{path}")))
-                    }
+                    },
                     None if rest.contains(':') => {
                         // Example: http://httpbin.org:80
                         Ok((rest.to_string(), String::from("/")))
-                    }
+                    },
                     None => {
                         // Example: http://httpbin.org
                         Ok((format!("{rest}:80"), String::from("/")))
-                    }
+                    },
                 },
                 "https" => Err(NetError::Https),
                 _ => Err(NetError::Parse(NetParseError::UriPath)),
@@ -385,20 +356,29 @@ impl Client {
         }
     }
 
+    /// Removes Date header field entries from requests and responses.
+    pub fn remove_date_headers(&mut self) {
+        if let Some(req) = self.req.as_mut() {
+            req.headers.remove(&DATE);
+        }
+
+        if let Some(res) = self.res.as_mut() {
+            res.headers.remove(&DATE);
+        }
+    }
+
     /// Sends an HTTP request to a remote host.
     #[allow(clippy::missing_errors_doc)]
     pub fn send(&mut self) -> NetResult<()> {
         self.req
             .as_mut()
             .ok_or(NetError::NotConnected)
-            .and_then(|req| req.send(&mut self.writer))?;
-
-        Ok(())
+            .and_then(|req| self.conn.writer.send_request(req))
     }
 
     /// Receives an HTTP response from the remote host.
     #[allow(clippy::missing_errors_doc)]
     pub fn recv(&mut self) {
-        self.res = self.reader.recv_response().ok();
+        self.res = self.conn.reader.recv_response().ok();
     }
 }

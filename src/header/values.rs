@@ -27,6 +27,12 @@ impl FromStr for HeaderValue {
     }
 }
 
+impl From<&str> for HeaderValue {
+    fn from(s: &str) -> Self {
+        Self(Vec::from(s.trim()))
+    }
+}
+
 impl From<String> for HeaderValue {
     fn from(s: String) -> Self {
         Self(s.into_bytes())

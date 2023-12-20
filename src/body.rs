@@ -1,10 +1,10 @@
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::path::Path;
 use std::str;
 
-use crate::{NetError, NetResult, Target};
 use crate::util::get_extension;
+use crate::{NetError, NetResult, Target};
 
 /// A respresentation of the message body.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -24,20 +24,39 @@ impl Default for Body {
     }
 }
 
+impl Display for Body {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Empty | Self::Bytes(_) | Self::Favicon(_) => {
+                write!(f, "")
+            },
+            Self::Text(ref buf) | Self::Html(ref buf) | Self::Xml(ref buf)
+            | Self::Json(ref buf) => {
+                let body = String::from_utf8_lossy(buf);
+                write!(f, "{}", body.trim())
+            },
+        }
+    }
+}
+
 impl Debug for Body {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty => write!(f, "Body::Empty"),
             Self::Bytes(_) => write!(f, "Body::Bytes(...)"),
             Self::Favicon(_) => write!(f, "Body::Favicon(...)"),
-            Self::Xml(buf) => write!(f, "Body::Xml({})",
-                String::from_utf8_lossy(buf)),
-            Self::Text(buf) => write!(f, "Body::Text({})",
-                String::from_utf8_lossy(buf)),
-            Self::Html(buf) => write!(f, "Body::Html({})",
-                String::from_utf8_lossy(buf)),
-            Self::Json(buf) => write!(f, "Body::Json({})",
-                String::from_utf8_lossy(buf)),
+            Self::Xml(buf) => {
+                write!(f, "Body::Xml({})", String::from_utf8_lossy(buf))
+            },
+            Self::Text(buf) => {
+                write!(f, "Body::Text({})", String::from_utf8_lossy(buf))
+            },
+            Self::Html(buf) => {
+                write!(f, "Body::Html({})", String::from_utf8_lossy(buf))
+            },
+            Self::Json(buf) => {
+                write!(f, "Body::Json({})", String::from_utf8_lossy(buf))
+            },
         }
     }
 }
@@ -48,10 +67,13 @@ impl TryFrom<Target> for Body {
     fn try_from(target: Target) -> NetResult<Self> {
         match target {
             Target::Empty | Target::NotFound => Ok(Self::Empty),
-            Target::Xml(bytes) => Ok(Self::Xml(bytes.to_vec())),
-            Target::Text(bytes) => Ok(Self::Text(bytes.to_vec())),
-            Target::Html(bytes) => Ok(Self::Html(bytes.to_vec())),
-            Target::Json(bytes) => Ok(Self::Json(bytes.to_vec())),
+            Target::Shutdown => {
+                Ok(Self::Text("Server is shutting down.".into()))
+            },
+            Target::Xml(s) => Ok(Self::Xml(s.into())),
+            Target::Text(s) => Ok(Self::Text(s.into())),
+            Target::Html(s) => Ok(Self::Html(s.into())),
+            Target::Json(s) => Ok(Self::Json(s.into())),
             Target::Bytes(bytes) => Ok(Self::Bytes(bytes.to_vec())),
             Target::File(path) => Ok(Self::from_filepath(path)?),
             Target::Favicon(path) => Ok(Self::from_filepath(path)?),
@@ -105,8 +127,10 @@ impl Body {
     /// Returns true if the body type is `Body::Favicon`.
     #[must_use]
     pub const fn is_printable(&self) -> bool {
-        matches!(self, Self::Text(_) | Self::Html(_) | Self::Json(_)
-            | Self::Xml(_))
+        matches!(
+            self,
+            Self::Text(_) | Self::Html(_) | Self::Json(_) | Self::Xml(_)
+        )
     }
 
     /// Returns a reference to the data contained within the `Body`
@@ -115,9 +139,12 @@ impl Body {
     pub fn get_ref(&self) -> Option<&[u8]> {
         match self {
             Self::Empty => None,
-            Self::Bytes(buf) | Self::Favicon(buf) | Self::Text(buf)
-                | Self::Html(buf) | Self::Json(buf)
-                | Self::Xml(buf) => Some(buf.as_slice()),
+            Self::Bytes(buf)
+            | Self::Favicon(buf)
+            | Self::Text(buf)
+            | Self::Html(buf)
+            | Self::Json(buf)
+            | Self::Xml(buf) => Some(buf.as_slice()),
         }
     }
 

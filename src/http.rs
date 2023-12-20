@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 
-use crate::{NetError, NetResult, NetParseError};
+use crate::{NetError, NetParseError, NetResult};
 
 /// HTTP methods.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -102,9 +102,10 @@ impl FromStr for Status {
             .split_once(' ')
             .ok_or(NetError::Parse(NetParseError::StatusCode))
             .and_then(|(code, _msg)| {
-                let status_code = code.parse::<u16>()
+                let code = code
+                    .parse::<u16>()
                     .map_err(|_| NetError::Parse(NetParseError::StatusCode))?;
-                Ok(Self(status_code))
+                Self::try_from(code)
             })
     }
 }

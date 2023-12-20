@@ -18,15 +18,19 @@ impl StdError for NetParseError {}
 
 impl Display for NetParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "Could not parse the {}", match self {
-            Self::Body => "message body",
-            Self::Header => "headers",
-            Self::Method => "HTTP method",
-            Self::StatusCode => "status code",
-            Self::StatusLine => "status line",
-            Self::UriPath => "URI path",
-            Self::Version => "HTTP version",
-        })
+        write!(
+            f,
+            "Could not parse the {}",
+            match self {
+                Self::Body => "message body",
+                Self::Header => "headers",
+                Self::Method => "HTTP method",
+                Self::StatusCode => "status code",
+                Self::StatusLine => "status line",
+                Self::UriPath => "URI path",
+                Self::Version => "HTTP version",
+            }
+        )
     }
 }
 
@@ -95,11 +99,13 @@ impl From<NetError> for IoError {
     fn from(err: NetError) -> Self {
         match err {
             NetError::Https => Self::new(IoErrorKind::Unsupported, err),
-            NetError::NotConnected | NetError::Other(_)
-                | NetError::UnexpectedEof
-                | NetError::Parse(_) => Self::new(IoErrorKind::Other, err),
-            NetError::Read(kind) | NetError::Write(kind)
-                | NetError::Io(kind) => Self::from(kind),
+            NetError::NotConnected
+            | NetError::Other(_)
+            | NetError::UnexpectedEof
+            | NetError::Parse(_) => Self::new(IoErrorKind::Other, err),
+            NetError::Read(kind)
+            | NetError::Write(kind)
+            | NetError::Io(kind) => Self::from(kind),
         }
     }
 }
