@@ -331,25 +331,33 @@ impl RequestLine {
         self.version
     }
 
+    // Common logic for the to_plain_string and to_color_string functions.
+    fn string_helper(&self, use_color: bool) -> String {
+        const YLW: &str = "\x1b[95m";
+        const CLR: &str = "\x1b[0m";
+
+        if use_color {
+            format!(
+                "{YLW}{} {} {}{CLR}\n",
+                &self.method,
+                &self.path,
+                &self.version
+            )
+        } else {
+            format!("{self}\n")
+        }
+    }
+
     /// Returns the `RequestLine` as a `String` with plain formatting.
     #[must_use]
-    pub fn to_string_plain(&self) -> String {
-        self.to_string()
+    pub fn to_plain_string(&self) -> String {
+        self.string_helper(false)
     }
 
     /// Returns the `RequestLine` as a `String` with color formatting.
     #[must_use]
-    pub fn to_string_color(&self) -> String {
-        const PURP: &str = "\x1b[95m";
-        const CYAN: &str = "\x1b[96m";
-        const CLR: &str = "\x1b[0m";
-
-        format!(
-            "{CYAN}{}{CLR} {PURP}{}{CLR} {CYAN}{}{CLR}",
-            &self.method,
-            &self.path,
-            &self.version
-        )
+    pub fn to_color_string(&self) -> String {
+        self.string_helper(true)
     }
 }
 
@@ -405,7 +413,7 @@ impl Request {
 
     /// Returns the `RequestLine` for this `Request`.
     #[must_use]
-    pub fn request_line(&self) -> &RequestLine {
+    pub const fn request_line(&self) -> &RequestLine {
         &self.request_line
     }
 

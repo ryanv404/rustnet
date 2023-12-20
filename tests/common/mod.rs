@@ -23,7 +23,7 @@ macro_rules! run_server_tests {
                     "--bin",
                     "server",
                     "--",
-                    "--shutdown",
+                    "--shutdown-route",
                     "--",
                     "127.0.0.1:7878"
                 ])

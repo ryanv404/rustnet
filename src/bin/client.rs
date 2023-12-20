@@ -1,79 +1,123 @@
 use std::env;
+use std::io::{stdout, Write};
 
-use rustnet::{Client, ClientCli, Method, NetResult};
+use rustnet::{Client, ClientCli, NetResult};
 
-mod client_tui;
-use client_tui::Browser;
-
-const RED: &str = "\x1b[91m";
-const GRN: &str = "\x1b[92m";
-const PURP: &str = "\x1b[95m";
-const CLR: &str = "\x1b[0m";
+mod tui;
+use tui::Tui;
 
 #[rustfmt::skip]
 fn main() -> NetResult<()> {
     // Handle CLI arguments.
-    let cli = ClientCli::parse(env::args());
+    let cli = ClientCli::parse_args(env::args())?;
 
     // Start TUI if selected.
     if cli.tui {
-        return Browser::run_client_tui()
+        Tui::run();
+        return Ok(());
     }
 
-    // Parse the URI argument.
-    let (addr, path) = Client::parse_uri(cli.uri)?;
-
-    // Print request without sending.
-    if cli.request {
-        todo!();
-        return;
-    }
-
-    // Create a client and send a request.
+    // Create an HTTP client.
     let mut client = Client::builder()
-        .addr(&addr)
         .method(cli.method)
-        .path(cli.path.as_ref().unwrap_or(&path))
-        .send()?;
+        .addr(&cli.addr)
+        .path(&cli.path)
+        .build()?;
 
-    // Receive response.
-    client.recv();
+    // Send request and receive response.
+    if cli.do_send {
+        client.send()?;
+        client.recv();
+    }
 
     // Ignore Date headers.
     if cli.no_dates {
         client.remove_date_headers();
     }
 
-    let mut w = io::stdout().lock().unwrap();
+    let mut w = stdout().lock();
 
+    // Handle request output.
     if let Some(req) = client.req.as_ref() {
-        if cli.output_req_line {
-            writeln!(&mut w, "{}", req.request_line.to_string_plain())?;
+        match (cli.out_req_line, cli.use_color) {
+            (true, true) => {
+                w.write_all(req.request_line.to_color_string().as_bytes())?;
+            },
+            (true, false) => {
+                w.write_all(req.request_line.to_plain_string().as_bytes())?;
+            },
+            (_, _) => {},
         }
 
-        if cli.output_req_headers {
-            writeln!(&mut w, "{}", req.headers.to_string_plain())?;
+        match (cli.out_req_headers, cli.use_color) {
+            (true, true) => {
+                w.write_all(req.headers.to_color_string().as_bytes())?;
+            },
+            (true, false) => {
+                w.write_all(req.headers.to_plain_string().as_bytes())?;
+            },
+            (_, _) => {},
         }
 
-        if cli.output_req_body && req.body.is_printable() {
-            writeln!(&mut w, "{}", &req.body)?;
+        if cli.out_req_body && req.body.is_printable() {
+            if cli.out_req_headers {
+                w.write_all(b"\n")?;
+            }
+
+            w.write_all(req.body.as_bytes())?;
+            w.write_all(b"\n")?;
         }
     }
 
+    if needs_a_newline(&cli) {
+        w.write_all(b"\n")?;
+    }
+
+    // Handle response output.
     if let Some(res) = client.res.as_ref() {
-        if cli.output_status_line {
-            writeln!(&mut w, "{}", req.status_line.to_string_plain())?;
+        match (cli.out_status_line, cli.use_color) {
+            (true, true) => {
+                w.write_all(res.status_line.to_color_string().as_bytes())?;
+            },
+            (true, false) => {
+                w.write_all(res.status_line.to_plain_string().as_bytes())?;
+            },
+            (_, _) => {},
         }
 
-        if cli.output_res_headers {
-            writeln!(&mut w, "{}", res.headers.to_string_plain())?;
+        match (cli.out_res_headers, cli.use_color) {
+            (true, true) => {
+                w.write_all(res.headers.to_color_string().as_bytes())?;
+            },
+            (true, false) => {
+                w.write_all(res.headers.to_plain_string().as_bytes())?;
+            },
+            (_, _) => {},
         }
 
-        if cli.output_res_body && res.body.is_printable() {
-            writeln!(&mut w, "{}", &res.body)?;
+        if cli.out_res_body && res.body.is_printable() {
+            if cli.out_res_headers {
+                w.write_all(b"\n")?;
+            }
+
+            w.write_all(res.body.as_bytes())?;
+            w.write_all(b"\n")?;
         }
     }
 
+    w.write_all(b"\n")?;
     w.flush()?;
     Ok(())
+}
+
+fn needs_a_newline(cli: &ClientCli) -> bool {
+    // A request component is output.
+    if cli.out_req_line || cli.out_req_headers || cli.out_req_body {
+        // And a response component is output.
+        if cli.out_status_line || cli.out_res_headers || cli.out_res_body {
+            return true;
+        }
+    }
+
+    false
 }

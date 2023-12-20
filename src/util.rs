@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::{NetError, NetParseError, NetResult};
+
 // Trims ASCII whitespace bytes from both ends of a slice of bytes.
 #[must_use]
 pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
@@ -57,6 +59,76 @@ pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
 #[must_use]
 pub fn get_extension(path: &Path) -> Option<&str> {
     path.extension().and_then(|ext| ext.to_str())
+}
+
+/// Parses a string slice into a host address and a URI path.
+#[allow(clippy::missing_errors_doc)]
+pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
+    let uri = uri.trim();
+
+    if let Some((scheme, rest)) = uri.split_once("://") {
+        // If "://" is present, we expect a URI like "http://httpbin.org".
+        if scheme.is_empty() || rest.is_empty() {
+            return Err(NetError::Parse(NetParseError::UriPath));
+        }
+
+        match scheme {
+            "http" => match rest.split_once('/') {
+                // Next "/" after the scheme, if present, starts the
+                // path segment.
+                Some((addr, path))
+                    if path.is_empty() && addr.contains(':') =>
+                {
+                    // Example: http://httpbin.org:80/
+                    Ok((addr.to_string(), String::from("/")))
+                },
+                Some((addr, path)) if path.is_empty() => {
+                    // Example: http://httpbin.org/
+                    Ok((format!("{addr}:80"), String::from("/")))
+                },
+                Some((addr, path)) if addr.contains(':') => {
+                    // Example: http://httpbin.org:80/json
+                    Ok((addr.to_string(), format!("/{path}")))
+                },
+                Some((addr, path)) => {
+                    // Example: http://httpbin.org/json
+                    Ok((format!("{addr}:80"), format!("/{path}")))
+                },
+                None if rest.contains(':') => {
+                    // Example: http://httpbin.org:80
+                    Ok((rest.to_string(), String::from("/")))
+                },
+                None => {
+                    // Example: http://httpbin.org
+                    Ok((format!("{rest}:80"), String::from("/")))
+                },
+            },
+            "https" => Err(NetError::Https),
+            _ => Err(NetError::Parse(NetParseError::UriPath)),
+        }
+    } else if let Some((addr, path)) = uri.split_once('/') {
+        if addr.is_empty() {
+            return Err(NetError::Parse(NetParseError::UriPath));
+        }
+
+        let addr = if addr.contains(':') {
+            addr.to_string()
+        } else {
+            format!("{addr}:80")
+        };
+
+        let path = if path.is_empty() {
+            String::from("/")
+        } else {
+            format!("/{path}")
+        };
+
+        Ok((addr, path))
+    } else if uri.contains(':') {
+        Ok((uri.to_string(), String::from("/")))
+    } else {
+        Ok((format!("{uri}:80"), String::from("/")))
+    }
 }
 
 // pub fn is_file(path: &Path) -> bool {

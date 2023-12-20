@@ -4,7 +4,7 @@ use rustnet::{NetResult, Router, Server, ServerCli};
 
 fn main() -> NetResult<()> {
     // Handle command-line options.
-    let cli = ServerCli::parse(env::args());
+    let cli = ServerCli::parse_args(env::args());
 
     // Add some static HTML routes and handle Error 404 situations.
     let router = Router::new()
@@ -37,10 +37,9 @@ fn main() -> NetResult<()> {
         .apply();
 
     // Start the HTTP server.
-    let server = Server::new()
+    let server = Server::http(&cli.addr)
         .log(cli.log)
         .router(router)
-        .addr(&cli.addr)
         .add_shutdown_route(cli.shutdown_route)
         .start()?;
 

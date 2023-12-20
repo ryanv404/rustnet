@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::header::names::STANDARD_HEADERS;
-use crate::util::trim_whitespace_bytes;
+use crate::util::{parse_uri, trim_whitespace_bytes};
 use crate::{
     Body, Client, Connection, Header, HeaderKind, HeaderName, HeaderValue,
     Headers, Method, NetError, NetParseError, NetReader, NetResult, NetWriter,
@@ -155,13 +155,13 @@ mod parse {
         macro_rules! test_uri_parser {
             ( $(SHOULD_ERROR: $uri:literal;)+ ) => {{
                 $(
-                    let parse_result = Client::parse_uri($uri);
+                    let parse_result = parse_uri($uri);
                     assert!(parse_result.is_err());
                 )+
             }};
             ( $($uri:literal: $addr:literal, $path:literal;)+ ) => {{
                 $(
-                    let (test_addr, test_path) = Client::parse_uri($uri).unwrap();
+                    let (test_addr, test_path) = parse_uri($uri).unwrap();
                     assert_eq!(test_addr, $addr);
                     assert_eq!(test_path, $path);
                 )+
@@ -209,7 +209,7 @@ mod many_headers {
         expected_hdrs.host("example.com");
         expected_hdrs.user_agent("xh/0.19.3");
         expected_hdrs.accept_encoding("gzip, deflate, br");
-        expected_hdrs.header("Pineapple", "pizza");
+        expected_hdrs.add_header("Pineapple", "pizza");
 
         let mut test_hdrs = Headers::new();
 

@@ -48,10 +48,9 @@ impl From<&str> for HeaderName {
         let bytes = s.as_bytes();
 
         Self {
-            inner: match StandardHeader::from_bytes(bytes) {
-                Some(std) => HeaderKind::Standard(std),
-                None => HeaderKind::Custom(Vec::from(s)),
-            }
+            inner: StandardHeader::from_bytes(bytes).map_or_else(
+                || HeaderKind::Custom(Vec::from(s)),
+                HeaderKind::Standard)
         }
     }
 }

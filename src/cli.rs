@@ -1,14 +1,15 @@
 use std::env::Args;
 use std::process;
 
-use crate::{Headers, Method};
+use crate::{Headers, Method, NetResult};
+use crate::util;
 
 const RED: &str = "\x1b[91m";
 const GRN: &str = "\x1b[92m";
 const CLR: &str = "\x1b[0m";
 
 /// Contains the parsed server command line arguments.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerCli {
     pub log: bool,
     pub shutdown_route: bool,
@@ -48,7 +49,7 @@ impl ServerCli {
 
     /// Parses command line arguments into a `ServerCli` object.
     #[must_use]
-    pub fn parse(args: Args) -> Self {
+    pub fn parse_args(args: Args) -> Self {
         let mut cli = Self::new();
         let mut args = args.skip(1);
 
@@ -86,43 +87,44 @@ impl ServerCli {
 }
 
 /// Contains the parsed client command line arguments.
-#[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientCli {
     pub method: Method,
-    pub path: Option<&'static str>,
-    pub uri: &'static str,
+    pub path: String,
+    pub addr: String,
     pub headers: Headers,
-    pub data: Option<&'static str>,
-    pub tui: bool,
-    pub plain: bool,
+    pub data: Option<String>,
+    pub do_send: bool,
+    pub use_color: bool,
     pub no_dates: bool,
-    pub no_send: bool,
-    pub request_line: bool,
-    pub req_headers: bool,
-    pub req_body: bool,
-    pub status_line: bool,
-    pub res_headers: bool,
-    pub res_body: bool,
+    pub tui: bool,
+    pub out_req_line: bool,
+    pub out_req_headers: bool,
+    pub out_req_body: bool,
+    pub out_status_line: bool,
+    pub out_res_headers: bool,
+    pub out_res_body: bool,
 }
 
 impl Default for ClientCli {
     fn default() -> Self {
         Self {
             method: Method::Get,
-            path: None,
-            uri: "",
+            path: String::new(),
+            addr: String::new(),
             headers: Headers::new(),
             data: None,
-            tui: false,
-            plain: false,
+            do_send: true,
+            use_color: true,
             no_dates: false,
-            no_send: false,
-            request_line: false,
-            req_headers: false,
-            req_body: false,
-            status_line: true,
-            res_headers: true,
-            res_body: true
+            tui: false,
+            out_req_line: false,
+            out_req_headers: false,
+            out_req_body: false,
+            out_status_line: true,
+            out_res_headers: true,
+            out_res_body: true
         }
     }
 }
@@ -156,27 +158,25 @@ impl ClientCli {
     pub fn print_help(&self) {
         eprintln!(
             "\
-{GRN}USAGE:{CLR} http_client [OPTIONS] <URI>\n
+{GRN}USAGE:{CLR}
+    http_client [OPTIONS] <URI>\n
 {GRN}ARGUMENT:{CLR}
-    URI    An HTTP URI (e.g. \"httpbin.org/json\")\n.
+    URI   An HTTP URI (e.g. \"httpbin.org/json\")\n
 {GRN}OPTIONS:{CLR}
-    --body              Output the response body (same as --output=\"b\").
-    --data DATA         Send DATA in the request body.
-    --header NAME:VALUE Add a header to the request.
-    --help              Displays this help message.
+    --body              Only output the response body.
+    --data DATA         Add DATA to the request body.
+    --header HEADER     Add a header with format NAME:VALUE to the request.
+    --help              Display this help message.
     --method METHOD     Use METHOD as the request method (default: \"GET\").
-    --minimal           Outputs the request line and the response's status
-                        line (same as --output=\"Rs\").
-    --no-dates          Remove Date headers from output (useful during testing).
-    --output FORMAT     Set the output style (default: --output=\"shb\").
-                        See the FORMAT options below.
+    --minimal           Only output the request line and status line.
+    --no-dates          Remove Date headers from the output (useful during testing).
+    --output FORMAT     Set the output to FORMAT (default: --output=\"shb\").
     --path PATH         Use PATH as the URI path (default: \"/\").
     --plain             Do not colorize output.
-    --request           Output the full request but do not send it.
-    --tui               Starts the client TUI.
-    --verbose           Outputs full requests and responses (same as 
-                        --output=\"RHBshb\").\n
-{GRN}FORMAT:{CLR}
+    --request           Output the full request without sending it.
+    --tui               Start the client TUI.
+    --verbose           Output the full request and response.\n
+{GRN}FORMAT OPTIONS:{CLR}
     R = request line
     H = request headers
     B = request body
@@ -184,60 +184,60 @@ impl ClientCli {
     h = response headers
     b = response body
     c = client tests
-    z = server tests"
-        );
+    z = server tests\n");
 
         process::exit(0);
     }
 
     pub fn handle_output_arg(&mut self, arg: &str) {
+        // Disable default output style first.
+        self.out_status_line = false;
+        self.out_res_headers = false;
+        self.out_res_body = false;
+
         arg.chars().for_each(|c| match c {
-            'R' => self.request_line = true,
-            'H' => self.req_headers = true,
-            'B' => self.req_body = true,
-            's' => self.status_line = true,
-            'h' => self.res_headers = true,
-            'b' => self.res_body = true,
+            'R' => self.out_req_line = true,
+            'H' => self.out_req_headers = true,
+            'B' => self.out_req_body = true,
+            's' => self.out_status_line = true,
+            'h' => self.out_res_headers = true,
+            'b' => self.out_res_body = true,
             'c' => {
-                self.request_line = true;
-                self.req_headers = true;
-                self.req_body = false;
-                self.status_line = false;
-                self.res_headers = false;
-                self.res_body = false;
-                self.plain = true;
+                self.out_req_line = true;
+                self.out_req_headers = true;
+                self.out_req_body = false;
+                self.out_status_line = true;
+                self.out_res_headers = true;
+                self.out_res_body = false;
+                self.use_color = false;
                 self.no_dates = true;
-                return;
             },
             'z' => {
-                self.request_line = false;
-                self.req_headers = false;
-                self.req_body = false;
-                self.status_line = true;
-                self.res_headers = true;
-                self.res_body = true;
-                self.plain = true;
+                self.out_req_line = false;
+                self.out_req_headers = false;
+                self.out_req_body = false;
+                self.out_status_line = true;
+                self.out_res_headers = true;
+                self.out_res_body = true;
+                self.use_color = false;
                 self.no_dates = true;
-                return;
             },
             'r' => {
-                self.request_line = true;
-                self.req_headers = true;
-                self.req_body = true;
-                self.status_line = false;
-                self.res_headers = false;
-                self.res_body = false;
-                self.no_send = true;
-                return;
+                self.out_req_line = true;
+                self.out_req_headers = true;
+                self.out_req_body = true;
+                self.out_status_line = false;
+                self.out_res_headers = false;
+                self.out_res_body = false;
+                self.do_send = false;
             },
             '*' => {
-                self.request_line = true;
-                self.req_headers = true;
-                self.req_body = true;
-                self.status_line = true;
-                self.res_headers = true;
-                self.res_body = true;
-                return;
+                self.out_req_line = true;
+                self.out_req_headers = true;
+                self.out_req_body = true;
+                self.out_status_line = true;
+                self.out_res_headers = true;
+                self.out_res_body = true;
             },
             // Ignore quotation marks.
             '\'' | '"' => {},
@@ -246,36 +246,45 @@ impl ClientCli {
     }
 
     /// Parses command line arguments into a `ClientCli` object.
-    #[must_use]
-    pub fn parse(args: Args) -> Self {
+    #[allow(clippy::missing_errors_doc)]
+    pub fn parse_args(args: Args) -> NetResult<Self> {
         let mut cli = Self::new();
         let mut args = args.skip(1);
 
-        while let Some(opt) = args.next().as_deref() {
-            match opt {
+        while let Some(ref opt) = args.next() {
+            match opt.as_str() {
                 // End of options flag.
                 "--" => {
-                    let optarg = args.next();
-                    if let Some(uri) = optarg.as_deref() {
-                        cli.uri = uri;
-                    }
+                    if let Some(ref uri) = args.next() {
+                        // Parse the URI argument.
+                        let (addr, path) = util::parse_uri(uri)?;
 
+                        cli.addr = addr;
+
+                        if cli.path.is_empty() {
+                            cli.path = path;
+                        }
+                    }
                     break;
                 },
                 // Print help message.
                 "--help" => cli.print_help(),
+                // Only print request lines and status lines.
+                "--minimal" => cli.handle_output_arg("Rs"),
                 // Only print response bodies.
                 "--body" => cli.handle_output_arg("b"),
                 // Use the TUI.
-                "--tui" => cli.tui = true,
+                "--tui" => {
+                    cli.tui = true;
+                    break;
+                },
                 // Do not colorize.
-                "--plain" => cli.plain = true,
+                "--plain" => cli.use_color = false,
                 // Remove Date headers before printing.
                 "--no-dates" => cli.no_dates = true,
                 // Add a request header.
                 "--header" => {
-                    let optarg = args.next();
-                    if let Some(header) = optarg.as_deref() {
+                    if let Some(ref header) = args.next() {
                         if let Some((name, value)) = header.split_once(':') {
                             cli.headers.add_header(name, value);
                         } else {
@@ -287,17 +296,15 @@ impl ClientCli {
                 },
                 // Set request body data.
                 "--data" => {
-                    let optarg = args.next();
-                    if let Some(data) = optarg.as_deref() {
-                        cli.data = Some(data);
+                    if let Some(ref data) = args.next() {
+                        cli.data = Some(data.to_string());
                     } else {
                         cli.handle_missing_arg("--data");
                     }
                 },
                 // Set request method.
                 "--method" => {
-                    let optarg = args.next();
-                    if let Some(method) = optarg.as_ref() {
+                    if let Some(ref method) = args.next() {
                         let method = method.to_ascii_uppercase();
 
                         if let Ok(custom_method) = method.parse::<Method>() {
@@ -311,17 +318,15 @@ impl ClientCli {
                 },
                 // Path component of the requested HTTP URI.
                 "--path" => {
-                    let optarg = args.next();
-                    if let Some(path) = optarg.as_deref() {
-                        cli.path = Some(path);
+                    if let Some(ref path) = args.next() {
+                        cli.path = path.to_string();
                     } else {
                         cli.handle_missing_arg("--path");
                     }
                 },
                 // Set the output style.
                 "--output" => {
-                    let optarg = args.next();
-                    if let Some(format_str) = optarg.as_deref() {
+                    if let Some(ref format_str) = args.next() {
                         cli.handle_output_arg(format_str);
                     } else {
                         cli.handle_missing_arg("--output");
@@ -335,17 +340,22 @@ impl ClientCli {
                 unk if unk.starts_with("--") => cli.handle_unknown_opt(unk),
                 // First non-option argument should be the URI argument.
                 uri => {
-                    cli.uri = uri;
+                    let (addr, path) = util::parse_uri(uri)?;
+                    if cli.path.is_empty() {
+                        cli.path = path;
+                    }
+
+                    cli.addr = addr;
                     break;
                 },
             }
         }
 
-        if cli.uri.is_empty() {
+        if cli.addr.is_empty() && !cli.tui {
             eprintln!("{RED}Missing required URI argument.{CLR}\n");
             process::exit(1);
         }
 
-        cli
+        Ok(cli)
     }
 }

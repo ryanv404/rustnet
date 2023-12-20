@@ -265,31 +265,28 @@ impl StatusLine {
         self.status.code()
     }
 
-    /// Returns the `Status` reason phrase.
-    #[must_use]
-    pub const fn status_msg(&self) -> &'static str {
-        self.status.msg()
+    // Common logic for the to_plain_string and to_color_string functions.
+    fn string_helper(self, use_color: bool) -> String {
+        const PURP: &str = "\x1b[95m";
+        const CLR: &str = "\x1b[0m";
+
+        if use_color {
+            format!("{PURP}{} {}{CLR}\n", &self.version, &self.status)
+        } else {
+            format!("{} {}\n", &self.version, &self.status)
+        }
     }
 
     /// Returns the `StatusLine` as a `String` with plain formatting.
     #[must_use]
-    pub fn to_string_plain(&self) -> String {
-        self.to_string()
+    pub fn to_plain_string(&self) -> String {
+        self.string_helper(false)
     }
 
     /// Returns the `StatusLine` as a `String` with color formatting.
     #[must_use]
-    pub fn to_string_color(&self) -> String {
-        const RED: &str = "\x1b[91m";
-        const GRN: &str = "\x1b[92m";
-        const CYAN: &str = "\x1b[96m";
-        const CLR: &str = "\x1b[0m";
-
-        if matches!(self.status.code(), 100..=399) {
-            format!("{CYAN}{}{CLR} {GRN}{}{CLR}", &self.version, &self.status)
-        } else {
-            format!("{CYAN}{}{CLR} {RED}{}{CLR}", &self.version, &self.status)
-        }
+    pub fn to_color_string(&self) -> String {
+        self.string_helper(true)
     }
 }
 

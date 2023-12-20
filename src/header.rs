@@ -122,13 +122,13 @@ impl Headers {
     }
 
     /// Inserts a Host header with the value "ip:port".
-    pub fn host(&mut self, value: &str) {
-        self.insert(HOST, value.into());
+    pub fn host(&mut self, host: &str) {
+        self.insert(HOST, host.into());
     }
 
     /// Inserts the default User-Agent header.
-    pub fn user_agent(&mut self, value: &str) {
-        self.insert(USER_AGENT, value.into());
+    pub fn user_agent(&mut self, agent: &str) {
+        self.insert(USER_AGENT, agent.into());
     }
 
     /// Inserts the default User-Agent header.
@@ -138,13 +138,13 @@ impl Headers {
     }
 
     /// Inserts an Accept header with the given value.
-    pub fn accept(&mut self, value: &str) {
-        self.insert(ACCEPT, value.into());
+    pub fn accept(&mut self, accepted: &str) {
+        self.insert(ACCEPT, accepted.into());
     }
 
     /// Inserts an Accept-Encoding header with the given value.
-    pub fn accept_encoding(&mut self, value: &str) {
-        self.insert(ACCEPT_ENCODING, value.into());
+    pub fn accept_encoding(&mut self, encoding: &str) {
+        self.insert(ACCEPT_ENCODING, encoding.into());
     }
 
     /// Inserts the default Server header.
@@ -153,9 +153,14 @@ impl Headers {
         self.insert(SERVER, server.into());
     }
 
+    /// Inserts a Server header with the given value.
+    pub fn server(&mut self, server: &str) {
+        self.insert(SERVER, server.into());
+    }
+
     /// Inserts a Connection header with the given value.
-    pub fn connection(&mut self, value: &str) {
-        self.insert(CONNECTION, value.into());
+    pub fn connection(&mut self, conn: &str) {
+        self.insert(CONNECTION, conn.into());
     }
 
     /// Inserts a Content-Length header with the given value.
@@ -164,36 +169,17 @@ impl Headers {
     }
 
     /// Inserts a Content-Type header with the given value.
-    pub fn content_type(&mut self, value: &str) {
-        self.insert(CONTENT_TYPE, value.into());
+    pub fn content_type(&mut self, content_type: &str) {
+        self.insert(CONTENT_TYPE, content_type.into());
     }
 
     /// Inserts a Cache-Control header with the given value.
-    pub fn cache_control(&mut self, value: &str) {
-        self.insert(CACHE_CONTROL, value.into());
+    pub fn cache_control(&mut self, directive: &str) {
+        self.insert(CACHE_CONTROL, directive.into());
     }
 
-    /// Returns the headers as a `String` with plain formatting.
-    #[must_use]
-    pub fn to_string_plain(&self) -> String {
-        let mut buf = String::new();
-
-        if !self.is_empty() {
-            self.0.iter().for_each(|(name, value)| {
-                let header = format!("{name}: {value}\n");
-                buf.push_str(&header);
-            });
-
-            // Remove final newline.
-            buf.pop();
-        }
-
-        buf
-    }
-
-    /// Returns the headers as a `String` with color formatting.
-    #[must_use]
-    pub fn to_string_color(&self) -> String {
+    // Common logic for the to_plain_string and to_color_string functions.
+    fn string_helper(&self, use_color: bool) -> String {
         const BLU: &str = "\x1b[94m";
         const YLW: &str = "\x1b[96m";
         const CLR: &str = "\x1b[0m";
@@ -202,14 +188,26 @@ impl Headers {
 
         if !self.is_empty() {
             self.0.iter().for_each(|(name, value)| {
-                let header = format!("{BLU}{name}{CLR}: {YLW}{value}{CLR}\n");
-                buf.push_str(&header);
+                if use_color {
+                    buf.push_str(&format!("{BLU}{name}{CLR}: {YLW}{value}{CLR}\n"));
+                } else {
+                    buf.push_str(&format!("{name}: {value}\n"));
+                }
             });
-
-            // Remove final newline.
-            buf.pop();
         }
 
         buf
+    }
+
+    /// Returns the headers as a `String` with plain formatting.
+    #[must_use]
+    pub fn to_plain_string(&self) -> String {
+        self.string_helper(false)
+    }
+
+    /// Returns the headers as a `String` with color formatting.
+    #[must_use]
+    pub fn to_color_string(&self) -> String {
+        self.string_helper(true)
     }
 }
