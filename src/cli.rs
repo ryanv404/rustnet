@@ -69,7 +69,10 @@ impl ServerCli {
     }
 
     /// Parses and inserts a route into the server's router.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    /// 
+    /// Returns an error if parsing of the input into a valid route fails.
     pub fn handle_route(&mut self, route: &str, kind: &str) -> NetResult<()> {
         let mut tokens = route.splitn(2, ':');
 
