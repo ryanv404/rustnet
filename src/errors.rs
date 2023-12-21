@@ -1,15 +1,16 @@
 use std::error::Error as StdError;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::result::Result as StdResult;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetParseError {
     Body,
     Header,
     Method,
     StatusCode,
     StatusLine,
+    TooManyHeaders,
     UriPath,
     Version,
 }
@@ -20,17 +21,24 @@ impl Display for NetParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(
             f,
-            "Could not parse the {}",
+            "Parsing error: {}",
             match self {
-                Self::Body => "message body",
+                Self::Body => "body",
                 Self::Header => "headers",
-                Self::Method => "HTTP method",
+                Self::Method => "method",
                 Self::StatusCode => "status code",
                 Self::StatusLine => "status line",
+                Self::TooManyHeaders => "headers (exceeded max)",
                 Self::UriPath => "URI path",
-                Self::Version => "HTTP version",
+                Self::Version => "version",
             }
         )
+    }
+}
+
+impl Debug for NetParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{self}")
     }
 }
 
@@ -40,7 +48,7 @@ impl From<NetParseError> for IoError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetError {
     Https,
     Io(IoErrorKind),
@@ -57,15 +65,21 @@ impl StdError for NetError {}
 impl Display for NetError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Https => f.write_str("HTTPS is not implemented"),
+            Self::Https => f.write_str("HTTPS not implemented"),
             Self::Io(kind) => write!(f, "I/O error: {kind}"),
-            Self::NotConnected => f.write_str("No active TCP stream found"),
+            Self::NotConnected => f.write_str("No active TCP stream"),
             Self::Other(msg) => write!(f, "Error: {msg}"),
-            Self::Parse(kind) => write!(f, "Parsing error: {kind}"),
+            Self::Parse(kind) => write!(f, "{kind}"),
             Self::Read(kind) => write!(f, "Read error: {kind}"),
-            Self::UnexpectedEof => f.write_str("Received an unexpected EOF"),
+            Self::UnexpectedEof => f.write_str("Received unexpected EOF"),
             Self::Write(kind) => write!(f, "Write error: {kind}"),
         }
+    }
+}
+
+impl Debug for NetError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{self}")
     }
 }
 

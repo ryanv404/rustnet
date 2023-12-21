@@ -18,10 +18,10 @@ pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs,
 {
+    pub is_test: bool,
+    pub do_logging: bool,
     pub addr: Option<A>,
-    pub router: Option<Router>,
-    pub log: bool,
-    pub add_shutdown_route: bool,
+    pub router: Router,
 }
 
 impl<A> Default for ServerBuilder<A>
@@ -30,10 +30,10 @@ where
 {
     fn default() -> Self {
         Self {
+            is_test: false,
+            do_logging: false,
             addr: None,
-            router: None,
-            log: false,
-            add_shutdown_route: false,
+            router: Router::default()
         }
     }
 }
@@ -48,32 +48,31 @@ where
         Self::default()
     }
 
-    /// Sets the server's socket address.
+    /// Sets the local address on which the server listens.
     #[must_use]
     pub fn addr(mut self, addr: A) -> Self {
         self.addr = Some(addr);
         self
     }
 
-    /// Sets the router for the server.
+    /// Adds the given `Router` to the server.
     #[must_use]
     pub fn router(mut self, router: Router) -> Self {
-        self.router = Some(router);
+        self.router = router;
         self
     }
 
     /// Enable logging of new connections to stdout (default: disabled).
     #[must_use]
-    pub const fn log(mut self, do_log: bool) -> Self {
-        self.log = do_log;
+    pub const fn is_test(mut self, is_test: bool) -> Self {
+        self.is_test = is_test;
         self
     }
 
-    /// Set whether to add a route to gracefully shutdown the server
-    /// (default: disabled).
+    /// Enable logging of new connections to stdout (default: disabled).
     #[must_use]
-    pub const fn add_shutdown_route(mut self, do_add: bool) -> Self {
-        self.add_shutdown_route = do_add;
+    pub const fn log_connections(mut self, do_log: bool) -> Self {
+        self.do_logging = do_log;
         self
     }
 
@@ -82,13 +81,7 @@ where
     /// # Errors
     ///
     /// Returns an error if creating the `Listener` fails.
-    pub fn build(mut self) -> NetResult<Server> {
-        let mut router = self.router.take().unwrap_or_default();
-
-        if self.add_shutdown_route {
-            router.mount_shutdown_route();
-        }
-
+    pub fn build(self) -> NetResult<Server> {
         let listener = self
             .addr
             .as_ref()
@@ -96,10 +89,10 @@ where
             .and_then(Listener::bind)?;
 
         let config = ServerConfig {
-            router: Arc::new(router),
-            log: Arc::new(self.log),
-            has_shutdown_route: Arc::new(self.add_shutdown_route),
-            keep_listening: Arc::new(AtomicBool::new(false)),
+            is_test: self.is_test,
+            do_logging: self.do_logging,
+            keep_listening: AtomicBool::new(false),
+            router: self.router
         };
 
         Ok(Server {
@@ -115,6 +108,80 @@ where
     /// Returns an error if building the `Server` instance fails.
     pub fn start(self) -> NetResult<ServerHandle<()>> {
         self.build().map(Server::start)
+    }
+}
+
+/// Contains the configuration options for a `Server`.
+#[derive(Debug)]
+pub struct ServerConfig {
+    pub is_test: bool,
+    pub do_logging: bool,
+    pub keep_listening: AtomicBool,
+    pub router: Router,
+}
+
+impl ServerConfig {
+    /// Logs a message to the terminal on server start up..
+    pub fn log_start_up(&self, addr: &SocketAddr) {
+        if self.do_logging {
+            let ip = addr.ip();
+            let port = addr.port();
+            println!("[SERVER] Listening on {ip}:{port}");
+        }
+    }
+
+    /// Logs a message to the terminal on server shutdown.
+    pub fn log_shutdown(&self, conn: &Connection) {
+        if self.do_logging {
+            let ip = conn.remote_ip();
+            println!("[SERVER] SHUTDOWN received from {ip}");
+        }
+    }
+
+    /// Logs a server error to the terminal.
+    pub fn log_error(&self, err: &NetError) {
+        if self.do_logging {
+            println!("[SERVER] Error: {err}");
+        }
+    }
+
+    /// Logs an incoming request and the response status to the terminal.
+    pub fn log_route(&self, status: u16, route: &Route, conn: &Connection) {
+        if self.do_logging {
+            let ip = conn.remote_ip();
+            println!("[{ip}|{status}] {route}");
+        }
+    }
+
+    /// Sends a 500 status response to the client if there is an error.
+    pub fn send_error(&self, writer: &mut NetWriter, err: &NetError) {
+        self.log_error(err);
+
+        if let Err(err2) = writer.send_error(&err.to_string()) {
+            self.log_error(&err2);
+        }
+    }
+
+    /// Triggers a graceful shutdown of the local server.
+    pub fn shutdown_server(&self, conn: &Connection) {
+        self.log_shutdown(conn);
+
+        self.keep_listening.store(false, Ordering::Relaxed);
+
+        // Briefly connect to ourselves to unblock the listener thread.
+        let timeout = Duration::from_millis(200);
+
+        match TcpStream::connect_timeout(&conn.local_addr, timeout) {
+            Ok(stream) => {
+                if let Err(e) = stream.shutdown(Shutdown::Both) {
+                    self.log_error(&e.into());
+                }
+            },
+            Err(e) => self.log_error(&e.into()),
+        }
+
+        // Give the worker threads some time to shutdown.
+        thread::sleep(timeout);
     }
 }
 
@@ -271,6 +338,17 @@ impl Server {
         ServerBuilder::new().addr(addr)
     }
 
+    /// Returns a test `Server` listening on the given address with a route
+    /// that is used for graceful shutdown of the server.
+    #[must_use]
+    pub fn test<A>(addr: A, mut router: Router) -> ServerBuilder<A>
+    where
+        A: ToSocketAddrs,
+    {
+        router.mount_shutdown_route();
+        ServerBuilder::new().is_test(true).addr(addr).router(router)
+    }
+
     /// Activates the server to start listening on its bound address.
     #[must_use]
     pub fn start(self) -> ServerHandle<()> {
@@ -284,7 +362,7 @@ impl Server {
             config.keep_listening.store(true, Ordering::Relaxed);
 
             // Create a thread pool to handle incoming requests.
-            let pool = ThreadPool::new(NUM_WORKERS, &Arc::clone(&config));
+            let pool = ThreadPool::new(NUM_WORKERS, &config);
 
             while config.keep_listening.load(Ordering::Relaxed) {
                 match listener.accept() {
@@ -323,97 +401,6 @@ impl Server {
     }
 }
 
-#[derive(Debug)]
-pub struct ServerConfig {
-    pub router: Arc<Router>,
-    pub log: Arc<bool>,
-    pub has_shutdown_route: Arc<bool>,
-    pub keep_listening: Arc<AtomicBool>,
-}
-
-impl Clone for ServerConfig {
-    fn clone(&self) -> Self {
-        Self {
-            router: Arc::clone(&self.router),
-            log: Arc::clone(&self.log),
-            has_shutdown_route: Arc::clone(&self.has_shutdown_route),
-            keep_listening: Arc::clone(&self.keep_listening),
-        }
-    }
-}
-
-impl ServerConfig {
-    /// Logs a message to the terminal on server start up..
-    pub fn log_start_up(&self, addr: &SocketAddr) {
-        if *self.log {
-            let ip = addr.ip();
-            let port = addr.port();
-            println!("[SERVER] Listening on {ip}:{port}");
-        }
-    }
-
-    /// Logs a message to the terminal on server shutdown.
-    pub fn log_shutdown(&self, conn: &Connection) {
-        if *self.log {
-            let ip = conn.remote_ip();
-            println!("[SERVER] SHUTDOWN received from {ip}");
-        }
-    }
-
-    /// Logs a server error to the terminal.
-    pub fn log_error(&self, err: &NetError) {
-        if *self.log {
-            println!("[SERVER] Error: {err}");
-        }
-    }
-
-    /// Logs an incoming request and the response status to the terminal.
-    pub fn log_route(&self, status: u16, route: &Route, conn: &Connection) {
-        if *self.log {
-            let ip = conn.remote_ip();
-            println!("[{ip}|{status}] {route}");
-        }
-    }
-
-    /// Sends a 500 status response to the client if there is an error.
-    pub fn send_error(&self, writer: &mut NetWriter, err: &NetError) {
-        self.log_error(err);
-
-        if let Err(err2) = writer.send_error(&err.to_string()) {
-            self.log_error(&err2);
-        }
-    }
-
-    /// Returns true if the `Router` has a shutdown route and the current
-    /// `Route` is the shutdown route.
-    #[must_use]
-    pub fn should_shutdown(&self, route: &Route) -> bool {
-        *self.has_shutdown_route && route.is_shutdown()
-    }
-
-    /// Triggers a graceful shutdown of the local server.
-    pub fn shutdown_server(&self, conn: &Connection) {
-        self.log_shutdown(conn);
-
-        self.keep_listening.store(false, Ordering::Relaxed);
-
-        // Briefly connect to ourselves to unblock the listener thread.
-        let timeout = Duration::from_millis(200);
-
-        match TcpStream::connect_timeout(&conn.local_addr, timeout) {
-            Ok(stream) => {
-                if let Err(e) = stream.shutdown(Shutdown::Both) {
-                    self.log_error(&e.into());
-                }
-            },
-            Err(e) => self.log_error(&e.into()),
-        }
-
-        // Give the worker threads some time to shutdown.
-        thread::sleep(timeout);
-    }
-}
-
 /// Holds a handle to a single worker thread.
 #[derive(Debug)]
 pub struct Worker {
@@ -433,7 +420,9 @@ impl Worker {
         config: Arc<ServerConfig>,
     ) -> Self {
         let handle = thread::spawn(move || {
-            while let Ok(mut conn) = receiver.lock().unwrap().recv() {
+            let rx = receiver.lock().unwrap();
+
+            while let Ok(mut conn) = rx.recv() {
                 let route = match conn.reader.recv_request() {
                     Ok(req) => req.route(),
                     Err(ref err) => {
@@ -445,11 +434,14 @@ impl Worker {
                 let (target, status) = config.router.resolve(&route);
 
                 let mut resp = match Response::from_target(target, status) {
-                    Ok(mut resp) if route.is_head() => {
-                        resp.body = Body::Empty;
+                    Ok(mut resp) => {
+                        // Remove body for HEAD requests.
+                        if route.is_head() {
+                            resp.body = Body::Empty;
+                        }
+
                         resp
                     },
-                    Ok(resp) => resp,
                     Err(ref err) => {
                         config.send_error(&mut conn.writer, err);
                         continue;
@@ -462,7 +454,7 @@ impl Worker {
                 }
 
                 // Check for server shutdown signal
-                if config.should_shutdown(&route) {
+                if config.is_test && route.is_shutdown() {
                     config.shutdown_server(&conn);
                     break;
                 }

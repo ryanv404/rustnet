@@ -101,17 +101,55 @@ impl NetWriter {
         Ok(())
     }
 
-    /// Writes all of the header entries in `Headers` to the underlying
+    /// Writes the request header entries in `Headers` to the underlying
     /// `TcpStream`.
     ///
     /// # Errors
     ///
     /// An error is returned if a problem was encountered while writing the
     /// `Headers` to the `TcpStream`.
-    pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
+    pub fn write_request_headers(&mut self, headers: &mut Headers) -> NetResult<()> {
+        if !headers.contains(&ACCEPT) {
+            headers.insert(ACCEPT, "*/*".into());
+        }
+
+        if !headers.contains(&HOST) {
+            let stream = self.get_ref();
+            let remote = stream.peer_addr()?;
+            headers.host(&remote);
+        }
+
+        if !headers.contains(&USER_AGENT) {
+            headers.user_agent("rustnet/0.1");
+        }
+
         if !headers.is_empty() {
             for (name, value) in &headers.0 {
-                self.write_all(format!("{name}: {value}\r\n").as_bytes())?;
+                let header = format!("{name}: {value}\r\n");
+                self.write_all(header.as_bytes())?;
+            }
+        }
+
+        self.write_all(b"\r\n")?;
+        Ok(())
+    }
+
+    /// Writes the response header entries in `Headers` to the underlying
+    /// `TcpStream`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if a problem was encountered while writing the
+    /// `Headers` to the `TcpStream`.
+    pub fn write_response_headers(&mut self, headers: &mut Headers) -> NetResult<()> {
+        if !headers.contains(&SERVER) {
+            headers.server("rustnet/0.1");
+        }
+
+        if !headers.is_empty() {
+            for (name, value) in &headers.0 {
+                let header = format!("{name}: {value}\r\n");
+                self.write_all(header.as_bytes())?;
             }
         }
 
@@ -139,22 +177,8 @@ impl NetWriter {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
-        if !req.headers.contains(&ACCEPT) {
-            req.headers.accept("*/*");
-        }
-
-        if !req.headers.contains(&HOST) {
-            let stream = self.get_ref();
-            let remote = stream.peer_addr()?;
-            req.headers.host(&remote.to_string());
-        }
-
-        if !req.headers.contains(&USER_AGENT) {
-            req.headers.default_user_agent();
-        }
-
         self.write_request_line(&req.request_line)?;
-        self.write_headers(&req.headers)?;
+        self.write_request_headers(&mut req.headers)?;
         self.write_body(&req.body)?;
         self.flush()?;
         Ok(())
@@ -171,7 +195,6 @@ impl NetWriter {
         let mut res = Response::new(500);
 
         // Update the response headers.
-        res.headers.default_server();
         res.headers.connection("close");
         res.headers.cache_control("no-cache");
         res.headers.content_length(err_msg.len());
@@ -181,7 +204,7 @@ impl NetWriter {
         res.body = Body::Text(err_msg.into());
 
         self.write_status_line(&res.status_line)?;
-        self.write_headers(&res.headers)?;
+        self.write_response_headers(&mut res.headers)?;
         self.write_body(&res.body)?;
         self.flush()?;
         Ok(())
@@ -194,12 +217,8 @@ impl NetWriter {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
-        if !res.headers.contains(&SERVER) {
-            res.headers.default_server();
-        }
-
         self.write_status_line(&res.status_line)?;
-        self.write_headers(&res.headers)?;
+        self.write_response_headers(&mut res.headers)?;
         self.write_body(&res.body)?;
         self.flush()?;
         Ok(())

@@ -1,5 +1,6 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::{NetError, NetParseError, NetResult};
@@ -9,6 +10,8 @@ pub mod values;
 
 pub use names::{header_consts::*, HeaderKind, HeaderName};
 pub use values::HeaderValue;
+
+pub const MAX_HEADERS: u16 = 1024;
 
 /// Represents a single header field line.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -47,6 +50,40 @@ impl Header {
 /// A wrapper around an object that maps header names to header values.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
+
+impl FromStr for Headers {
+    type Err = NetError;
+
+    fn from_str(headers_str: &str) -> NetResult<Self> {
+        let mut num_headers = 0;
+        let mut headers = Self::new();
+
+        let lines = headers_str
+            .trim_start()
+            .split('\n');
+
+        for line in lines {
+            num_headers += 1;
+
+            if num_headers >= MAX_HEADERS {
+                return Err(NetParseError::TooManyHeaders)?;
+            }
+
+            let trimmed_line = line.trim();
+
+            // Check for end of headers section.
+            if trimmed_line.is_empty() {
+                break;
+            }
+
+            trimmed_line
+                .parse::<Header>()
+                .map(|hdr| headers.insert(hdr.name, hdr.value))?;
+        }
+
+        Ok(headers)
+    }
+}
 
 impl Headers {
     /// Returns a new `Headers` instance.
@@ -112,28 +149,23 @@ impl Headers {
 
     /// Inserts a collection of default server response headers.
     pub fn default_response_headers(&mut self) {
-        self.default_server();
-        self.connection("keep-alive");
+        todo!();
     }
 
     /// Inserts a new header with the given name and value.
-    pub fn add_header(&mut self, name: &str, value: &str) {
+    pub fn header(&mut self, name: &str, value: &str) {
         self.insert(HeaderName::from(name), HeaderValue::from(value));
     }
 
-    /// Inserts a Host header with the value "ip:port".
-    pub fn host(&mut self, host: &str) {
-        self.insert(HOST, host.into());
+    /// Inserts a Host header that is parsed from the given `SocketAddr`.
+    pub fn host(&mut self, host: &SocketAddr) {
+        let ip = host.ip();
+        let port = host.port();
+        self.insert(HOST, format!("{ip}:{port}").into());
     }
 
     /// Inserts the default User-Agent header.
     pub fn user_agent(&mut self, agent: &str) {
-        self.insert(USER_AGENT, agent.into());
-    }
-
-    /// Inserts the default User-Agent header.
-    pub fn default_user_agent(&mut self) {
-        let agent = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
         self.insert(USER_AGENT, agent.into());
     }
 
@@ -145,12 +177,6 @@ impl Headers {
     /// Inserts an Accept-Encoding header with the given value.
     pub fn accept_encoding(&mut self, encoding: &str) {
         self.insert(ACCEPT_ENCODING, encoding.into());
-    }
-
-    /// Inserts the default Server header.
-    pub fn default_server(&mut self) {
-        let server = concat!("rustnet/", env!("CARGO_PKG_VERSION"));
-        self.insert(SERVER, server.into());
     }
 
     /// Inserts a Server header with the given value.
@@ -188,11 +214,13 @@ impl Headers {
 
         if !self.is_empty() {
             self.0.iter().for_each(|(name, value)| {
-                if use_color {
-                    buf.push_str(&format!("{BLU}{name}{CLR}: {YLW}{value}{CLR}\n"));
+                let header = if use_color {
+                    format!("{BLU}{name}{CLR}: {YLW}{value}{CLR}\n")
                 } else {
-                    buf.push_str(&format!("{name}: {value}\n"));
-                }
+                    format!("{name}: {value}\n")
+                };
+
+                buf.push_str(&header);
             });
         }
 

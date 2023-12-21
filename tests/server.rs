@@ -2,9 +2,8 @@ use std::process::{Command, Stdio};
 
 #[macro_use]
 mod common;
-
 use common::{
-    get_expected_server_output, get_server_test_output, server_is_live,
+    get_test_output_server, get_expected_output_server, server_is_live,
 };
 
 mod a {

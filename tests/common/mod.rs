@@ -8,25 +8,25 @@ use std::time::Duration;
 use rustnet::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
     ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION as CONN,
-    CONTENT_LENGTH as CL, CONTENT_TYPE as CT, LOCATION, SERVER,
+    CONTENT_LENGTH as CL, CONTENT_TYPE as CT, HOST, LOCATION, SERVER,
     WWW_AUTHENTICATE as WWW, X_MORE_INFO as XMORE,
 };
-use rustnet::{Headers, Response};
+use rustnet::{
+    Body, Connection, Header, Headers, Method, Request, RequestLine,
+    Response, Status, StatusLine, Version,
+};
 
 macro_rules! run_server_tests {
     (START_TEST_SERVER) => {
         #[test]
         fn test_server_started() {
+            let args = [
+                "run", "--bin", "server", "--", "--test", "--",
+                "127.0.0.1:7878"
+            ];
+
             let _server = Command::new("cargo")
-                .args([
-                    "run",
-                    "--bin",
-                    "server",
-                    "--",
-                    "--shutdown-route",
-                    "--",
-                    "127.0.0.1:7878"
-                ])
+                .args(&args[..])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -41,21 +41,14 @@ macro_rules! run_server_tests {
     (SHUTDOWN_TEST_SERVER) => {
         #[test]
         fn test_server_shutdown() {
+            let args = [
+                "run", "--bin", "client", "--", "--method", "DELETE",
+                "--path", "/__shutdown_server__", "--output", "s",
+                "--plain", "--no-dates", "--", "127.0.0.1:7878"
+            ];
+
             let _shutdown = Command::new("cargo")
-                .args([
-                    "run",
-                    "--bin",
-                    "client",
-                    "--",
-                    "--method",
-                    "DELETE",
-                    "--path",
-                    "/__shutdown_server__",
-                    "--output",
-                    "z",
-                    "--",
-                    "127.0.0.1:7878"
-                ])
+                .args(&args[..])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
@@ -74,27 +67,22 @@ macro_rules! run_server_tests {
         #[test]
         fn $label() {
             $(
+                let args = [
+                    "run", "--bin", "client", "--", "--method", $method,
+                    "--path", $uri_path, "--output", "sh", "--plain",
+                    "--no-dates", "--", "127.0.0.1:7878"
+                ];
+
                 let output = Command::new("cargo")
-                    .args([
-                        "run",
-                        "--bin",
-                        "client",
-                        "--",
-                        "--method",
-                        $method,
-                        "--path",
-                        $uri_path,
-                        "--output",
-                        "z",
-                        "--",
-                        "127.0.0.1:7878"
-                    ])
+                    .args(&args[..])
                     .output()
+                    .map(|out| {
+                        let input = String::from_utf8(out.stdout).unwrap();
+                        get_test_output_server(&input)
+                    })
                     .unwrap();
 
-                let output_str = String::from_utf8(output.stdout).unwrap();
-                let output = get_server_test_output(&output_str);
-                let expected = get_expected_server_output($method, $uri_path);
+                let expected = get_expected_output_server($method, $uri_path);
                 assert_eq!(output, expected);
             )+
         }
@@ -105,8 +93,7 @@ macro_rules! run_server_tests {
 macro_rules! get_responses {
     ($($code:literal),+) => {
         let stream = TcpStream::connect("httpbin.org:80").unwrap();
-        let mut reader = NetReader::from(stream.try_clone().unwrap());
-        let mut writer = NetWriter::from(stream);
+        let mut conn = Connection::try_from(stream).unwrap();
 
         let mut req = Request {
             request_line: RequestLine {
@@ -133,16 +120,16 @@ macro_rules! get_responses {
             req.request_line.path
                 .push_str(concat!("/status/", stringify!($code)));
 
-            if let Err(e) = writer.send_request(&mut req) {
+            if let Err(e) = conn.writer.send_request(&mut req) {
                 panic!("Error sending request.\nCode {}.\n{e}", $code);
             }
 
             // Update the expected response.
             expected.status_line.status = Status($code);
-            add_expected_headers($code, &mut expected);
+            expected_headers($code, &mut expected);
 
             // Get the test response.
-            let mut res = match reader.recv_response() {
+            let mut res = match conn.reader.recv_response() {
                 Ok(res) => res,
                 Err(e) => {
                     panic!("Error receiving response.\nCode {}.\n{e}", $code);
@@ -164,35 +151,34 @@ macro_rules! run_client_test {
     ($label:ident: $method:literal, $uri_path:literal) => {
         #[test]
         fn $label() {
-            let output = Command::new("cargo")
-                .args([
-                    "run",
-                    "--bin",
-                    "client",
-                    "--",
-                    "--method",
-                    $method,
-                    "--path",
-                    $uri_path,
-                    "--output",
-                    "c",
-                    "--",
-                    "httpbin.org:80",
-                ])
+            let args = [
+                "run", "--bin", "client", "--", "--method", $method,
+                "--path", $uri_path, "--output", "RHsh", "--plain",
+                "--no-dates", "--", "httpbin.org:80"
+            ];
+
+            let (test_req, test_res) = Command::new("cargo")
+                .args(&args[..])
                 .output()
+                .map(|out| {
+                    let input = String::from_utf8(out.stdout).unwrap();
+                    get_test_output_client(&input)
+                })
                 .unwrap();
 
-            let output_str = String::from_utf8(output.stdout).unwrap();
-            let output = get_client_test_output(&output_str);
-            let expected = get_expected_client_output($method, $uri_path);
-            assert_eq!(output, expected);
+            let exp_req = get_expected_req_client($method, $uri_path);
+            let exp_res = get_expected_res_client($method, $uri_path);
+
+            assert_eq!(test_req, exp_req);
+            assert_eq!(test_res, exp_res);
         }
     };
 }
 
 pub fn server_is_live(is_shutting_down: bool) -> bool {
     let timeout = Duration::from_millis(200);
-    let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7878);
+    let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+    let socket = SocketAddr::new(ip, 7878);
 
     for _ in 0..5 {
         if TcpStream::connect_timeout(&socket, timeout).is_ok() {
@@ -209,16 +195,16 @@ pub fn server_is_live(is_shutting_down: bool) -> bool {
     }
 
     // Returns the fail state:
-    // True (server is live) if server is shutting down.
-    // False (server is not live) if server is starting up.
+    // - True (server is live) if server is shutting down.
+    // - False (server is not live) if server is starting up.
     is_shutting_down
 }
 
-pub fn add_expected_headers(code: u16, expected: &mut Response) {
+pub fn expected_headers(code: u16, expected: &mut Response) {
     // Clear prior headers.
     expected.headers.clear();
 
-    // Add default headers.
+    // Add default expected headers.
     expected.headers.content_length(0);
     expected.headers.insert(ACAO, "*".into());
     expected.headers.connection("keep-alive");
@@ -270,216 +256,284 @@ pub fn add_expected_headers(code: u16, expected: &mut Response) {
     }
 }
 
-pub fn favicon_route_output() -> String {
-    "\
-HTTP/1.1 200 OK
-Cache-Control: max-age=604800
-Content-Length: 1406
-Content-Type: image/x-icon
-Server: rustnet/0.1.0"
-        .to_string()
+pub fn favicon_route() -> Response {
+    let mut headers = Headers::new();
+    headers.server("rustnet/0.1");
+    headers.content_length(1406);
+    headers.cache_control("max-age=604800");
+    headers.content_type("image/x-icon");
+
+    Response {
+        status_line: StatusLine {
+            status: Status(200),
+            version: Version::OneDotOne
+        },
+        headers,
+        body: Body::Empty
+    }
 }
 
-pub fn many_methods_output(method: &str) -> String {
-    let status_200 = "200 OK";
-    let status_201 = "201 Created";
-
-    let (status, len) = match method {
-        "GET" => (status_200, 22),
-        "HEAD" => (status_200, 23),
-        "POST" => (status_201, 23),
-        "PUT" => (status_200, 22),
-        "PATCH" => (status_200, 24),
-        "DELETE" => (status_200, 25),
-        "TRACE" => (status_200, 24),
-        "OPTIONS" => (status_200, 26),
-        "CONNECT" => (status_200, 26),
-        _ => unreachable!(),
+pub fn many_methods(method: &str) -> Response {
+    let status = if method == "POST" {
+        Status(201)
+    } else {
+        Status(200)
     };
 
-    let mut output = format!(
-        "\
-HTTP/1.1 {status}
-Cache-Control: no-cache
-Content-Length: {len}
-Content-Type: text/plain; charset=utf-8
-Server: rustnet/0.1.0"
-    );
+    let mut headers = Headers::new();
+    headers.server("rustnet/0.1");
+    headers.cache_control("no-cache");
+    headers.content_type("text/plain; charset=utf-8");
+    headers.content_length(match method {
+        "GET" | "PUT" => 22,
+        "HEAD" | "POST" => 23,
+        "PATCH" | "TRACE" => 24,
+        "DELETE" => 25,
+        "OPTIONS" | "CONNECT" => 26,
+        _ => unreachable!(),
+    });
 
-    if method != "HEAD" {
-        output.push_str(&format!("\nHi from the {method} route!"));
+    Response {
+        status_line: StatusLine {
+            status,
+            version: Version::OneDotOne
+        },
+        headers,
+        body: Body::Empty
     }
-
-    output
 }
 
-pub fn unknown_route_output(method: &str) -> String {
-    if method == "HEAD" {
-        "\
-HTTP/1.1 404 Not Found
-Cache-Control: no-cache
-Content-Length: 482
-Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0"
-            .to_string()
+pub fn unknown_route(method: &str) -> Response {
+    let mut headers = Headers::new();
+    headers.content_length(482);
+    headers.server("rustnet/0.1");
+    headers.cache_control("no-cache");
+    headers.content_type("text/html; charset=utf-8");
+
+    Response {
+        status_line: StatusLine {
+            status: Status(404),
+            version: Version::OneDotOne
+        },
+        headers,
+        body: Body::Empty
+    }
+}
+
+pub fn known_route(method: &str) -> Response {
+    let status = if method == "POST" {
+        Status(201)
     } else {
-        r#"HTTP/1.1 404 Not Found
-Cache-Control: no-cache
-Content-Length: 482
-Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Not Found</title>
-</head>
-<body style="background-color:black;">
-<main style="color:white;">
-<h2 style="text-align:left;">Sorry, that page could not be found.</h2>
-<p><a href="/" style="color:lightgray; text-decoration:none;">Home</a></p>
-</main>
-</body>
-</html>"#
-            .to_string()
+        Status(200)
+    };
+
+    let mut headers = Headers::new();
+    headers.content_length(575);
+    headers.server("rustnet/0.1");
+    headers.cache_control("no-cache");
+    headers.content_type("text/html; charset=utf-8");
+
+    Response {
+        status_line: StatusLine {
+            status,
+            version: Version::OneDotOne
+        },
+        headers,
+        body: Body::Empty
     }
 }
 
-pub fn known_route_output(method: &str) -> String {
-    if method == "HEAD" {
-        "\
-HTTP/1.1 200 OK
-Cache-Control: no-cache
-Content-Length: 575
-Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0"
-            .to_string()
+pub fn get_expected_req_client(
+    method_str: &str,
+    path_str: &str
+) -> Request {
+    use rustnet::header::HOST;
+
+    let mut req_headers = Headers::new();
+    req_headers.accept("*/*");
+    req_headers.content_length(0);
+    req_headers.user_agent("rustnet/0.1");
+    req_headers.insert(HOST, "httpbin.org:80".into());
+
+    let method = method_str.parse::<Method>().unwrap();
+
+    Request {
+        request_line: RequestLine {
+            method,
+            path: path_str.to_string(),
+            version: Version::OneDotOne
+        },
+        headers: req_headers,
+        body: Body::Empty
+    }
+}
+
+pub fn get_expected_res_client(
+    method_str: &str,
+    path_str: &str
+) -> Response {
+    use rustnet::header::{
+        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
+        ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, HOST,
+    };
+
+    let status = if path_str == "/status/201" {
+        Status(201)
+    } else if path_str == "/status/203" {
+        Status(203)
     } else {
-        format!(
-            r#"HTTP/1.1 {}
-Cache-Control: no-cache
-Content-Length: 575
-Content-Type: text/html; charset=utf-8
-Server: rustnet/0.1.0
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta charset="utf-8">
-<title>Home</title>
-</head>
-<body style="background-color:black;">
-<main style="color:white;">
-<h1 style="text-align:center; padding:10px;">Welcome home.</h1>
-<h2>Links:</h2>
-<ul style="list-style-type:none;">
-<li><a href="/about" style="color:lightgray; text-decoration:none;">About</a></li>
-</ul>
-</main>
-</body>
-</html>"#,
-            if method == "POST" {
-                "201 Created"
-            } else {
-                "200 OK"
-            }
-        )
-    }
-}
+        Status(200)
+    };
 
-pub fn get_expected_client_output(method: &str, path: &str) -> String {
+    let mut res_headers = Headers::new();
+    res_headers.server("gunicorn/19.9.0");
+    res_headers.connection("keep-alive");
+    res_headers.insert(ACAO, "*".into());
+    res_headers.insert(ACAC, "true".into());
+
     let jpeg = "image/jpeg";
-    let text = "text/plain";
     let xml = "application/xml";
     let json = "application/json";
     let html = "text/html; charset=utf-8";
-    let status_200 = "200 OK";
-    let status_201 = "201 Created";
-    let status_203 = "203 Non-Authoritative Information";
+    let text = "text/plain";
 
-    let (status, len, contype) = match path {
-        "/xml" => (status_200, 522, xml),
-        "/json" => (status_200, 429, json),
-        "/deny" => (status_200, 239, text),
-        "/html" => (status_200, 3741, html),
-        "/status/200" => (status_200, 0, html),
-        "/status/201" => (status_201, 0, html),
-        "/status/203" => (status_203, 0, html),
-        "/robots.txt" => (status_200, 30, text),
-        "/image/jpeg" => (status_200, 35588, jpeg),
-        "/encoding/utf8" => (status_200, 14239, html),
+    match path_str {
+        "/xml" => {
+            res_headers.content_length(522);
+            res_headers.content_type(xml);
+        },
+        "/json" => {
+            res_headers.content_length(429);
+            res_headers.content_type(json);
+        },
+        "/deny" => {
+            res_headers.content_length(239);
+            res_headers.content_type(text);
+        },
+        "/html" => {
+            res_headers.content_length(3741);
+            res_headers.content_type(html);
+        },
+        "/status/200" | "/status/201" | "/status/203" => {
+            res_headers.content_length(0);
+            res_headers.content_type(html);
+        },
+        "/robots.txt" => {
+            res_headers.content_length(30);
+            res_headers.content_type(text);
+        },
+        "/image/jpeg" => {
+            res_headers.content_length(35588);
+            res_headers.content_type(jpeg);
+        },
+        "/encoding/utf8" => {
+            res_headers.content_length(14239);
+            res_headers.content_type(html);
+        },
         _ => unreachable!(),
-    };
+    }
 
-    format!(
-        "\
-{method} {path} HTTP/1.1
-Accept: */*
-Content-Length: 0
-Host: httpbin.org:80
-User-Agent: rustnet/0.1.0
-HTTP/1.1 {status}
-Access-Control-Allow-Credentials: true
-Access-Control-Allow-Origin: *
-Connection: keep-alive
-Content-Length: {len}
-Content-Type: {contype}
-Server: gunicorn/19.9.0"
-    )
+    Response {
+        status_line: StatusLine {
+            status,
+            version: Version::OneDotOne
+        },
+        headers: res_headers,
+        body: Body::Empty
+    }
 }
 
-pub fn get_expected_server_output(method: &str, path: &str) -> String {
+pub fn get_expected_output_server(method: &str, path: &str) -> Response {
     match path {
-        "/foo" => unknown_route_output(method),
-        "/favicon.ico" => favicon_route_output(),
-        "/many_methods" => many_methods_output(method),
+        "/foo" => unknown_route(method),
+        "/favicon.ico" => favicon_route(),
+        "/many_methods" => many_methods(method),
         "/" | "/head" | "/post" | "/put" | "/patch" | "/delete" | "/trace"
-        | "/options" | "/connect" => known_route_output(method),
+        | "/options" | "/connect" => known_route(method),
         _ => unreachable!(),
     }
 }
 
-pub fn get_client_test_output(input: &str) -> String {
-    let mut output = input
-        .split('\n')
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                None
-            } else if line.starts_with("Host:") {
-                Some("Host: httpbin.org:80")
-            } else {
-                Some(line)
-            }
+pub fn get_test_output_client(input: &str) -> (Request, Response) {
+    // Get rid of the first "HTTP/1.1" occurrence from "rest".
+    let (request_line, rest) = input
+        .trim_start()
+        .split_once('\n')
+        .map(|(reqline, rest)| {
+            let reqline = reqline.parse::<RequestLine>().unwrap();
+            (reqline, rest)
         })
-        .fold(String::new(), |mut acc, s| {
-            acc.push_str(s);
-            acc.push('\n');
-            acc
-        });
+        .unwrap();
 
-    output.pop();
-    output
+    // Use second "HTTP/1.1" occurrence to get the response start.
+    let idx = rest.find("HTTP/1.1").unwrap();
+    let mut req_lines = (&rest[..idx])
+        .trim_start()
+        .split('\n')
+        .map(|s| s.trim())
+        .collect::<Vec<&str>>();
+
+    let mut req_headers = parse_headers(&req_lines[..]);
+    req_headers.insert(HOST, "httpbin.org:80".into());
+
+    let mut req = Request {
+        request_line,
+        headers: req_headers,
+        body: Body::Empty
+    };
+
+    let (status_line, res_rest) = (&rest[idx..])
+        .split_once('\n')
+        .map(|(statline, rest)| {
+            let statline = statline.parse::<StatusLine>().unwrap();
+            (statline, rest)
+        })
+        .unwrap();
+
+    let mut res_lines = res_rest
+        .trim_start()
+        .split('\n')
+        .map(|s| s.trim())
+        .collect::<Vec<&str>>();
+
+    let res_headers = parse_headers(&res_lines[..]);
+
+    let res = Response {
+        status_line,
+        headers: res_headers,
+        body: Body::Empty
+    };
+
+    (req, res)
 }
 
-pub fn get_server_test_output(input: &str) -> String {
-    let mut output = input
-        .split('\n')
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                None
-            } else {
-                Some(line)
-            }
-        })
-        .fold(String::new(), |mut acc, line| {
-            acc.push_str(line);
-            acc.push('\n');
-            acc
-        });
+pub fn get_test_output_server(input: &str) -> Response {
+    let (statline, res_hdrs_str) = input
+        .trim_start()
+        .split_once('\n')
+        .unwrap();
 
-    output.pop();
-    output
+    let status_line = statline.parse::<StatusLine>().unwrap();
+    let headers = res_hdrs_str.parse::<Headers>().unwrap();
+
+    Response {
+        status_line,
+        headers,
+        body: Body::Empty
+    }
+}
+
+fn parse_headers(lines: &[&str]) -> Headers {
+    let mut headers = Headers::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if line.is_empty() {
+            break;
+        }
+
+        line.parse::<Header>()
+            .map(|hdr| headers.insert(hdr.name, hdr.value)).unwrap();
+    }
+
+    headers
 }

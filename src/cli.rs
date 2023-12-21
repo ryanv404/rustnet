@@ -1,7 +1,11 @@
 use std::env::Args;
+use std::path::PathBuf;
 use std::process;
 
-use crate::{Headers, Method, NetResult};
+use crate::{
+    Headers, Method, NetError, NetParseError, NetResult, Route, Router,
+    Target,
+};
 use crate::util;
 
 const RED: &str = "\x1b[91m";
@@ -11,17 +15,19 @@ const CLR: &str = "\x1b[0m";
 /// Contains the parsed server command line arguments.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerCli {
-    pub log: bool,
-    pub shutdown_route: bool,
+    pub is_test: bool,
+    pub do_logging: bool,
     pub addr: String,
+    pub router: Router,
 }
 
 impl Default for ServerCli {
     fn default() -> Self {
         Self {
-            log: false,
-            shutdown_route: false,
-            addr: "127.0.0.1:7878".to_string(),
+            is_test: false,
+            do_logging: false,
+            addr: String::new(),
+            router: Router::new()
         }
     }
 }
@@ -33,53 +39,179 @@ impl ServerCli {
         Self::default()
     }
 
-    /// Prints the server binary's help message to the terminal.
+    /// Prints unknown option error message and exits the program.
+    pub fn handle_unknown_opt(&self, opt_name: &str) {
+        eprintln!("{RED}Unknown option: \"{opt_name}\".{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints missing option argument error message and exits the program.
+    pub fn handle_missing_optarg(&self, opt_name: &str) {
+        eprintln!("{RED}Missing required argument to \"{opt_name}\".{CLR}");
+        process::exit(1);
+    }
+
+    pub fn handle_invalid_optarg(&self, opt_name: &str) {
+        eprintln!("{RED}Invalid argument to \"{opt_name}\".{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints missing CLI argument error message and exits the program.
+    pub fn handle_missing_arg(&self, arg_name: &str) {
+        eprintln!("{RED}Missing required {arg_name} argument.{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints invalid CLI argument error message and exits the program.
+    pub fn handle_invalid_arg(&self, arg_name: &str, bad_arg: &str) {
+        eprintln!("{RED}Invalid {arg_name} argument: \"{bad_arg}\"{CLR}");
+        process::exit(1);
+    }
+
+    /// Parses and inserts a route into the server's router.
+    #[allow(clippy::missing_errors_doc)]
+    pub fn handle_route(&mut self, route: &str, kind: &str) -> NetResult<()> {
+        let mut tokens = route.splitn(2, ':');
+
+        match (kind, tokens.next()) {
+            (_, None) => self.handle_invalid_optarg("--route"),
+            ("favicon", Some(filepath)) => {
+                let route = Route::Get("/favicon.ico".into());
+                let target = Target::Favicon(PathBuf::from(filepath));
+                self.router.mount(route, target);
+            },
+            ("404", Some(filepath)) => {
+                let route = Route::NotFound;
+                let target = Target::File(PathBuf::from(filepath));
+                self.router.mount(route, target);
+            },
+            ("file" | "text", Some(method)) => {
+                let method = method.parse::<Method>()?;
+
+                let path = tokens
+                    .next()
+                    .ok_or(NetError::Parse(NetParseError::UriPath))
+                    .map(ToString::to_string)?;
+
+                let route = Route::new(method, &path);
+
+                let target = if kind == "text" {
+                    tokens
+                        .next()
+                        .ok_or(NetError::Other("route text parsing"))
+                        .map(|text| Target::Text(text.into()))?
+                } else {
+                    tokens
+                        .next()
+                        .ok_or(NetError::Other("route file path parsing"))
+                        .map(|fpath| Target::File(PathBuf::from(fpath)))?
+                };
+
+                self.router.mount(route, target);
+            },
+            (_, _) => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    /// Prints the server help message and exists the program.
     pub fn print_help(&self) {
         eprintln!(
             "\
 {GRN}USAGE:{CLR}
-    http_server [OPTIONS] <SERVER ADDRESS>\n
+    http_server [OPTIONS] [--] <SERVER ADDRESS>\n
 {GRN}SERVER ADDRESS:{CLR}
-    IP:PORT    The server's IP address and port (default: 127.0.0.1:7878).\n
+    IP:PORT    The server's IP address and port.\n
 {GRN}OPTIONS:{CLR}
-    --log             Enables logging of connections to the terminal.
-    --shutdown-route  Adds a server shutdown route for testing."
+    --log      Enables logging of connections to the terminal.
+    --test     Creates a test server with a shutdown route.\n
+{GRN}ROUTES:{CLR}
+    --file-route METHOD:URI_PATH:FILE_PATH
+            Add a route with the given HTTP method that serves a file.
+    --text-route METHOD:URI_PATH:TEXT
+            Add a route with the given HTTP method that serves text.
+    --favicon-route FILE_PATH
+            Add a favicon.
+    --404-route FILE_PATH
+            Add a static file that is returned with 404 responses.\n"
         );
+
+        process::exit(0);
     }
 
     /// Parses command line arguments into a `ServerCli` object.
     #[must_use]
     pub fn parse_args(args: Args) -> Self {
         let mut cli = Self::new();
+
         let mut args = args.skip(1);
 
-        while let Some(opt) = args.next().as_deref() {
-            if opt.is_empty() {
-                break;
-            }
-
-            match opt {
-                "--log" => cli.log = true,
-                "--shutdown-route" => cli.shutdown_route = true,
-                "--help" => {
-                    cli.print_help();
-                    process::exit(0);
+        while let Some(arg) = args.next() {
+            match arg.len() {
+                // Enable logging of new connections.
+                5 if arg == "--log" => cli.do_logging = true,
+                // Make the server a test server.
+                6 if arg == "--test" => cli.is_test = true,
+                // Print help message.
+                6 if arg == "--help" => cli.print_help(),
+                // Add a route that serves a file.
+                12 if arg == "--file-route" => match args.next().as_deref() {
+                    Some(route) => {
+                        if cli.handle_route(route, "file").is_err() {
+                            cli.handle_invalid_optarg("--route");
+                        }
+                    },
+                    None => cli.handle_missing_optarg("--route"),
                 },
-                "--" => {
-                    if let Some(addr) = args.next().as_deref() {
-                        cli.addr = addr.to_string();
+                // Add a route that serves text.
+                12 if arg == "--text-route" => match args.next().as_deref() {
+                    Some(route) => {
+                        if cli.handle_route(route, "text").is_err() {
+                            cli.handle_invalid_optarg("--route");
+                        }
+                    },
+                    None => cli.handle_missing_optarg("--route"),
+                },
+                // Add a favicon route.
+                15 if arg == "--favicon-route" => match args.next().as_deref() {
+                    Some(route) => {
+                        if cli.handle_route(route, "favicon").is_err() {
+                            cli.handle_invalid_optarg("--route");
+                        }
+                    },
+                    None => cli.handle_missing_optarg("--route"),
+                },
+                // Set a file to serve for routes that are not found.
+                11 if arg == "--404-route" => match args.next().as_deref() {
+                    Some(route) => {
+                        if cli.handle_route(route, "404").is_err() {
+                            cli.handle_invalid_optarg("--route");
+                        }
+                    },
+                    None => cli.handle_missing_optarg("--route"),
+                },
+                // End of options flag.
+                2 if arg == "--" => match args.next() {
+                    // First non-option argument is the server address.
+                    Some(addr) => {
+                        cli.addr = addr;
                         break;
-                    }
+                    },
+                    None => cli.handle_missing_arg("server address"),
                 },
-                unk if unk.starts_with("--") => {
-                    eprintln!("Unknown option: \"{unk}\"\n");
-                    process::exit(1);
-                },
-                addr => {
-                    cli.addr = addr.to_string();
+                // Unknown option.
+                _ if arg.starts_with("--") => cli.handle_unknown_opt(&arg),
+                // First non-option argument is the server address.
+                _ => {
+                    cli.addr = arg;
                     break;
                 },
             }
+        }
+
+        if cli.addr.is_empty() {
+            cli.handle_missing_arg("server address");
         }
 
         cli
@@ -137,24 +269,36 @@ impl ClientCli {
     }
 
     /// Prints unknown option error message and exits the program.
-    pub fn handle_unknown_opt(&self, opt: &str) {
-        eprintln!("{RED}Unknown option: \"{opt}\".{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints invalid argument error message and exits the program.
-    pub fn handle_invalid_arg(&self, opt: &str) {
-        eprintln!("{RED}Invalid argument to \"{opt}\".{CLR}");
+    pub fn handle_unknown_opt(&self, opt_name: &str) {
+        eprintln!("{RED}Unknown option: \"{opt_name}\".{CLR}");
         process::exit(1);
     }
 
     /// Prints missing option argument error message and exits the program.
-    pub fn handle_missing_arg(&self, opt: &str) {
-        eprintln!("{RED}Missing required argument to \"{opt}\".{CLR}");
+    pub fn handle_missing_optarg(&self, opt_name: &str) {
+        eprintln!("{RED}Missing required argument to \"{opt_name}\".{CLR}");
         process::exit(1);
     }
 
-    /// Prints the help message and exits the program.
+    /// Prints invalid argument error message and exits the program.
+    pub fn handle_invalid_optarg(&self, opt_name: &str) {
+        eprintln!("{RED}Invalid argument to \"{opt_name}\".{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints missing CLI argument error message and exits the program.
+    pub fn handle_missing_arg(&self, arg_name: &str) {
+        eprintln!("{RED}Missing required {arg_name} argument.{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints invalid CLI argument error message and exits the program.
+    pub fn handle_invalid_arg(&self, arg_name: &str, bad_arg: &str) {
+        eprintln!("{RED}Invalid {arg_name} argument: \"{bad_arg}\"{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints the client help message and exits the program.
     pub fn print_help(&self) {
         eprintln!(
             "\
@@ -189,7 +333,7 @@ impl ClientCli {
         process::exit(0);
     }
 
-    pub fn handle_output_arg(&mut self, arg: &str) {
+    pub fn handle_style(&mut self, arg: &str) {
         // Disable default output style first.
         self.out_status_line = false;
         self.out_res_headers = false;
@@ -202,26 +346,6 @@ impl ClientCli {
             's' => self.out_status_line = true,
             'h' => self.out_res_headers = true,
             'b' => self.out_res_body = true,
-            'c' => {
-                self.out_req_line = true;
-                self.out_req_headers = true;
-                self.out_req_body = false;
-                self.out_status_line = true;
-                self.out_res_headers = true;
-                self.out_res_body = false;
-                self.use_color = false;
-                self.no_dates = true;
-            },
-            'z' => {
-                self.out_req_line = false;
-                self.out_req_headers = false;
-                self.out_req_body = false;
-                self.out_status_line = true;
-                self.out_res_headers = true;
-                self.out_res_body = true;
-                self.use_color = false;
-                self.no_dates = true;
-            },
             'r' => {
                 self.out_req_line = true;
                 self.out_req_headers = true;
@@ -241,7 +365,7 @@ impl ClientCli {
             },
             // Ignore quotation marks.
             '\'' | '"' => {},
-            _ => self.handle_invalid_arg("--output"),
+            _ => self.handle_invalid_optarg("--output"),
         });
     }
 
@@ -249,34 +373,30 @@ impl ClientCli {
     #[allow(clippy::missing_errors_doc)]
     pub fn parse_args(args: Args) -> NetResult<Self> {
         let mut cli = Self::new();
+
         let mut args = args.skip(1);
 
-        while let Some(ref opt) = args.next() {
-            match opt.as_str() {
+        while let Some(opt) = args.next().as_deref() {
+            match opt {
                 // End of options flag.
-                "--" => {
-                    if let Some(ref uri) = args.next() {
-                        // Parse the URI argument.
-                        let (addr, path) = util::parse_uri(uri)?;
-
-                        cli.addr = addr;
-
-                        if cli.path.is_empty() {
-                            cli.path = path;
-                        }
-                    }
-                    break;
+                "--" => match args.next().as_deref() {
+                    Some(uri) => {
+                        // First non-option argument should be the URI argument.
+                        cli.parse_uri(uri);
+                        break;
+                    },
+                    None => cli.handle_missing_arg("URI"),
                 },
                 // Print help message.
                 "--help" => cli.print_help(),
                 // Only print request lines and status lines.
-                "--minimal" => cli.handle_output_arg("Rs"),
+                "--minimal" => cli.handle_style("Rs"),
                 // Only print response bodies.
-                "--body" => cli.handle_output_arg("b"),
-                // Use the TUI.
+                "--body" => cli.handle_style("b"),
+                // Run the client TUI.
                 "--tui" => {
                     cli.tui = true;
-                    break;
+                    return Ok(cli);
                 },
                 // Do not colorize.
                 "--plain" => cli.use_color = false,
@@ -286,76 +406,84 @@ impl ClientCli {
                 "--header" => {
                     if let Some(ref header) = args.next() {
                         if let Some((name, value)) = header.split_once(':') {
-                            cli.headers.add_header(name, value);
+                            cli.headers.header(name, value);
                         } else {
-                            cli.handle_invalid_arg("--header");
+                            cli.handle_invalid_optarg("--header");
                         }
                     } else {
-                        cli.handle_missing_arg("--header");
+                        cli.handle_missing_optarg("--header");
                     }
                 },
                 // Set request body data.
                 "--data" => {
-                    if let Some(ref data) = args.next() {
+                    if let Some(data) = args.next().as_deref() {
                         cli.data = Some(data.to_string());
                     } else {
-                        cli.handle_missing_arg("--data");
+                        cli.handle_missing_optarg("--data");
                     }
                 },
                 // Set request method.
                 "--method" => {
-                    if let Some(ref method) = args.next() {
+                    if let Some(method) = args.next().as_deref() {
                         let method = method.to_ascii_uppercase();
 
                         if let Ok(custom_method) = method.parse::<Method>() {
                             cli.method = custom_method;
                         } else {
-                            cli.handle_invalid_arg("--method");
+                            cli.handle_invalid_optarg("--method");
                         }
                     } else {
-                        cli.handle_missing_arg("--method");
+                        cli.handle_missing_optarg("--method");
                     }
                 },
                 // Path component of the requested HTTP URI.
                 "--path" => {
-                    if let Some(ref path) = args.next() {
+                    if let Some(path) = args.next().as_deref() {
                         cli.path = path.to_string();
                     } else {
-                        cli.handle_missing_arg("--path");
+                        cli.handle_missing_optarg("--path");
                     }
                 },
                 // Set the output style.
                 "--output" => {
-                    if let Some(ref format_str) = args.next() {
-                        cli.handle_output_arg(format_str);
+                    if let Some(style) = args.next().as_deref() {
+                        cli.handle_style(style);
                     } else {
-                        cli.handle_missing_arg("--output");
+                        cli.handle_missing_optarg("--output");
                     }
                 },
                 // Set request output style and no send option.
-                "--request" => cli.handle_output_arg("RHB"),
+                "--request" => cli.handle_style("RHB"),
                 // Set verbose output style.
-                "--verbose" => cli.handle_output_arg("*"),
+                "--verbose" => cli.handle_style("*"),
                 // Handle an unknown option.
                 unk if unk.starts_with("--") => cli.handle_unknown_opt(unk),
                 // First non-option argument should be the URI argument.
                 uri => {
-                    let (addr, path) = util::parse_uri(uri)?;
-                    if cli.path.is_empty() {
-                        cli.path = path;
-                    }
-
-                    cli.addr = addr;
+                    cli.parse_uri(uri);
                     break;
                 },
             }
         }
 
-        if cli.addr.is_empty() && !cli.tui {
-            eprintln!("{RED}Missing required URI argument.{CLR}\n");
-            process::exit(1);
+        if cli.addr.is_empty() {
+            cli.handle_missing_arg("URI");
         }
 
         Ok(cli)
+    }
+
+    pub fn parse_uri(&mut self, uri: &str) {
+        match util::parse_uri(uri).ok() {
+            Some((addr, path)) => {
+                self.addr = addr;
+
+                // Do not clobber a previously set path.
+                if self.path.is_empty() {
+                    self.path = path;
+                }
+            },
+            None => self.handle_invalid_arg("URI", uri),
+        }
     }
 }

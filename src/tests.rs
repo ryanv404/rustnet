@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::header::names::STANDARD_HEADERS;
@@ -195,7 +194,7 @@ mod many_headers {
 
     #[test]
     fn from_str() {
-        let headers_section = "\
+        let headers_str = "\
             Accept: */*\r\n\
             Accept-Encoding: gzip, deflate, br\r\n\
             Connection: keep-alive\r\n\
@@ -206,23 +205,12 @@ mod many_headers {
         let mut expected_hdrs = Headers::new();
         expected_hdrs.accept("*/*");
         expected_hdrs.connection("keep-alive");
-        expected_hdrs.host("example.com");
+        expected_hdrs.header("Host", "example.com");
         expected_hdrs.user_agent("xh/0.19.3");
         expected_hdrs.accept_encoding("gzip, deflate, br");
-        expected_hdrs.add_header("Pineapple", "pizza");
+        expected_hdrs.header("Pineapple", "pizza");
 
-        let mut test_hdrs = Headers::new();
-
-        for line in headers_section.split('\n') {
-            let trim = line.trim();
-
-            if trim.is_empty() {
-                break;
-            }
-
-            let header = trim.parse::<Header>().unwrap();
-            test_hdrs.insert(header.name, header.value);
-        }
+        let test_hdrs = headers_str.parse::<Headers>().unwrap();
 
         assert_eq!(test_hdrs, expected_hdrs);
     }
@@ -274,19 +262,19 @@ mod router {
     test_resolve_route! {
         Route::Get("/empty1".into()) => Target::Empty, 200;
         Route::Head("/empty2".into()) => Target::Empty, 200;
-        Route::Put("/text1".into()) => Target::Text("test1"), 200;
-        Route::Patch("/text2".into()) => Target::Text("test2"), 200;
+        Route::Put("/text1".into()) => Target::Text("test1".into()), 200;
+        Route::Patch("/text2".into()) => Target::Text("test2".into()), 200;
         Route::Post("/json1".into()) => 
-            Target::Json("{\n\"data\": \"test data 1\"\n}"), 201;
+            Target::Json("{\n\"data\": \"test data 1\"\n}".into()), 201;
         Route::Delete("/json2".into()) =>
-            Target::Json("{\n\"data\": \"test data 2\"\n}"), 200;
+            Target::Json("{\n\"data\": \"test data 2\"\n}".into()), 200;
         Route::Get("/xml1".into()) => Target::Xml("\
             <note>
             <to>Cat</to>
             <from>Dog</from>
             <heading>Woof</heading>
             <body>Who's a good boy?</body>
-            </note>"
+            </note>".into()
         ), 200;
         Route::Head("/xml2".into()) => Target::Xml("\
             <note>
@@ -294,7 +282,7 @@ mod router {
             <from>Cat</from>
             <heading>Meow</heading>
             <body>Where's the mouse?</body>
-            </note>"
+            </note>".into()
         ), 200;
         Route::Patch("/index".into()) => Target::Html("\
             <!DOCTYPE html>
@@ -305,7 +293,7 @@ mod router {
                 <body>
                     <p>Home page</p>
                 </body>
-            </html>"
+            </html>".into()
         ), 200;
         Route::Post("/about".into()) => Target::Html("\
             <!DOCTYPE html>
@@ -316,18 +304,20 @@ mod router {
                 <body>
                     <p>About page</p>
                 </body>
-            </html>"
+            </html>".into()
         ), 201;
-        Route::Delete("/bytes1".into()) => Target::Bytes(b"text bytes"), 200;
-        Route::Put("/bytes2".into()) => Target::Bytes(b"text bytes"), 200;
+        Route::Delete("/bytes1".into()) =>
+            Target::Bytes(b"text bytes".into()), 200;
+        Route::Put("/bytes2".into()) =>
+            Target::Bytes(b"text bytes".into()), 200;
         Route::Get("/favicon1".into()) =>
-            Target::Favicon(Path::new("favicon.ico")), 200;
+            Target::Favicon("favicon.ico".into()), 200;
         Route::Head("/favicon2".into()) =>
-            Target::Favicon(Path::new("favicon.ico")), 200;
+            Target::Favicon("favicon.ico".into()), 200;
         Route::Post("/file1".into()) => 
-            Target::File(Path::new("test_file.dat")), 201;
+            Target::File("test_file.dat".into()), 201;
         Route::Put("/file2".into()) =>
-            Target::File(Path::new("test_file.dat")), 200;
+            Target::File("test_file.dat".into()), 200;
     }
 }
 

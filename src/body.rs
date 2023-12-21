@@ -70,13 +70,13 @@ impl TryFrom<Target> for Body {
             Target::Shutdown => {
                 Ok(Self::Text("Server is shutting down.".into()))
             },
-            Target::Xml(s) => Ok(Self::Xml(s.into())),
-            Target::Text(s) => Ok(Self::Text(s.into())),
-            Target::Html(s) => Ok(Self::Html(s.into())),
-            Target::Json(s) => Ok(Self::Json(s.into())),
-            Target::Bytes(bytes) => Ok(Self::Bytes(bytes.to_vec())),
-            Target::File(path) => Ok(Self::from_filepath(path)?),
-            Target::Favicon(path) => Ok(Self::from_filepath(path)?),
+            Target::Xml(s) => Ok(Self::Xml(s.into_bytes())),
+            Target::Text(s) => Ok(Self::Text(s.into_bytes())),
+            Target::Html(s) => Ok(Self::Html(s.into_bytes())),
+            Target::Json(s) => Ok(Self::Json(s.into_bytes())),
+            Target::Bytes(ref bytes) => Ok(Self::Bytes(bytes.clone())),
+            Target::File(ref path) => Ok(Self::from_filepath(path)?),
+            Target::Favicon(ref path) => Ok(Self::from_filepath(path)?),
         }
     }
 }

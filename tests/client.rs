@@ -3,7 +3,7 @@ use std::process::Command;
 
 use rustnet::header::DATE;
 use rustnet::{
-    Body, Headers, Method, NetReader, NetWriter, Request, RequestLine,
+    Body, Connection, Headers, Method, Request, RequestLine,
     Response, Status, StatusLine, Version,
 };
 
@@ -11,7 +11,8 @@ use rustnet::{
 mod common;
 
 use common::{
-    add_expected_headers, get_client_test_output, get_expected_client_output,
+    expected_headers, get_test_output_client, get_expected_req_client,
+    get_expected_res_client,
 };
 
 mod get {

@@ -43,7 +43,6 @@ pub use server::{
     Worker,
 };
 
-pub const MAX_HEADERS: u16 = 1024;
 pub const READER_BUFSIZE: usize = 1024;
 pub const WRITER_BUFSIZE: usize = 1024;
 pub const NUM_WORKERS: usize = 4;

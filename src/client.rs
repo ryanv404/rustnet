@@ -192,11 +192,11 @@ where
         }
 
         if !self.headers.contains(&HOST) {
-            self.headers.host(&conn.remote_addr.to_string());
+            self.headers.host(&conn.remote_addr);
         }
 
         if !self.headers.contains(&USER_AGENT) {
-            self.headers.default_user_agent();
+            self.headers.user_agent("rustnet/0.1");
         }
 
         let path = self

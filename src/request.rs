@@ -7,8 +7,9 @@ use std::string::ToString;
 use crate::{
     Body, Header, HeaderName, HeaderValue, Headers, Method, NetError,
     NetParseError, NetResult, NetWriter, Response, Route, StatusLine, Version,
-    MAX_HEADERS, READER_BUFSIZE,
+    READER_BUFSIZE,
 };
+use crate::header::MAX_HEADERS;
 
 /// A buffered reader responsible for reading from an inner `TcpStream`.
 #[derive(Debug)]
@@ -115,21 +116,24 @@ impl NetReader {
         let mut line = String::with_capacity(1024);
 
         while num_headers <= MAX_HEADERS {
+            num_headers += 1;
+
             line.clear();
 
             match self.read_line(&mut line) {
                 Err(e) => return Err(NetError::Read(e.kind())),
                 Ok(0) => return Err(NetError::UnexpectedEof),
                 Ok(_) => {
-                    let buf = line.trim();
+                    let trimmed_line = line.trim();
 
-                    if buf.is_empty() {
+                    // Check for end of headers section.
+                    if trimmed_line.is_empty() {
                         break;
                     }
 
-                    let header = buf.parse::<Header>()?;
-                    headers.insert(header.name, header.value);
-                    num_headers += 1;
+                    trimmed_line
+                        .parse::<Header>()
+                        .map(|hdr| headers.insert(hdr.name, hdr.value))?;
                 },
             }
         }

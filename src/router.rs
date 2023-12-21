@@ -1,7 +1,6 @@
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::util::get_extension;
 use crate::Method;
@@ -10,20 +9,20 @@ use crate::Method;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Route {
     NotFound,
-    Get(Cow<'static, str>),
-    Head(Cow<'static, str>),
-    Post(Cow<'static, str>),
-    Put(Cow<'static, str>),
-    Patch(Cow<'static, str>),
-    Delete(Cow<'static, str>),
-    Trace(Cow<'static, str>),
-    Options(Cow<'static, str>),
-    Connect(Cow<'static, str>),
+    Get(String),
+    Head(String),
+    Post(String),
+    Put(String),
+    Patch(String),
+    Delete(String),
+    Trace(String),
+    Options(String),
+    Connect(String),
 }
 
 impl Default for Route {
     fn default() -> Self {
-        Self::Get(Cow::Borrowed("/"))
+        Self::Get(String::from("/"))
     }
 }
 
@@ -31,15 +30,15 @@ impl Display for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::NotFound => write!(f, "NotFound"),
-            Self::Get(path) => write!(f, "GET {path}"),
-            Self::Head(path) => write!(f, "HEAD {path}"),
-            Self::Post(path) => write!(f, "POST {path}"),
-            Self::Put(path) => write!(f, "PUT {path}"),
-            Self::Patch(path) => write!(f, "PATCH {path}"),
-            Self::Delete(path) => write!(f, "DELETE {path}"),
-            Self::Trace(path) => write!(f, "TRACE {path}"),
-            Self::Options(path) => write!(f, "OPTIONS {path}"),
-            Self::Connect(path) => write!(f, "CONNECT {path}"),
+            Self::Get(ref path) => write!(f, "GET {path}"),
+            Self::Head(ref path) => write!(f, "HEAD {path}"),
+            Self::Post(ref path) => write!(f, "POST {path}"),
+            Self::Put(ref path) => write!(f, "PUT {path}"),
+            Self::Patch(ref path) => write!(f, "PATCH {path}"),
+            Self::Delete(ref path) => write!(f, "DELETE {path}"),
+            Self::Trace(ref path) => write!(f, "TRACE {path}"),
+            Self::Options(ref path) => write!(f, "OPTIONS {path}"),
+            Self::Connect(ref path) => write!(f, "CONNECT {path}"),
         }
     }
 }
@@ -51,15 +50,15 @@ impl Route {
         let path = path.to_string();
 
         match method {
-            Method::Get => Self::Get(path.into()),
-            Method::Head => Self::Head(path.into()),
-            Method::Post => Self::Post(path.into()),
-            Method::Put => Self::Put(path.into()),
-            Method::Patch => Self::Patch(path.into()),
-            Method::Delete => Self::Delete(path.into()),
-            Method::Trace => Self::Trace(path.into()),
-            Method::Options => Self::Options(path.into()),
-            Method::Connect => Self::Connect(path.into()),
+            Method::Get => Self::Get(path),
+            Method::Head => Self::Head(path),
+            Method::Post => Self::Post(path),
+            Method::Put => Self::Put(path),
+            Method::Patch => Self::Patch(path),
+            Method::Delete => Self::Delete(path),
+            Method::Trace => Self::Trace(path),
+            Method::Options => Self::Options(path),
+            Method::Connect => Self::Connect(path),
         }
     }
 
@@ -82,18 +81,18 @@ impl Route {
 
     /// Returns URI path component for this `Route`.
     #[must_use]
-    pub fn path(&self) -> Option<Cow<'_, str>> {
+    pub fn path(&self) -> Option<&str> {
         match self {
             Self::NotFound => None,
-            Self::Get(path)
-            | Self::Head(path)
-            | Self::Post(path)
-            | Self::Put(path)
-            | Self::Patch(path)
-            | Self::Delete(path)
-            | Self::Trace(path)
-            | Self::Options(path)
-            | Self::Connect(path) => Some(path.clone()),
+            Self::Get(ref path)
+            | Self::Head(ref path)
+            | Self::Post(ref path)
+            | Self::Put(ref path)
+            | Self::Patch(ref path)
+            | Self::Delete(ref path)
+            | Self::Trace(ref path)
+            | Self::Options(ref path)
+            | Self::Connect(ref path) => Some(path),
         }
     }
 
@@ -118,6 +117,7 @@ impl Route {
     }
 }
 
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Router(pub BTreeMap<Route, Target>);
 
@@ -135,15 +135,15 @@ impl Router {
 
     /// Mount a shutdown route.
     pub fn mount_shutdown_route(&mut self) {
-        let route = Route::Delete("/__shutdown_server__".into());
+        let route = Route::Delete("/__shutdown_server__".to_string());
         let target = Target::Shutdown;
         self.0.insert(route, target);
     }
 
-    /// Returns the `Target` of the given `Route`, if present.
+    /// Returns the `Target` of the given `Route`.
     #[must_use]
     pub fn get_target(&self, route: &Route) -> Target {
-        self.0.get(route).copied().unwrap_or(Target::NotFound)
+        self.0.get(route).cloned().unwrap_or(Target::NotFound)
     }
 
     /// Returns the `Target` for non-existent routes.
@@ -151,7 +151,7 @@ impl Router {
     pub fn get_404_target(&self) -> Target {
         self.0
             .get(&Route::NotFound)
-            .copied()
+            .cloned()
             .unwrap_or(Target::Empty)
     }
 
@@ -163,8 +163,7 @@ impl Router {
         // Implement HEAD routes for all GET routes.
         if target.is_not_found() && route.is_head() {
             if let Route::Head(path) = route {
-                let path = path.to_string();
-                let get_route = Route::Get(path.into());
+                let get_route = Route::Get(path.to_string());
                 let new_target = self.get_target(&get_route);
 
                 if !new_target.is_not_found() {
@@ -199,11 +198,11 @@ impl Router {
     #[must_use]
     pub fn get(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Get(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Get(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -212,11 +211,11 @@ impl Router {
     #[must_use]
     pub fn head(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Head(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Head(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -225,11 +224,11 @@ impl Router {
     #[must_use]
     pub fn post(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Post(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Post(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -238,11 +237,11 @@ impl Router {
     #[must_use]
     pub fn put(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Put(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Put(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -251,11 +250,11 @@ impl Router {
     #[must_use]
     pub fn patch(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Patch(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Patch(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -264,11 +263,11 @@ impl Router {
     #[must_use]
     pub fn delete(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Delete(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Delete(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -277,11 +276,11 @@ impl Router {
     #[must_use]
     pub fn trace(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Trace(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Trace(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -290,11 +289,11 @@ impl Router {
     #[must_use]
     pub fn connect(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Connect(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Connect(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -303,20 +302,20 @@ impl Router {
     #[must_use]
     pub fn options(
         mut self,
-        uri_path: &'static str,
-        file_path: &'static str,
+        uri_path: &str,
+        file_path: &str,
     ) -> Self {
-        let route = Route::Options(uri_path.into());
-        let target = Target::File(file_path.as_ref());
+        let route = Route::Options(uri_path.to_string());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
 
     /// Sets the static file path to a favicon icon.
     #[must_use]
-    pub fn favicon(mut self, file_path: &'static str) -> Self {
+    pub fn favicon(mut self, file_path: &str) -> Self {
         let route = Route::Get("/favicon.ico".into());
-        let target = Target::Favicon(file_path.as_ref());
+        let target = Target::Favicon(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
@@ -324,16 +323,16 @@ impl Router {
     /// Sets the file path to a static resource to return with 404 Not Found
     /// responses.
     #[must_use]
-    pub fn not_found(mut self, file_path: &'static str) -> Self {
+    pub fn not_found(mut self, file_path: &str) -> Self {
         let route = Route::NotFound;
-        let target = Target::File(file_path.as_ref());
+        let target = Target::File(PathBuf::from(file_path));
         self.mount(route, target);
         self
     }
 
     /// Returns a `RouteBuilder`.
     #[must_use]
-    pub const fn route(self, uri_path: &'static str) -> RouteBuilder {
+    pub fn route(self, uri_path: &str) -> RouteBuilder {
         RouteBuilder::new(self, uri_path)
     }
 }
@@ -343,20 +342,21 @@ impl Router {
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RouteBuilder {
     pub router: Router,
-    pub path: &'static str,
+    pub path: String,
 }
 
 impl RouteBuilder {
     /// Returns a new `RouteBuilder` instance.
     #[must_use]
-    pub const fn new(router: Router, path: &'static str) -> Self {
+    pub fn new(router: Router, path: &str) -> Self {
+        let path = path.to_string();
         Self { router, path }
     }
 
     /// Configures handling of a GET request.
     #[must_use]
     pub fn get(mut self, target: Target) -> Self {
-        let route = Route::Get(self.path.into());
+        let route = Route::Get(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -364,7 +364,7 @@ impl RouteBuilder {
     /// Configures handling of a Head request.
     #[must_use]
     pub fn head(mut self, target: Target) -> Self {
-        let route = Route::Head(self.path.into());
+        let route = Route::Head(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -372,7 +372,7 @@ impl RouteBuilder {
     /// Configures handling of a POST request.
     #[must_use]
     pub fn post(mut self, target: Target) -> Self {
-        let route = Route::Post(self.path.into());
+        let route = Route::Post(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -380,7 +380,7 @@ impl RouteBuilder {
     /// Configures handling of a PUT request.
     #[must_use]
     pub fn put(mut self, target: Target) -> Self {
-        let route = Route::Put(self.path.into());
+        let route = Route::Put(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -388,7 +388,7 @@ impl RouteBuilder {
     /// Configures handling of a PATCH request.
     #[must_use]
     pub fn patch(mut self, target: Target) -> Self {
-        let route = Route::Patch(self.path.into());
+        let route = Route::Patch(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -396,7 +396,7 @@ impl RouteBuilder {
     /// Configures handling of a DELETE request.
     #[must_use]
     pub fn delete(mut self, target: Target) -> Self {
-        let route = Route::Delete(self.path.into());
+        let route = Route::Delete(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -404,7 +404,7 @@ impl RouteBuilder {
     /// Configures handling of a TRACE request.
     #[must_use]
     pub fn trace(mut self, target: Target) -> Self {
-        let route = Route::Trace(self.path.into());
+        let route = Route::Trace(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -412,7 +412,7 @@ impl RouteBuilder {
     /// Configures handling of an OPTIONS request.
     #[must_use]
     pub fn options(mut self, target: Target) -> Self {
-        let route = Route::Options(self.path.into());
+        let route = Route::Options(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -420,7 +420,7 @@ impl RouteBuilder {
     /// Configures handling of a CONNECT request.
     #[must_use]
     pub fn connect(mut self, target: Target) -> Self {
-        let route = Route::Connect(self.path.into());
+        let route = Route::Connect(self.path.clone());
         self.router.mount(route, target);
         self
     }
@@ -433,18 +433,18 @@ impl RouteBuilder {
 }
 
 /// Target resources served by routes in a `Router`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Empty,
     NotFound,
     Shutdown,
-    Text(&'static str),
-    Html(&'static str),
-    Json(&'static str),
-    Xml(&'static str),
-    Bytes(&'static [u8]),
-    File(&'static Path),
-    Favicon(&'static Path),
+    Text(String),
+    Html(String),
+    Json(String),
+    Xml(String),
+    Bytes(Vec<u8>),
+    File(PathBuf),
+    Favicon(PathBuf),
 }
 
 impl Default for Target {
@@ -459,10 +459,10 @@ impl Debug for Target {
             Self::Empty => write!(f, "Target::Empty"),
             Self::NotFound => write!(f, "Target::NotFound"),
             Self::Shutdown => write!(f, "Target::Shutdown"),
-            Self::Text(s) => write!(f, "Target::Text({s})"),
-            Self::Html(s) => write!(f, "Target::Html({s})"),
-            Self::Json(s) => write!(f, "Target::Json({s})"),
-            Self::Xml(s) => write!(f, "Target::Xml({s})"),
+            Self::Text(ref s) => write!(f, "Target::Text({s})"),
+            Self::Html(ref s) => write!(f, "Target::Html({s})"),
+            Self::Json(ref s) => write!(f, "Target::Json({s})"),
+            Self::Xml(ref s) => write!(f, "Target::Xml({s})"),
             Self::File(_) => write!(f, "Target::File(...)"),
             Self::Bytes(_) => write!(f, "Target::Bytes(...)"),
             Self::Favicon(_) => write!(f, "Target::Favicon(...)"),
@@ -470,15 +470,15 @@ impl Debug for Target {
     }
 }
 
-impl From<&'static str> for Target {
-    fn from(text: &'static str) -> Self {
-        Self::Text(text)
+impl From<&str> for Target {
+    fn from(text: &str) -> Self {
+        Self::Text(text.to_string())
     }
 }
 
-impl From<&'static [u8]> for Target {
-    fn from(bytes: &'static [u8]) -> Self {
-        Self::Bytes(bytes)
+impl From<&[u8]> for Target {
+    fn from(bytes: &[u8]) -> Self {
+        Self::Bytes(bytes.to_vec())
     }
 }
 
@@ -551,7 +551,7 @@ impl Target {
 
     /// Returns the `Target` as a Content-Type header value, if possible.
     #[must_use]
-    pub fn as_content_type(&self) -> Option<&'static str> {
+    pub fn as_content_type(&self) -> Option<&str> {
         match self {
             Self::Empty | Self::NotFound => None,
             Self::Text(_) | Self::Shutdown => Some("text/plain; charset=utf-8"),
@@ -559,7 +559,7 @@ impl Target {
             Self::Json(_) => Some("application/json"),
             Self::Xml(_) => Some("application/xml"),
             Self::Bytes(_) => Some("application/octet-stream"),
-            Self::File(path) | Self::Favicon(path) => {
+            Self::File(ref path) | Self::Favicon(ref path) => {
                 Self::content_type_from_ext(path)
             },
         }
@@ -567,7 +567,7 @@ impl Target {
 
     /// Returns a Content-Type header value from a file extension, if present.
     #[must_use]
-    pub fn content_type_from_ext(path: &Path) -> Option<&'static str> {
+    pub fn content_type_from_ext(path: &Path) -> Option<&str> {
         get_extension(path).and_then(|ext| match ext {
             "html" | "htm" => Some("text/html; charset=utf-8"),
             "txt" => Some("text/plain; charset=utf-8"),
