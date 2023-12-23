@@ -1,10 +1,11 @@
 use std::net::TcpStream;
 use std::process::Command;
+use std::str;
 
-use rustnet::header::DATE;
+use rustnet::header_name::DATE;
 use rustnet::{
-    Body, Connection, Headers, Method, Request, RequestLine,
-    Response, Status, StatusLine, Version,
+    Body, Connection, Headers, Method, NetError, Request, RequestLine,
+    Response, Status, StatusCode, StatusLine, Version,
 };
 
 #[macro_use]

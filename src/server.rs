@@ -2,14 +2,12 @@ use std::net::{
     IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
 use crate::{
-    Body, NetError, NetReader, NetResult, NetWriter, Response, Route, Router,
-    NUM_WORKERS,
+    Connection, NetError, NetResult, Route, Router, ThreadPool, NUM_WORKERS,
 };
 
 /// Configures the socket address and the router for a `Server`.
@@ -18,9 +16,9 @@ pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs,
 {
-    pub is_test: bool,
-    pub do_logging: bool,
     pub addr: Option<A>,
+    pub do_logging: bool,
+    pub is_test_server: bool,
     pub router: Router,
 }
 
@@ -30,9 +28,9 @@ where
 {
     fn default() -> Self {
         Self {
-            is_test: false,
-            do_logging: false,
             addr: None,
+            do_logging: false,
+            is_test_server: false,
             router: Router::default()
         }
     }
@@ -57,15 +55,15 @@ where
 
     /// Adds the given `Router` to the server.
     #[must_use]
-    pub fn router(mut self, router: Router) -> Self {
-        self.router = router;
+    pub fn router(mut self, router: &Router) -> Self {
+        self.router = router.clone();
         self
     }
 
     /// Enable logging of new connections to stdout (default: disabled).
     #[must_use]
-    pub const fn is_test(mut self, is_test: bool) -> Self {
-        self.is_test = is_test;
+    pub const fn is_test_server(mut self, is_test: bool) -> Self {
+        self.is_test_server = is_test;
         self
     }
 
@@ -89,8 +87,8 @@ where
             .and_then(Listener::bind)?;
 
         let config = ServerConfig {
-            is_test: self.is_test,
             do_logging: self.do_logging,
+            is_test_server: self.is_test_server,
             keep_listening: AtomicBool::new(false),
             router: self.router
         };
@@ -114,8 +112,8 @@ where
 /// Contains the configuration options for a `Server`.
 #[derive(Debug)]
 pub struct ServerConfig {
-    pub is_test: bool,
     pub do_logging: bool,
+    pub is_test_server: bool,
     pub keep_listening: AtomicBool,
     pub router: Router,
 }
@@ -154,10 +152,10 @@ impl ServerConfig {
     }
 
     /// Sends a 500 status response to the client if there is an error.
-    pub fn send_error(&self, writer: &mut NetWriter, err: &NetError) {
+    pub fn send_500_error(&self, err: &NetError, conn: &mut Connection) {
         self.log_error(err);
 
-        if let Err(err2) = writer.send_error(&err.to_string()) {
+        if let Err(err2) = conn.send_500_error(&err.to_string()) {
             self.log_error(&err2);
         }
     }
@@ -172,143 +170,16 @@ impl ServerConfig {
         let timeout = Duration::from_millis(200);
 
         match TcpStream::connect_timeout(&conn.local_addr, timeout) {
+            Err(e) => self.log_error(&e.into()),
             Ok(stream) => {
                 if let Err(e) = stream.shutdown(Shutdown::Both) {
                     self.log_error(&e.into());
                 }
             },
-            Err(e) => self.log_error(&e.into()),
         }
 
         // Give the worker threads some time to shutdown.
         thread::sleep(timeout);
-    }
-}
-
-/// Represents the TCP connection between a client and a server.
-#[derive(Debug)]
-pub struct Connection {
-    pub reader: NetReader,
-    pub writer: NetWriter,
-    pub local_addr: SocketAddr,
-    pub remote_addr: SocketAddr,
-}
-
-impl TryFrom<TcpStream> for Connection {
-    type Error = NetError;
-
-    fn try_from(stream: TcpStream) -> NetResult<Self> {
-        let local_addr = stream.local_addr()?;
-        let remote_addr = stream.peer_addr()?;
-        let reader = NetReader::from(stream.try_clone()?);
-        let writer = NetWriter::from(stream);
-
-        Ok(Self {
-            reader,
-            writer,
-            local_addr,
-            remote_addr,
-        })
-    }
-}
-
-impl Connection {
-    /// Returns the IP address of the remote client.
-    #[must_use]
-    pub const fn remote_ip(&self) -> IpAddr {
-        self.remote_addr.ip()
-    }
-
-    /// Returns a clone of this `Connection`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if cloning of the underlying `NetReader` or
-    /// `NetWriter` fails.
-    pub fn try_clone(&self) -> NetResult<Self> {
-        let local_addr = self.local_addr;
-        let remote_addr = self.remote_addr;
-        let reader = self.reader.try_clone()?;
-        let writer = self.writer.try_clone()?;
-        Ok(Self {
-            reader,
-            writer,
-            local_addr,
-            remote_addr,
-        })
-    }
-}
-
-/// A wrapper around a `TcpListener` instance.
-#[derive(Debug)]
-pub struct Listener {
-    pub inner: TcpListener,
-    pub local_addr: SocketAddr,
-}
-
-impl TryFrom<TcpListener> for Listener {
-    type Error = NetError;
-
-    fn try_from(inner: TcpListener) -> NetResult<Self> {
-        let local_addr = inner.local_addr()?;
-        Ok(Self { inner, local_addr })
-    }
-}
-
-impl Listener {
-    /// Bind a `Listener` to a given socket address.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `TcpListener::bind` returns an error.
-    pub fn bind<A>(addr: A) -> NetResult<Self>
-    where
-        A: ToSocketAddrs,
-    {
-        let listener = TcpListener::bind(addr)?;
-        Self::try_from(listener)
-    }
-
-    /// Returns a `Connection` instance for each incoming connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `TcpStream::try_clone` returns an error.
-    pub fn accept(&self) -> NetResult<Connection> {
-        self.inner
-            .accept()
-            .map_err(|err| NetError::Read(err.kind()))
-            .and_then(|(stream, remote_addr)| {
-                let local_addr = self.local_addr;
-                let reader = NetReader::from(stream.try_clone()?);
-                let writer = NetWriter::from(stream);
-
-                Ok(Connection {
-                    reader,
-                    writer,
-                    local_addr,
-                    remote_addr,
-                })
-            })
-    }
-}
-
-/// A handle to the server's listener thread.
-#[derive(Debug)]
-pub struct ServerHandle<T> {
-    pub handle: JoinHandle<T>,
-}
-
-impl<T> ServerHandle<T> {
-    /// Waits until the server thread is finished.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if the server's listener thread panics.
-    pub fn join(self) -> NetResult<T> {
-        self.handle
-            .join()
-            .map_err(|_| NetError::Other("Could not join the server handle."))
     }
 }
 
@@ -338,17 +209,6 @@ impl Server {
         ServerBuilder::new().addr(addr)
     }
 
-    /// Returns a test `Server` listening on the given address with a route
-    /// that is used for graceful shutdown of the server.
-    #[must_use]
-    pub fn test<A>(addr: A, mut router: Router) -> ServerBuilder<A>
-    where
-        A: ToSocketAddrs,
-    {
-        router.mount_shutdown_route();
-        ServerBuilder::new().is_test(true).addr(addr).router(router)
-    }
-
     /// Activates the server to start listening on its bound address.
     #[must_use]
     pub fn start(self) -> ServerHandle<()> {
@@ -366,6 +226,7 @@ impl Server {
 
             while config.keep_listening.load(Ordering::Relaxed) {
                 match listener.accept() {
+                    Err(ref e) => config.log_error(e),
                     Ok(conn) => {
                         // Check if shutdown was triggered.
                         if config.keep_listening.load(Ordering::Relaxed) {
@@ -374,7 +235,6 @@ impl Server {
                             break;
                         }
                     },
-                    Err(ref e) => config.log_error(e),
                 }
             }
         });
@@ -401,129 +261,65 @@ impl Server {
     }
 }
 
-/// Holds a handle to a single worker thread.
+/// A handle to the server's listener thread.
 #[derive(Debug)]
-pub struct Worker {
-    pub id: usize,
-    pub handle: Option<JoinHandle<()>>,
+pub struct ServerHandle<T> {
+    pub handle: JoinHandle<T>,
 }
 
-impl Worker {
-    /// Spawns a worker thread that receives and handles new connections.
+impl<T> ServerHandle<T> {
+    /// Waits until the server thread is finished.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if there is a problem receiving a `Connection`.
-    pub fn new(
-        id: usize,
-        receiver: Arc<Mutex<Receiver<Connection>>>,
-        config: Arc<ServerConfig>,
-    ) -> Self {
-        let handle = thread::spawn(move || {
-            let rx = receiver.lock().unwrap();
-
-            while let Ok(mut conn) = rx.recv() {
-                let route = match conn.reader.recv_request() {
-                    Ok(req) => req.route(),
-                    Err(ref err) => {
-                        config.send_error(&mut conn.writer, err);
-                        continue;
-                    },
-                };
-
-                let (target, status) = config.router.resolve(&route);
-
-                let mut resp = match Response::from_target(target, status) {
-                    Ok(mut resp) => {
-                        // Remove body for HEAD requests.
-                        if route.is_head() {
-                            resp.body = Body::Empty;
-                        }
-
-                        resp
-                    },
-                    Err(ref err) => {
-                        config.send_error(&mut conn.writer, err);
-                        continue;
-                    },
-                };
-
-                if let Err(ref err) = conn.writer.send_response(&mut resp) {
-                    config.send_error(&mut conn.writer, err);
-                    continue;
-                }
-
-                // Check for server shutdown signal
-                if config.is_test && route.is_shutdown() {
-                    config.shutdown_server(&conn);
-                    break;
-                }
-
-                config.log_route(status, &route, &conn);
-            }
-        });
-
-        Self {
-            id,
-            handle: Some(handle),
-        }
+    /// An error is returned if the server's listener thread panics.
+    pub fn join(self) -> NetResult<T> {
+        self.handle.join().map_err(|_| NetError::JoinFail)
     }
 }
 
-/// Holds the pool of `Worker` threads.
+/// A wrapper around a `TcpListener` instance.
 #[derive(Debug)]
-pub struct ThreadPool {
-    pub workers: Vec<Worker>,
-    pub sender: Option<Sender<Connection>>,
+pub struct Listener {
+    pub inner: TcpListener,
+    pub local_addr: SocketAddr,
 }
 
-impl ThreadPool {
-    /// Create a new `ThreadPool` with the given number of worker threads.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the `size` argument is less than one.
-    #[must_use]
-    pub fn new(num_workers: usize, config: &Arc<ServerConfig>) -> Self {
-        assert!(num_workers > 0);
+impl TryFrom<TcpListener> for Listener {
+    type Error = NetError;
 
-        let (tx, rx) = channel();
-        let sender = Some(tx);
-        let receiver = Arc::new(Mutex::new(rx));
-
-        let mut workers = Vec::with_capacity(num_workers);
-
-        for id in 0..num_workers {
-            let worker_rx = Arc::clone(&receiver);
-            let config_clone = Arc::clone(config);
-            let worker = Worker::new(id, worker_rx, config_clone);
-            workers.push(worker);
-        }
-
-        Self { workers, sender }
-    }
-
-    /// Sends a `Connection` to a worker thread for handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if there is a problem sending the `Connection` to the worker
-    /// thread.
-    pub fn handle_connection(&self, conn: Connection) {
-        if let Some(tx) = self.sender.as_ref() {
-            tx.send(conn).unwrap();
-        }
+    fn try_from(inner: TcpListener) -> NetResult<Self> {
+        let local_addr = inner.local_addr()?;
+        Ok(Self { inner, local_addr })
     }
 }
 
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        drop(self.sender.take());
+impl Listener {
+    /// Bind a TCP `Listener` to a given address. This function accepts
+    /// any input that implements the `ToSocketAddrs` trait.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `TcpListener::bind` returns an error.
+    pub fn bind<A>(addr: A) -> NetResult<Self>
+    where
+        A: ToSocketAddrs,
+    {
+        let listener = TcpListener::bind(addr)?;
+        Self::try_from(listener)
+    }
 
-        for worker in &mut self.workers {
-            if let Some(handle) = worker.handle.take() {
-                handle.join().unwrap();
-            }
-        }
+    /// Returns a `Connection` instance for each incoming connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Connection::try_clone` fails.
+    pub fn accept(&self) -> NetResult<Connection> {
+        self.inner
+            .accept()
+            .map_err(|err| NetError::Read(err.kind()))
+            .and_then(|(stream, remote_addr)| {
+                Connection::try_from((stream, remote_addr))
+            })
     }
 }

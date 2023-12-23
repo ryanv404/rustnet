@@ -4,7 +4,7 @@ use rustnet::{NetResult, Router, Server, ServerCli};
 
 fn main() -> NetResult<()> {
     // Handle command-line options.
-    let cli = ServerCli::parse_args(env::args());
+    let mut cli = ServerCli::parse_args(env::args());
 
     // Add some static HTML routes.
     let mut router = Router::new()
@@ -18,7 +18,7 @@ fn main() -> NetResult<()> {
         .trace("/trace", "static/index.html")
         .options("/options", "static/index.html")
         .connect("/connect", "static/index.html")
-        // Set up favicon and handle non-existent routes.
+        // Set up a favicon and handle non-existent routes.
         .favicon("static/favicon.ico")
         .not_found("static/error.html");
 
@@ -37,25 +37,26 @@ fn main() -> NetResult<()> {
         .connect("Hi from the CONNECT route!".into())
         .apply();
 
-    // Apply CLI routes to server.
-    for (name, value) in cli.router.0.iter() {
-        router.0.insert(name.clone(), value.clone());
+    // Merge the CLI router into the server router.
+    router.append(&mut cli.router);
+
+    // Build the HTTP server.
+    let server = Server::http(&cli.addr)
+        .router(&router)
+        .log_connections(cli.do_logging)
+        .is_test_server(cli.is_test_server)
+        .build()?;
+
+    // Print and exit if "--debug" was selected.
+    if cli.debug_cli {
+        dbg!(&server);
+        return Ok(());
     }
 
     // Start the HTTP server.
-    let server = if cli.is_test {
-        Server::test(&cli.addr, router)
-            .log_connections(cli.do_logging)
-            .start()?
-    } else {
-        Server::http(&cli.addr)
-            .router(router)
-            .log_connections(cli.do_logging)
-            .start()?
-    };
+    let handle = server.start();
 
     // Wait for the server to exit.
-    server.join()?;
-
+    handle.join()?;
     Ok(())
 }

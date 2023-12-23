@@ -1,229 +1,13 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, Result as IoResult, Write, WriterPanicked};
-use std::net::TcpStream;
+use std::io::{BufWriter, StdoutLock, Write};
 use std::str::FromStr;
 
-use crate::header::{ACCEPT, CONNECTION, HOST, SERVER, USER_AGENT};
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetError, NetParseError,
-    NetReader, NetResult, Request, RequestLine, Status, Target, Version,
-    WRITER_BUFSIZE,
+    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
+    NetParseError, NetResult, Status, StatusCode, Target, Version,
 };
-
-/// A buffered writer responsible for writing to an inner `TcpStream`.
-#[derive(Debug)]
-pub struct NetWriter(pub BufWriter<TcpStream>);
-
-impl From<TcpStream> for NetWriter {
-    fn from(stream: TcpStream) -> Self {
-        Self(BufWriter::with_capacity(WRITER_BUFSIZE, stream))
-    }
-}
-
-impl From<NetReader> for NetWriter {
-    fn from(reader: NetReader) -> Self {
-        Self::from(reader.into_inner())
-    }
-}
-
-impl Write for NetWriter {
-    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        self.0.write(buf)
-    }
-
-    fn flush(&mut self) -> IoResult<()> {
-        self.0.flush()
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.0.write_all(buf)
-    }
-}
-
-impl NetWriter {
-    /// Returns a clone of the current `NetWriter`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if the underlying call to `TcpStream::try_clone`
-    /// returns an error.
-    pub fn try_clone(&self) -> NetResult<Self> {
-        let stream = self.get_ref().try_clone()?;
-        Ok(Self::from(stream))
-    }
-
-    /// Consumes the `NetWriter` and returns the components of underlying
-    /// `TcpStream`.
-    pub fn into_parts(self) -> (TcpStream, Result<Vec<u8>, WriterPanicked>) {
-        self.0.into_parts()
-    }
-
-    /// Consumes the `NetWriter` and returns the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the inner `TcpStream` could not be returned.
-    pub fn into_inner(self) -> NetResult<TcpStream> {
-        self.0.into_inner().map_err(|e| e.into_error().into())
-    }
-
-    /// Returns a reference to the underlying `TcpStream`.
-    #[must_use]
-    pub fn get_ref(&self) -> &TcpStream {
-        self.0.get_ref()
-    }
-
-    /// Writes a `RequestLine` to the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if the `RequestLine` could not be written
-    /// to the `TcpStream` successfully.
-    pub fn write_request_line(
-        &mut self,
-        request_line: &RequestLine,
-    ) -> NetResult<()> {
-        self.write_all(format!("{request_line}\r\n").as_bytes())?;
-        Ok(())
-    }
-
-    /// Writes a `StatusLine` to the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if the `StatusLine` could not be written
-    /// to the `TcpStream` successfully.
-    pub fn write_status_line(
-        &mut self,
-        status_line: &StatusLine,
-    ) -> NetResult<()> {
-        self.write_all(format!("{status_line}\r\n").as_bytes())?;
-        Ok(())
-    }
-
-    /// Writes the request header entries in `Headers` to the underlying
-    /// `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if a problem was encountered while writing the
-    /// `Headers` to the `TcpStream`.
-    pub fn write_request_headers(&mut self, headers: &mut Headers) -> NetResult<()> {
-        if !headers.contains(&ACCEPT) {
-            headers.insert(ACCEPT, "*/*".into());
-        }
-
-        if !headers.contains(&HOST) {
-            let stream = self.get_ref();
-            let remote = stream.peer_addr()?;
-            headers.host(&remote);
-        }
-
-        if !headers.contains(&USER_AGENT) {
-            headers.user_agent("rustnet/0.1");
-        }
-
-        if !headers.is_empty() {
-            for (name, value) in &headers.0 {
-                let header = format!("{name}: {value}\r\n");
-                self.write_all(header.as_bytes())?;
-            }
-        }
-
-        self.write_all(b"\r\n")?;
-        Ok(())
-    }
-
-    /// Writes the response header entries in `Headers` to the underlying
-    /// `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if a problem was encountered while writing the
-    /// `Headers` to the `TcpStream`.
-    pub fn write_response_headers(&mut self, headers: &mut Headers) -> NetResult<()> {
-        if !headers.contains(&SERVER) {
-            headers.server("rustnet/0.1");
-        }
-
-        if !headers.is_empty() {
-            for (name, value) in &headers.0 {
-                let header = format!("{name}: {value}\r\n");
-                self.write_all(header.as_bytes())?;
-            }
-        }
-
-        self.write_all(b"\r\n")?;
-        Ok(())
-    }
-
-    /// Writes a `Body` to the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if the `Body` could not be written
-    /// to the `TcpStream` successfully.
-    pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
-        if !body.is_empty() {
-            self.write_all(body.as_bytes())?;
-        }
-        Ok(())
-    }
-
-    /// Writes a `Request` to the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if there is a failure to write any of the
-    /// individual components of the `Request` to the `TcpStream`.
-    pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
-        self.write_request_line(&req.request_line)?;
-        self.write_request_headers(&mut req.headers)?;
-        self.write_body(&req.body)?;
-        self.flush()?;
-        Ok(())
-    }
-
-    /// Writes an internal server error `Response` to the underlying
-    /// `TcpStream` that contains the provided error message.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if there is a failure to write any of the
-    /// individual components of the `Response` to the `TcpStream`.
-    pub fn send_error(&mut self, err_msg: &str) -> NetResult<()> {
-        let mut res = Response::new(500);
-
-        // Update the response headers.
-        res.headers.connection("close");
-        res.headers.cache_control("no-cache");
-        res.headers.content_length(err_msg.len());
-        res.headers.content_type("text/plain; charset=utf-8");
-
-        // Include the provided error message.
-        res.body = Body::Text(err_msg.into());
-
-        self.write_status_line(&res.status_line)?;
-        self.write_response_headers(&mut res.headers)?;
-        self.write_body(&res.body)?;
-        self.flush()?;
-        Ok(())
-    }
-
-    /// Writes a `Response` to the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if there is a failure to write any of the
-    /// individual components of the `Response` to the `TcpStream`.
-    pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
-        self.write_status_line(&res.status_line)?;
-        self.write_response_headers(&mut res.headers)?;
-        self.write_body(&res.body)?;
-        self.flush()?;
-        Ok(())
-    }
-}
+use crate::colors::{CLR, PURP};
+use crate::header_name::CONNECTION;
 
 /// Contains the components of an HTTP status line.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -242,70 +26,64 @@ impl FromStr for StatusLine {
     type Err = NetError;
 
     fn from_str(line: &str) -> NetResult<Self> {
-        let start = line.find("HTTP")
-            .ok_or(NetError::Parse(NetParseError::StatusLine))?;
+        let start = line
+            .find("HTTP")
+            .ok_or(NetParseError::StatusLine)?;
 
         line[start..]
+            .trim()
             .split_once(' ')
-            .ok_or(NetError::Parse(NetParseError::StatusLine))
+            .ok_or(NetParseError::StatusLine.into())
             .and_then(|(token1, token2)| {
-                let version = token1.parse::<Version>()?;
-                let status = token2.parse::<Status>()?;
+                let version = Version::from_str(token1)?;
+                let status = Status::from_str(token2)?;
                 Ok(Self { version, status })
             })
     }
 }
 
-impl StatusLine {
-    /// Returns a new `StatusLine` instance from the provided status code.
-    #[must_use]
-    pub const fn new(code: u16) -> Self {
+impl TryFrom<u16> for StatusLine {
+    type Error = NetError;
+
+    fn try_from(code: u16) -> NetResult<Self> {
+        StatusCode::try_from(code).map(Into::into)
+    }
+}
+
+impl From<StatusCode> for StatusLine {
+    fn from(status_code: StatusCode) -> Self {
         Self {
             version: Version::OneDotOne,
-            status: Status(code),
+            status: Status(status_code)
         }
     }
+}
 
-    /// Returns the HTTP protocol `Version`.
-    #[must_use]
-    pub const fn version(&self) -> Version {
-        self.version
+impl StatusLine {
+    /// Writes the `StatusLine` to a `BufWriter` with plain formatting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the provided `BufWriter` fails.
+    pub fn write_plain(
+        &self,
+        writer: &mut BufWriter<StdoutLock<'_>>
+    ) -> NetResult<()> {
+        writeln!(writer, "{self}")?;
+        Ok(())
     }
 
-    /// Returns the `Status`.
-    #[must_use]
-    pub const fn status(&self) -> Status {
-        self.status
-    }
-
-    /// Returns the `Status` code.
-    #[must_use]
-    pub const fn status_code(&self) -> u16 {
-        self.status.code()
-    }
-
-    // Common logic for the to_plain_string and to_color_string functions.
-    fn string_helper(self, use_color: bool) -> String {
-        const PURP: &str = "\x1b[95m";
-        const CLR: &str = "\x1b[0m";
-
-        if use_color {
-            format!("{PURP}{} {}{CLR}\n", &self.version, &self.status)
-        } else {
-            format!("{} {}\n", &self.version, &self.status)
-        }
-    }
-
-    /// Returns the `StatusLine` as a `String` with plain formatting.
-    #[must_use]
-    pub fn to_plain_string(&self) -> String {
-        self.string_helper(false)
-    }
-
-    /// Returns the `StatusLine` as a `String` with color formatting.
-    #[must_use]
-    pub fn to_color_string(&self) -> String {
-        self.string_helper(true)
+    /// Writes the `StatusLine` to a `BufWriter` with color formatting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the provided `BufWriter` fails.
+    pub fn write_color(
+        &self,
+        writer: &mut BufWriter<StdoutLock<'_>>
+    ) -> NetResult<()> {
+        writeln!(writer, "{PURP}{self}{CLR}")?;
+        Ok(())
     }
 }
 
@@ -334,26 +112,26 @@ impl Display for Response {
     }
 }
 
-impl Response {
-    /// Returns a new `Response` containing the provided status code.
-    #[must_use]
-    pub fn new(code: u16) -> Self {
-        Self {
-            status_line: StatusLine::new(code),
-            headers: Headers::new(),
-            body: Body::Empty,
-        }
-    }
+impl TryFrom<u16> for Response {
+    type Error = NetError;
 
-    /// Constructs a new `Response` based on the `Target` of the requested
-    /// `Route`.
+    fn try_from(code: u16) -> NetResult<Self> {
+        let status_line = StatusLine::try_from(code)?;
+        let headers = Headers::new();
+        let body = Body::Empty;
+
+        Ok(Self { status_line, headers, body })
+    }
+}
+
+impl Response {
+    /// Constructs a new `Response` based on a `Target` and a `Route`.
     ///
     /// # Errors
     ///
-    /// Returns an error if a `Response` could not be constructed from
-    /// a `Target`.
+    /// Returns an error if the `Response` could not be constructed.
     pub fn from_target(target: Target, status: u16) -> NetResult<Self> {
-        let mut res = Self::new(status);
+        let mut res = Self::try_from(status)?;
 
         res.body = Body::try_from(target)?;
 
@@ -377,49 +155,50 @@ impl Response {
         Ok(res)
     }
 
-    /// Returns the `StatusLine` for this `Response`.
+    /// Returns a reference to the `StatusLine`.
     #[must_use]
     pub const fn status_line(&self) -> &StatusLine {
         &self.status_line
     }
 
-    /// Returns the HTTP protocol `Version`.
+    /// Returns a reference to the HTTP protocol `Version`.
     #[must_use]
-    pub const fn version(&self) -> Version {
-        self.status_line.version
+    pub const fn version(&self) -> &Version {
+        &self.status_line.version
     }
 
-    /// Returns the `Status` for this `Response`.
+    /// Returns a reference to the `Status` for this `Response`.
     #[must_use]
-    pub const fn status(&self) -> Status {
-        self.status_line.status
+    pub const fn status(&self) -> &Status {
+        &self.status_line.status
     }
 
-    /// Returns the `Status` code for this `Response`.
+    /// Returns the `Status` code.
     #[must_use]
     pub const fn status_code(&self) -> u16 {
         self.status_line.status.code()
     }
 
-    /// Returns the `Status` reason phrase for this `Response`.
+    /// Returns the reason phrase for the response `Status`.
     #[must_use]
-    pub const fn status_msg(&self) -> &'static str {
+    pub fn status_msg(&self) -> &str {
         self.status_line.status.msg()
     }
 
-    /// Returns the headers for this `Response`.
+    /// Returns a reference to the headers for this `Response`.
     #[must_use]
     pub const fn headers(&self) -> &Headers {
         &self.headers
     }
 
-    /// Returns true if the `HeaderName` key is present.
+    /// Returns true if the header represented by the given `HeaderName` key
+    /// is present.
     #[must_use]
     pub fn contains(&self, name: &HeaderName) -> bool {
         self.headers.contains(name)
     }
 
-    /// Adds or modifies the header field represented by `HeaderName`.
+    /// Inserts a header into the `Response`.
     pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
     }
@@ -432,41 +211,39 @@ impl Response {
 
     /// Returns true if a body is permitted for this `Response`.
     #[must_use]
-    pub fn body_is_permitted(&self, method: Method) -> bool {
+    pub fn body_is_permitted(&self, method: &Method) -> bool {
         match self.status_code() {
             // 1xx (Informational), 204 (No Content), and 304 (Not Modified).
             100..=199 | 204 | 304 => false,
             // CONNECT responses with a 2xx (Success) status.
-            200..=299 if method == Method::Connect => false,
+            200..=299 if *method == Method::Connect => false,
             // HEAD responses.
-            _ if method == Method::Head => false,
+            _ if *method == Method::Head => false,
             _ => true,
         }
     }
 
-    /// Returns a reference to the `Body`.
+    /// Returns a reference to the message `Body`.
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body
     }
 
-    /// Writes an HTTP response to a remote client.
+    /// Writes an HTTP response to a `Connection`.
     ///
     /// # Errors
     ///
-    /// An error is returned if `NetWriter::send_response` encounters an
-    /// error.
-    pub fn send(&mut self, writer: &mut NetWriter) -> NetResult<()> {
-        writer.send_response(self)
+    /// An error is returned if `Connection::send_response` fails.
+    pub fn send(&mut self, conn: &mut Connection) -> NetResult<()> {
+        conn.send_response(self)
     }
 
-    /// Reads and parses an HTTP response from a remote server.
+    /// Reads and parses an HTTP response from a `Connection`.
     ///
     /// # Errors
     ///
-    /// An error is returned if `NetReader::recv_response` encounters an
-    /// error.
-    pub fn recv(reader: &mut NetReader) -> NetResult<Self> {
-        reader.recv_response()
+    /// An error is returned if `Connection::recv_response` fails.
+    pub fn recv(conn: &mut Connection) -> NetResult<Self> {
+        conn.recv_response()
     }
 }

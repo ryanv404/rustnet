@@ -1,13 +1,12 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
-use crate::util::trim_whitespace_bytes;
 use crate::{NetError, NetParseError, NetResult};
 
 /// Header field name.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HeaderName {
-    pub inner: HeaderKind,
+    pub inner: HeaderNameInner,
 }
 
 impl Display for HeaderName {
@@ -18,69 +17,49 @@ impl Display for HeaderName {
 
 impl Debug for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        Debug::fmt(&self.to_titlecase(), f)
-    }
-}
-
-impl From<StandardHeader> for HeaderName {
-    fn from(std: StandardHeader) -> Self {
-        let inner = HeaderKind::Standard(std);
-        Self { inner }
-    }
-}
-
-impl FromStr for HeaderName {
-    type Err = NetError;
-
-    fn from_str(s: &str) -> NetResult<Self> {
-        let inner = StandardHeader::from_bytes(s.as_bytes()).map_or_else(
-            || HeaderKind::Custom(Vec::from(s.trim())),
-            HeaderKind::Standard,
-        );
-
-        Ok(Self { inner })
+        write!(f, "{self}")
     }
 }
 
 impl From<&str> for HeaderName {
-    fn from(s: &str) -> Self {
-        let s = s.trim();
-        let bytes = s.as_bytes();
-
-        Self {
-            inner: StandardHeader::from_bytes(bytes).map_or_else(
-                || HeaderKind::Custom(Vec::from(s)),
-                HeaderKind::Standard)
-        }
+    fn from(header_name: &str) -> Self {
+        HeaderNameInner::from(header_name).into()
     }
 }
 
 impl TryFrom<&[u8]> for HeaderName {
     type Error = NetError;
 
-    fn try_from(b: &[u8]) -> NetResult<Self> {
-        let inner = HeaderKind::try_from(b)?;
-        Ok(Self { inner })
+    fn try_from(bytes: &[u8]) -> NetResult<Self> {
+        HeaderNameInner::try_from(bytes).map(Into::into)
+    }
+}
+
+impl From<HeaderNameInner> for HeaderName {
+    fn from(inner: HeaderNameInner) -> Self {
+        Self { inner }
+    }
+}
+
+impl From<StandardHeaderName> for HeaderName {
+    fn from(std_header: StandardHeaderName) -> Self {
+        Self { inner: std_header.into() }
     }
 }
 
 impl HeaderName {
-    /// Returns a standard `HeaderName` with an inner `HeaderKind::Standard`
-    /// from the given string slice, if possible.
+    /// Returns a `HeaderName` of kind `HeaderKind::Standard` from the given
+    /// string slice, if possible.
     #[must_use]
     pub fn standard(name: &str) -> Option<Self> {
-        StandardHeader::from_bytes(name.as_bytes()).map(|hdr| Self {
-            inner: HeaderKind::Standard(hdr),
-        })
+        StandardHeaderName::try_from(name.as_bytes()).map(Into::into).ok()
     }
 
-    /// Returns a custom `HeaderName` with an inner `HeaderKind::Custom` from
-    /// the given string slice.
+    /// Returns a `HeaderName` of kind `HeaderKind::Custom` from the given
+    /// string slice.
     #[must_use]
     pub fn custom(name: &str) -> Self {
-        Self {
-            inner: HeaderKind::Custom(Vec::from(name)),
-        }
+        HeaderNameInner::Custom(name.to_string()).into()
     }
 
     /// Returns the header name as a byte slice.
@@ -92,15 +71,15 @@ impl HeaderName {
     /// Returns the header name as a title case string.
     #[must_use]
     pub fn to_titlecase(&self) -> String {
-        if self.inner.is_empty() {
+        let bytes = self.inner.as_bytes();
+
+        if bytes.is_empty() {
             return String::new();
         }
 
-        let bytes = self.inner.as_bytes();
         let mut title = String::with_capacity(bytes.len());
 
-        bytes
-            .split(|&b| b == b'-')
+        bytes.split(|&b| b == b'-')
             .filter(|&part| !part.is_empty())
             .for_each(|part| {
                 if let Some((first, rest)) = part.split_first() {
@@ -122,85 +101,97 @@ impl HeaderName {
 }
 
 /// Header name representation.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum HeaderKind {
-    Standard(StandardHeader),
-    Custom(Vec<u8>),
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HeaderNameInner {
+    Standard(StandardHeaderName),
+    Custom(String),
 }
 
-impl TryFrom<&[u8]> for HeaderKind {
+impl TryFrom<&[u8]> for HeaderNameInner {
     type Error = NetError;
 
-    fn try_from(b: &[u8]) -> NetResult<Self> {
-        match StandardHeader::from_bytes(b) {
-            Some(std) => Ok(Self::Standard(std)),
-            None if str::from_utf8(b).is_ok() => {
-                Ok(Self::Custom(b.to_ascii_lowercase()))
-            },
-            None => Err(NetError::Parse(NetParseError::Header)),
+    fn try_from(bytes: &[u8]) -> NetResult<Self> {
+        match str::from_utf8(bytes) {
+            Ok(header) => Ok(header.into()),
+            Err(_) => Err(NetParseError::Header)?,
         }
     }
 }
 
-impl HeaderKind {
+impl From<&str> for HeaderNameInner {
+    fn from(header_name: &str) -> Self {
+        match StandardHeaderName::from_str(header_name) {
+            Ok(std) => Self::Standard(std),
+            Err(_) => Self::Custom(header_name.to_string()),
+        }
+    }
+}
+
+impl From<StandardHeaderName> for HeaderNameInner {
+    fn from(std_header: StandardHeaderName) -> Self {
+        Self::Standard(std_header)
+    }
+}
+
+impl HeaderNameInner {
     /// Returns the header field name as a bytes slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Standard(std) => std.as_bytes(),
-            Self::Custom(ref buf) => buf.as_slice(),
-        }
-    }
-
-    /// Returns whether the byte representation of the header name has a
-    /// length of zero.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Standard(std) => std.as_bytes().is_empty(),
-            Self::Custom(ref buf) => buf.is_empty(),
+            Self::Custom(custom) => custom.as_bytes(),
         }
     }
 }
 
-macro_rules! impl_standard_headers {
+macro_rules! impl_standard_header_names {
     ($( $bytes:literal => $constant:ident, $variant:ident; )+) => {
         // Standard header names.
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
-        pub enum StandardHeader {
+        pub enum StandardHeaderName {
             $( $variant, )+
         }
 
-        pub mod header_consts {
-            use super::{HeaderKind, HeaderName, StandardHeader};
+        // Constants representing all of the standard header field names.
+        pub mod header_name {
+            use super::{HeaderName, HeaderNameInner, StandardHeaderName};
             $(
-                // Constants representing all of the standard header field names.
                 pub const $constant: HeaderName = HeaderName {
-                    inner: HeaderKind::Standard(StandardHeader::$variant)
+                    inner: HeaderNameInner::Standard(StandardHeaderName::$variant)
                 };
             )+
         }
 
-        impl Display for StandardHeader {
+        impl Display for StandardHeaderName {
             fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-                write!(f, "{}", self.as_str())
+                write!(f, "{}", unsafe { self.as_str() })
             }
         }
 
-        impl StandardHeader {
-            /// Parses a bytes slice into a `StandardHeader` if possible.
-            #[must_use]
-            pub fn from_bytes(input: &[u8]) -> Option<Self> {
-                let lowercase = trim_whitespace_bytes(input)
-                    .to_ascii_lowercase();
+        impl TryFrom<&[u8]> for StandardHeaderName {
+            type Error = NetError;
 
-                match lowercase.as_slice() {
-                    $( $bytes => Some(Self::$variant), )+
-                    _ => None,
+            fn try_from(name_bytes: &[u8]) -> NetResult<Self> {
+                match name_bytes {
+                    $(
+                        b if b.eq_ignore_ascii_case($bytes) =>
+                            Ok(Self::$variant),
+                    )+
+                    _ => Err(NetParseError::Header)?,
                 }
             }
+        }
 
-            /// Returns a bytes slice representation of the `StandardHeader`.
+        impl FromStr for StandardHeaderName {
+            type Err = NetError;
+
+            fn from_str(header: &str) -> NetResult<Self> {
+                Self::try_from(header.as_bytes())
+            }
+        }
+
+        impl StandardHeaderName {
+            /// Returns a bytes slice representation of the `StandardHeaderName`.
             #[must_use]
             pub const fn as_bytes(&self) -> &'static [u8] {
                 match *self {
@@ -208,24 +199,26 @@ macro_rules! impl_standard_headers {
                 }
             }
 
-            /// Returns a string slice representation of the `StandardHeader`.
+            /// Returns a string slice representation of the `StandardHeaderName`.
             #[must_use]
-            pub fn as_str(&self) -> &'static str {
-                // NOTE: The standard headers below are all UTF-8 compatible.
-                str::from_utf8(self.as_bytes()).unwrap()
+            pub unsafe fn as_str(&self) -> &'static str {
+                // SAFETY: We know that all of the bytes slices returned by
+                // `StandardHeaderName::as_bytes` are valid UTF-8 since we
+                // provided them.
+                unsafe { str::from_utf8_unchecked(self.as_bytes()) }
             }
         }
 
-        // A collection of all `StandardHeader` values that is used during
+        // A collection of all `StandardHeaderName` values that is used during
         // testing.
         #[cfg(test)]
-        pub const STANDARD_HEADERS: &'static [(StandardHeader, &'static [u8])] = &[
-            $( (StandardHeader::$variant, $bytes), )+
+        pub const STANDARD_HEADERS: &'static [(StandardHeaderName, &'static [u8])] = &[
+            $( (StandardHeaderName::$variant, $bytes), )+
         ];
     };
 }
 
-impl_standard_headers! {
+impl_standard_header_names! {
     b"accept" => ACCEPT, Accept;
     b"accept-charset" => ACCEPT_CHARSET, AcceptCharset;
     b"accept-datetime" => ACCEPT_DATETIME, AcceptDatetime;

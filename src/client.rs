@@ -1,13 +1,15 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::{TcpStream, ToSocketAddrs};
 
-use crate::header::{
-    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, DATE, HOST, USER_AGENT,
-};
 use crate::{
     Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
     NetResult, Request, RequestLine, Response, Version,
 };
+use crate::header_name::DATE;
+use crate::util;
+
+pub mod output;
+pub use output::{WriteCliError, Output};
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,8 +53,8 @@ where
 
     /// Sets the HTTP method.
     #[must_use]
-    pub const fn method(mut self, method: Method) -> Self {
-        self.method = method;
+    pub fn method(mut self, method: &Method) -> Self {
+        self.method = method.clone();
         self
     }
 
@@ -66,14 +68,10 @@ where
     /// Sets the URI path to the target resource.
     #[must_use]
     pub fn path(mut self, path: &str) -> Self {
-        self.path = Some(path.to_string());
-        self
-    }
+        if !path.is_empty() {
+            self.path = Some(path.to_string());
+        }
 
-    /// Sets the protocol version.
-    #[must_use]
-    pub const fn version(mut self, version: Version) -> Self {
-        self.version = version;
         self
     }
 
@@ -84,85 +82,18 @@ where
         self
     }
 
-    /// Returns true if the header is present.
+    /// Sets the request headers.
     #[must_use]
-    pub fn has_header(&self, name: &HeaderName) -> bool {
-        self.headers.contains(name)
-    }
-
-    /// Sets the request body, Content-Type header, and Content-Length header.
-    #[must_use]
-    pub fn body(mut self, body: Body, content_type: &str) -> Self {
-        if body.is_empty() {
-            self.headers.content_length(0);
-            self.body = Body::Empty;
-        } else {
-            self.body = body;
-            self.headers.content_length(self.body.len());
-            self.headers.content_type(content_type);
-        }
-
+    pub fn headers(mut self, headers: &Headers) -> Self {
+        self.headers = headers.clone();
         self
     }
 
-    /// Sets a text request body and sets the Content-Type and Content-Length
-    /// headers.
+    /// Sets the request body.
     #[must_use]
-    pub fn text(mut self, text: &str) -> Self {
-        if text.is_empty() {
-            self.headers.content_length(0);
-            self.body = Body::Empty;
-        } else {
-            self.body = Body::Text(text.into());
-            self.headers.content_length(self.body.len());
-            self.headers.content_type("text/plain; charset=utf-8");
-        }
-
-        self
-    }
-
-    /// Sets a HTML request body and sets the Content-Type and Content-Length
-    /// headers.
-    #[must_use]
-    pub fn html(mut self, html: &str) -> Self {
-        if html.is_empty() {
-            self.headers.content_length(0);
-            self.body = Body::Empty;
-        } else {
-            self.body = Body::Html(html.into());
-            self.headers.content_length(self.body.len());
-            self.headers.content_type("text/html; charset=utf-8");
-        }
-
-        self
-    }
-
-    /// Sets a JSON request body and sets the Content-Type and Content-Length
-    /// headers.
-    #[must_use]
-    pub fn json(mut self, json: &str) -> Self {
-        if json.is_empty() {
-            self.headers.content_length(0);
-            self.body = Body::Empty;
-        } else {
-            self.body = Body::Json(json.into());
-            self.headers.content_length(self.body.len());
-            self.headers.content_type("application/json");
-        }
-
-        self
-    }
-
-    /// Sets a request body comprised of bytes and sets the Content-Type and
-    /// Content-Length headers.
-    #[must_use]
-    pub fn bytes(mut self, bytes: &[u8]) -> Self {
-        if bytes.is_empty() {
-            self.headers.content_length(0);
-            self.body = Body::Empty;
-        } else {
-            self.body = Body::Bytes(bytes.to_vec());
-            self.headers.content_type("application/octet-stream");
+    pub fn body(mut self, body: &Body) -> Self {
+        if !body.is_empty() {
+            self.body = body.clone();
         }
 
         self
@@ -171,33 +102,15 @@ where
     /// Builds and returns a new `Client` instance.
     #[allow(clippy::missing_errors_doc)]
     pub fn build(mut self) -> NetResult<Client> {
-        let conn = self.addr.as_ref().ok_or(NetError::NotConnected).and_then(
-            |addr| {
-                TcpStream::connect(addr)
-                    .map_err(|_| NetError::NotConnected)
-                    .and_then(Connection::try_from)
-            },
-        )?;
+        let Some(addr) = self.addr.as_ref() else {
+            return Err(NetError::NotConnected);
+        };
 
-        if !self.headers.contains(&ACCEPT) {
-            self.headers.accept("*/*");
-        }
+        let conn = TcpStream::connect(addr)
+            .map_err(Into::into)
+            .and_then(Connection::try_from)?;
 
-        if !self.headers.contains(&CONTENT_LENGTH) {
-            self.headers.content_length(self.body.len());
-        }
-
-        if !self.headers.contains(&CONTENT_TYPE) && !self.body.is_empty() {
-            self.headers.content_type("text/plain");
-        }
-
-        if !self.headers.contains(&HOST) {
-            self.headers.host(&conn.remote_addr);
-        }
-
-        if !self.headers.contains(&USER_AGENT) {
-            self.headers.user_agent("rustnet/0.1");
-        }
+        self.headers.default_request_headers(&self.body, &conn.remote_addr);
 
         let path = self
             .path
@@ -225,30 +138,6 @@ where
     #[allow(clippy::missing_errors_doc)]
     pub fn send(self) -> NetResult<Client> {
         let mut client = self.build()?;
-        client.send()?;
-        Ok(client)
-    }
-
-    /// Sends an HTTP request with a text body.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn send_text(self, text: &str) -> NetResult<Client> {
-        let mut client = self.text(text).build()?;
-        client.send()?;
-        Ok(client)
-    }
-
-    /// Sends an HTTP request with an HTML body.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn send_html(self, html: &str) -> NetResult<Client> {
-        let mut client = self.html(html).build()?;
-        client.send()?;
-        Ok(client)
-    }
-
-    /// Sends an HTTP request with a JSON body.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn send_json(self, json: &str) -> NetResult<Client> {
-        let mut client = self.json(json).build()?;
         client.send()?;
         Ok(client)
     }
@@ -286,6 +175,38 @@ impl Client {
         ClientBuilder::new()
     }
 
+    /// Sends a GET request to the provided address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if building the `Client` or sending the request
+    /// fails.
+    pub fn get(uri: &str) -> NetResult<Self> {
+        util::parse_uri(uri)
+            .and_then(|(ref addr, ref path)| {
+                ClientBuilder::new()
+                    .method(&Method::Get)
+                    .addr(addr)
+                    .path(path)
+                    .send()
+            })
+    }
+
+    /// Sends a custom SHUTDOWN request to the provided test server address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if building the `Client` or sending the request
+    /// fails.
+    pub fn shutdown(addr: &str) -> NetResult<()> {
+        ClientBuilder::new()
+            .method(&Method::Custom("SHUTDOWN".to_string()))
+            .addr(addr)
+            .send()?;
+
+        Ok(())
+    }
+
     /// Removes Date header field entries from requests and responses.
     pub fn remove_date_headers(&mut self) {
         if let Some(req) = self.req.as_mut() {
@@ -303,12 +224,12 @@ impl Client {
         self.req
             .as_mut()
             .ok_or(NetError::NotConnected)
-            .and_then(|req| self.conn.writer.send_request(req))
+            .and_then(|req| self.conn.send_request(req))
     }
 
     /// Receives an HTTP response from the remote host.
     #[allow(clippy::missing_errors_doc)]
     pub fn recv(&mut self) {
-        self.res = self.conn.reader.recv_response().ok();
+        self.res = self.conn.recv_response().ok();
     }
 }

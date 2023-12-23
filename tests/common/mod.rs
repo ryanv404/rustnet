@@ -2,10 +2,11 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use rustnet::header::{
+use rustnet::header_name::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
     ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION as CONN,
     CONTENT_LENGTH as CL, CONTENT_TYPE as CT, HOST, LOCATION, SERVER,
@@ -13,7 +14,7 @@ use rustnet::header::{
 };
 use rustnet::{
     Body, Connection, Header, Headers, Method, Request, RequestLine,
-    Response, Status, StatusLine, Version,
+    Response, Status, StatusCode, StatusLine, Version,
 };
 
 macro_rules! run_server_tests {
@@ -21,7 +22,7 @@ macro_rules! run_server_tests {
         #[test]
         fn test_server_started() {
             let args = [
-                "run", "--bin", "server", "--", "--test", "--",
+                "run", "--bin", "server", "--", "--test-server", "--",
                 "127.0.0.1:7878"
             ];
 
@@ -42,9 +43,8 @@ macro_rules! run_server_tests {
         #[test]
         fn test_server_shutdown() {
             let args = [
-                "run", "--bin", "client", "--", "--method", "DELETE",
-                "--path", "/__shutdown_server__", "--output", "s",
-                "--plain", "--no-dates", "--", "127.0.0.1:7878"
+                "run", "--bin", "client", "--", "--shutdown", "--",
+                "127.0.0.1:7878"
             ];
 
             let _shutdown = Command::new("cargo")
@@ -76,13 +76,14 @@ macro_rules! run_server_tests {
                 let output = Command::new("cargo")
                     .args(&args[..])
                     .output()
-                    .map(|out| {
-                        let input = String::from_utf8(out.stdout).unwrap();
-                        get_test_output_server(&input)
+                    .map(|output| {
+                        let input = str::from_utf8(&output.stdout).unwrap();
+                        get_test_output_server(input)
                     })
                     .unwrap();
 
                 let expected = get_expected_output_server($method, $uri_path);
+
                 assert_eq!(output, expected);
             )+
         }
@@ -92,8 +93,10 @@ macro_rules! run_server_tests {
 // Httpbin.org server responds with the status code corresponding to `$code`.
 macro_rules! get_responses {
     ($($code:literal),+) => {
-        let stream = TcpStream::connect("httpbin.org:80").unwrap();
-        let mut conn = Connection::try_from(stream).unwrap();
+        let mut conn = TcpStream::connect("httpbin.org:80")
+            .map_err(|_| NetError::NotConnected)
+            .and_then(Connection::try_from)
+            .unwrap();
 
         let mut req = Request {
             request_line: RequestLine {
@@ -107,7 +110,7 @@ macro_rules! get_responses {
 
         let mut expected = Response {
             status_line: StatusLine {
-                status: Status(666),
+                status: Status(StatusCode(666)),
                 version: Version::OneDotOne
             },
             headers: Headers::new(),
@@ -116,32 +119,29 @@ macro_rules! get_responses {
 
         $(
             // Update the request and send it.
+            let current_path = concat!("/status/", stringify!($code));
             req.request_line.path.clear();
-            req.request_line.path
-                .push_str(concat!("/status/", stringify!($code)));
+            req.request_line.path.push_str(current_path);
 
-            if let Err(e) = conn.writer.send_request(&mut req) {
+            // Update the expected response.
+            expected.status_line.status = Status(StatusCode($code));
+            expected_headers($code, &mut expected);
+
+            if let Err(e) = conn.send_request(&mut req) {
                 panic!("Error sending request.\nCode {}.\n{e}", $code);
             }
 
-            // Update the expected response.
-            expected.status_line.status = Status($code);
-            expected_headers($code, &mut expected);
-
-            // Get the test response.
-            let mut res = match conn.reader.recv_response() {
-                Ok(res) => res,
-                Err(e) => {
-                    panic!("Error receiving response.\nCode {}.\n{e}", $code);
-                },
+            let Ok(mut res) = conn.recv_response() else {
+                panic!("Error receiving response.\nCode {}.", $code);
             };
 
             if $code == 406 {
                 assert!(res.body.is_json());
-                res.body = Body::Empty;
             }
 
             res.headers.remove(&DATE);
+            res.body = Body::Empty;
+
             assert_eq!(res, expected);
         )+
     };
@@ -160,9 +160,9 @@ macro_rules! run_client_test {
             let (test_req, test_res) = Command::new("cargo")
                 .args(&args[..])
                 .output()
-                .map(|out| {
-                    let input = String::from_utf8(out.stdout).unwrap();
-                    get_test_output_client(&input)
+                .map(|output| {
+                    let input = str::from_utf8(&output.stdout).unwrap();
+                    get_test_output_client(input)
                 })
                 .unwrap();
 
@@ -176,9 +176,10 @@ macro_rules! run_client_test {
 }
 
 pub fn server_is_live(is_shutting_down: bool) -> bool {
-    let timeout = Duration::from_millis(200);
     let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
     let socket = SocketAddr::new(ip, 7878);
+
+    let timeout = Duration::from_millis(200);
 
     for _ in 0..5 {
         if TcpStream::connect_timeout(&socket, timeout).is_ok() {
@@ -231,14 +232,16 @@ pub fn expected_headers(code: u16, expected: &mut Response) {
             expected.headers.remove(&CT);
             expected
                 .headers
-                .insert(WWW, r#"Basic realm="Fake Realm""#.into());
+                .insert(WWW,
+                    r#"Basic realm="Fake Realm""#.into());
         },
         402 => {
             expected.headers.remove(&CT);
             expected.headers.content_length(17);
             expected
                 .headers
-                .insert(XMORE, "http://vimeo.com/22053820".into());
+                .insert(XMORE,
+                    "http://vimeo.com/22053820".into());
         },
         406 => {
             expected.headers.content_length(142);
@@ -250,7 +253,8 @@ pub fn expected_headers(code: u16, expected: &mut Response) {
             expected.headers.content_length(135);
             expected
                 .headers
-                .insert(XMORE, "http://tools.ietf.org/html/rfc2324".into());
+                .insert(XMORE,
+                    "http://tools.ietf.org/html/rfc2324".into());
         },
         _ => {},
     }
@@ -258,14 +262,14 @@ pub fn expected_headers(code: u16, expected: &mut Response) {
 
 pub fn favicon_route() -> Response {
     let mut headers = Headers::new();
-    headers.server("rustnet/0.1");
     headers.content_length(1406);
-    headers.cache_control("max-age=604800");
+    headers.server("rustnet/0.1");
     headers.content_type("image/x-icon");
+    headers.cache_control("max-age=604800");
 
     Response {
         status_line: StatusLine {
-            status: Status(200),
+            status: Status(StatusCode(200)),
             version: Version::OneDotOne
         },
         headers,
@@ -275,23 +279,25 @@ pub fn favicon_route() -> Response {
 
 pub fn many_methods(method: &str) -> Response {
     let status = if method == "POST" {
-        Status(201)
+        Status(StatusCode(201))
     } else {
-        Status(200)
+        Status(StatusCode(200))
+    };
+
+    let cont_len = match method {
+        "DELETE" => 25,
+        "GET" | "PUT" => 22,
+        "HEAD" | "POST" => 23,
+        "PATCH" | "TRACE" => 24,
+        "OPTIONS" | "CONNECT" => 26,
+        _ => unreachable!(),
     };
 
     let mut headers = Headers::new();
     headers.server("rustnet/0.1");
+    headers.content_length(cont_len);
     headers.cache_control("no-cache");
     headers.content_type("text/plain; charset=utf-8");
-    headers.content_length(match method {
-        "GET" | "PUT" => 22,
-        "HEAD" | "POST" => 23,
-        "PATCH" | "TRACE" => 24,
-        "DELETE" => 25,
-        "OPTIONS" | "CONNECT" => 26,
-        _ => unreachable!(),
-    });
 
     Response {
         status_line: StatusLine {
@@ -312,7 +318,7 @@ pub fn unknown_route(method: &str) -> Response {
 
     Response {
         status_line: StatusLine {
-            status: Status(404),
+            status: Status(StatusCode(404)),
             version: Version::OneDotOne
         },
         headers,
@@ -322,9 +328,9 @@ pub fn unknown_route(method: &str) -> Response {
 
 pub fn known_route(method: &str) -> Response {
     let status = if method == "POST" {
-        Status(201)
+        Status(StatusCode(201))
     } else {
-        Status(200)
+        Status(StatusCode(200))
     };
 
     let mut headers = Headers::new();
@@ -347,15 +353,13 @@ pub fn get_expected_req_client(
     method_str: &str,
     path_str: &str
 ) -> Request {
-    use rustnet::header::HOST;
-
     let mut req_headers = Headers::new();
     req_headers.accept("*/*");
     req_headers.content_length(0);
     req_headers.user_agent("rustnet/0.1");
     req_headers.insert(HOST, "httpbin.org:80".into());
 
-    let method = method_str.parse::<Method>().unwrap();
+    let method = Method::from_str(method_str).unwrap();
 
     Request {
         request_line: RequestLine {
@@ -372,30 +376,25 @@ pub fn get_expected_res_client(
     method_str: &str,
     path_str: &str
 ) -> Response {
-    use rustnet::header::{
-        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
-        ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, HOST,
-    };
-
     let status = if path_str == "/status/201" {
-        Status(201)
+        Status(StatusCode(201))
     } else if path_str == "/status/203" {
-        Status(203)
+        Status(StatusCode(203))
     } else {
-        Status(200)
+        Status(StatusCode(200))
     };
 
     let mut res_headers = Headers::new();
-    res_headers.server("gunicorn/19.9.0");
-    res_headers.connection("keep-alive");
     res_headers.insert(ACAO, "*".into());
+    res_headers.connection("keep-alive");
+    res_headers.server("gunicorn/19.9.0");
     res_headers.insert(ACAC, "true".into());
 
+    let text = "text/plain";
     let jpeg = "image/jpeg";
     let xml = "application/xml";
     let json = "application/json";
     let html = "text/html; charset=utf-8";
-    let text = "text/plain";
 
     match path_str {
         "/xml" => {
@@ -448,8 +447,15 @@ pub fn get_expected_output_server(method: &str, path: &str) -> Response {
         "/foo" => unknown_route(method),
         "/favicon.ico" => favicon_route(),
         "/many_methods" => many_methods(method),
-        "/" | "/head" | "/post" | "/put" | "/patch" | "/delete" | "/trace"
-        | "/options" | "/connect" => known_route(method),
+        "/"
+            | "/head"
+            | "/post"
+            | "/put"
+            | "/patch"
+            | "/delete"
+            | "/trace"
+            | "/options"
+            | "/connect" => known_route(method),
         _ => unreachable!(),
     }
 }
@@ -459,48 +465,37 @@ pub fn get_test_output_client(input: &str) -> (Request, Response) {
     let (request_line, rest) = input
         .trim_start()
         .split_once('\n')
-        .map(|(reqline, rest)| {
-            let reqline = reqline.parse::<RequestLine>().unwrap();
-            (reqline, rest)
+        .map(|(req_line, rest)| {
+            let req_line = RequestLine::from_str(req_line).unwrap();
+            (req_line, rest)
         })
         .unwrap();
 
     // Use second "HTTP/1.1" occurrence to get the response start.
     let idx = rest.find("HTTP/1.1").unwrap();
-    let mut req_lines = (&rest[..idx])
-        .trim_start()
-        .split('\n')
-        .map(|s| s.trim())
-        .collect::<Vec<&str>>();
 
-    let mut req_headers = parse_headers(&req_lines[..]);
-    req_headers.insert(HOST, "httpbin.org:80".into());
+    let mut headers = Headers::from_str(&rest[..idx]).unwrap();
+    headers.insert(HOST, "httpbin.org:80".into());
 
     let mut req = Request {
         request_line,
-        headers: req_headers,
+        headers,
         body: Body::Empty
     };
 
-    let (status_line, res_rest) = (&rest[idx..])
+    let (status_line, rest) = (&rest[idx..])
         .split_once('\n')
-        .map(|(statline, rest)| {
-            let statline = statline.parse::<StatusLine>().unwrap();
-            (statline, rest)
+        .map(|(stat_line, rest)| {
+            let stat_line = StatusLine::from_str(stat_line).unwrap();
+            (stat_line, rest)
         })
         .unwrap();
 
-    let mut res_lines = res_rest
-        .trim_start()
-        .split('\n')
-        .map(|s| s.trim())
-        .collect::<Vec<&str>>();
-
-    let res_headers = parse_headers(&res_lines[..]);
+    let headers = Headers::from_str(rest).unwrap();
 
     let res = Response {
         status_line,
-        headers: res_headers,
+        headers,
         body: Body::Empty
     };
 
@@ -508,32 +503,17 @@ pub fn get_test_output_client(input: &str) -> (Request, Response) {
 }
 
 pub fn get_test_output_server(input: &str) -> Response {
-    let (statline, res_hdrs_str) = input
+    let (stat_line, headers_str) = input
         .trim_start()
         .split_once('\n')
         .unwrap();
 
-    let status_line = statline.parse::<StatusLine>().unwrap();
-    let headers = res_hdrs_str.parse::<Headers>().unwrap();
+    let status_line = StatusLine::from_str(stat_line).unwrap();
+    let headers = Headers::from_str(headers_str).unwrap();
 
     Response {
         status_line,
         headers,
         body: Body::Empty
     }
-}
-
-fn parse_headers(lines: &[&str]) -> Headers {
-    let mut headers = Headers::new();
-
-    for (idx, line) in lines.iter().enumerate() {
-        if line.is_empty() {
-            break;
-        }
-
-        line.parse::<Header>()
-            .map(|hdr| headers.insert(hdr.name, hdr.value)).unwrap();
-    }
-
-    headers
 }

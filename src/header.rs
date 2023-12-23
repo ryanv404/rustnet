@@ -1,14 +1,19 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::io::{BufWriter, StdoutLock, Write};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use crate::{NetError, NetParseError, NetResult};
+use crate::{Body, NetError, NetParseError, NetResult};
 
 pub mod names;
 pub mod values;
 
-pub use names::{header_consts::*, HeaderKind, HeaderName};
+pub use names::{HeaderName, HeaderNameInner};
+pub use names::header_name::{
+    self, ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
+    CONTENT_TYPE, HOST, SERVER, USER_AGENT,
+};
 pub use values::HeaderValue;
 
 pub const MAX_HEADERS: u16 = 1024;
@@ -29,21 +34,17 @@ impl Display for Header {
 impl FromStr for Header {
     type Err = NetError;
 
-    fn from_str(line: &str) -> NetResult<Self> {
-        line.trim()
+    fn from_str(header: &str) -> NetResult<Self> {
+        header.trim()
             .split_once(':')
-            .ok_or(NetError::Parse(NetParseError::Header))
-            .map(|(name, value)| Self::new(name, value))
+            .ok_or(NetParseError::Header.into())
+            .map(Into::into)
     }
 }
 
-impl Header {
-    /// Returns a new `Header` from the provided name and value.
-    #[must_use]
-    pub fn new(name: &str, value: &str) -> Self {
-        let name = HeaderName::from(name);
-        let value = HeaderValue::from(value);
-        Self { name, value }
+impl From<(&str, &str)> for Header {
+    fn from((name, value): (&str, &str)) -> Self {
+        Self { name: name.into(), value: value.into() }
     }
 }
 
@@ -54,31 +55,13 @@ pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
 impl FromStr for Headers {
     type Err = NetError;
 
-    fn from_str(headers_str: &str) -> NetResult<Self> {
-        let mut num_headers = 0;
+    fn from_str(many_headers: &str) -> NetResult<Self> {
         let mut headers = Self::new();
 
-        let lines = headers_str
-            .trim_start()
-            .split('\n');
+        let mut lines = many_headers.trim().lines();
 
-        for line in lines {
-            num_headers += 1;
-
-            if num_headers >= MAX_HEADERS {
-                return Err(NetParseError::TooManyHeaders)?;
-            }
-
-            let trimmed_line = line.trim();
-
-            // Check for end of headers section.
-            if trimmed_line.is_empty() {
-                break;
-            }
-
-            trimmed_line
-                .parse::<Header>()
-                .map(|hdr| headers.insert(hdr.name, hdr.value))?;
+        while let Some(line) = lines.next() {
+            headers.parse_and_insert_header(line)?;
         }
 
         Ok(headers)
@@ -110,6 +93,12 @@ impl Headers {
         self.0.contains_key(name)
     }
 
+    /// Removes and returns the first entry in the map.
+    #[must_use]
+    pub fn pop_first(&mut self) -> Option<(HeaderName, HeaderValue)> {
+        self.0.pop_first()
+    }
+
     /// Returns the entry for associated with the given `HeaderName` key.
     #[must_use]
     pub fn entry(
@@ -124,6 +113,24 @@ impl Headers {
         self.entry(name)
             .and_modify(|val| *val = value.clone())
             .or_insert(value);
+    }
+
+    /// Inserts a header if one with the same `HeaderName` is not already
+    /// present.
+    pub fn insert_if_empty(&mut self, name: HeaderName, value: HeaderValue) {
+        self.entry(name).or_insert(value);
+    }
+
+    /// Parses a `Header` from the given string slice and inserts the
+    /// resulting header into this `Headers` map.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Header::from_str` returns an error.
+    pub fn parse_and_insert_header(&mut self, line: &str) -> NetResult<()> {
+        let header = Header::from_str(line)?;
+        self.insert(header.name.clone(), header.value);
+        Ok(())
     }
 
     /// Removes a header field entry.
@@ -142,9 +149,17 @@ impl Headers {
         self.0.clear();
     }
 
-    /// Inserts a collection of default request headers.
-    pub fn default_request_headers(&mut self) {
-        todo!();
+    /// Inserts sensible values for a default set of request headers if they
+    /// are not already present.
+    pub fn default_request_headers(&mut self, body: &Body, addr: &SocketAddr) {
+        self.insert_if_empty(ACCEPT, "*/*".into());
+        self.insert_if_empty(HOST, addr.into());
+        self.insert_if_empty(USER_AGENT, "rustnet/0.1".into());
+        self.insert_if_empty(CONTENT_LENGTH, body.len().into());
+
+        if let Some(con_type) = body.as_content_type() {
+            self.insert_if_empty(CONTENT_TYPE, con_type.into());
+        }
     }
 
     /// Inserts a collection of default server response headers.
@@ -204,38 +219,72 @@ impl Headers {
         self.insert(CACHE_CONTROL, directive.into());
     }
 
-    // Common logic for the to_plain_string and to_color_string functions.
-    fn string_helper(&self, use_color: bool) -> String {
-        const BLU: &str = "\x1b[94m";
-        const YLW: &str = "\x1b[96m";
-        const CLR: &str = "\x1b[0m";
-
-        let mut buf = String::new();
-
-        if !self.is_empty() {
-            self.0.iter().for_each(|(name, value)| {
-                let header = if use_color {
-                    format!("{BLU}{name}{CLR}: {YLW}{value}{CLR}\n")
-                } else {
-                    format!("{name}: {value}\n")
-                };
-
-                buf.push_str(&header);
-            });
+    /// Writes the headers to a `BufWriter` with plain formatting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the provided `BufWriter` fails.
+    pub fn write_plain(
+        &self,
+        writer: &mut BufWriter<StdoutLock<'_>>
+    ) -> NetResult<()> {
+        for (name, value) in &self.0 {
+            writeln!(writer, "{name}: {value}")?;
         }
 
-        buf
+        Ok(())
     }
 
-    /// Returns the headers as a `String` with plain formatting.
-    #[must_use]
-    pub fn to_plain_string(&self) -> String {
-        self.string_helper(false)
+    /// Writes the headers to a `BufWriter` with color formatting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the provided `BufWriter` fails.
+    pub fn write_color(
+        &self,
+        writer: &mut BufWriter<StdoutLock<'_>>
+    ) -> NetResult<()> {
+        use crate::colors::{BLU, CLR, CYAN};
+
+        for (name, value) in &self.0 {
+            writeln!(writer, "{BLU}{name}{CLR}: {CYAN}{value}{CLR}")?;
+        }
+
+        Ok(())
     }
 
-    /// Returns the headers as a `String` with color formatting.
-    #[must_use]
-    pub fn to_color_string(&self) -> String {
-        self.string_helper(true)
+    /// Returns the Content-Length and Content-Type header values from this
+    /// `Headers` map.
+    pub fn get_content_len_and_type(&self) -> NetResult<(u64, String)> {
+        let cl_value = self.get(&CONTENT_LENGTH);
+        let ct_value = self.get(&CONTENT_TYPE);
+
+        if cl_value.is_none() || ct_value.is_none() {
+            return Ok((0, String::new()));
+        }
+
+        let body_len = cl_value
+            .ok_or(NetParseError::Body.into())
+            .map(ToString::to_string)
+            .and_then(|len| len.trim().parse::<usize>()
+                .map_err(|_| NetParseError::Body))?;
+
+        if body_len == 0 {
+            return Ok((0, String::new()));
+        }
+
+        let content_len = u64::try_from(body_len)
+            .map_err(|_| NetParseError::Body)?;
+
+        let content_type = ct_value
+            .map(ToString::to_string)
+            .ok_or(NetParseError::Body)?;
+
+        if content_type.is_empty() {
+            // Return error since content length is greater than zero.
+            return Err(NetParseError::Body)?;
+        }
+
+        Ok((content_len, content_type))
     }
 }

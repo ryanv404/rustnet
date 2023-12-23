@@ -27,15 +27,18 @@ impl Default for Body {
 impl Display for Body {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Empty | Self::Bytes(_) | Self::Favicon(_) => {
-                write!(f, "")
-            },
-            Self::Text(ref buf) | Self::Html(ref buf) | Self::Xml(ref buf)
-            | Self::Json(ref buf) => {
+            Self::Empty | Self::Bytes(_) | Self::Favicon(_) => {},
+            Self::Text(ref buf)
+                | Self::Html(ref buf)
+                | Self::Xml(ref buf)
+                | Self::Json(ref buf) =>
+            {
                 let body = String::from_utf8_lossy(buf);
-                write!(f, "{}", body.trim())
+                write!(f, "{}", body.trim_end())?;
             },
         }
+
+        Ok(())
     }
 }
 
@@ -189,6 +192,17 @@ impl Body {
             Some("xml") => Ok(Self::Xml(data)),
             Some("ico") => Ok(Self::Favicon(data)),
             Some(_) | None => Ok(Self::Bytes(data)),
+        }
+    }
+
+    pub fn from_content_type(buf: Vec<u8>, content_type: &str) -> Body {
+        match content_type {
+            s if s.starts_with("text/html") => Self::Html(buf),
+            s if s.starts_with("text/plain") => Self::Text(buf),
+            s if s.starts_with("application/xml") => Self::Xml(buf),
+            s if s.starts_with("application/json") => Self::Json(buf),
+            s if s.starts_with("image/x-icon") => Self::Favicon(buf),
+            _ => Self::Bytes(buf),
         }
     }
 }

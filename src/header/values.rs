@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::{NetError, NetResult};
@@ -15,7 +16,7 @@ impl Display for HeaderValue {
 
 impl Debug for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{:#}", self.to_string())
+        write!(f, "{self}")
     }
 }
 
@@ -55,6 +56,13 @@ impl From<usize> for HeaderValue {
 impl From<Vec<u8>> for HeaderValue {
     fn from(vec: Vec<u8>) -> Self {
         Self(vec)
+    }
+}
+
+impl From<&SocketAddr> for HeaderValue {
+    fn from(sock: &SocketAddr) -> Self {
+        let sock_str = sock.to_string();
+        Self(sock_str.into_bytes())
     }
 }
 
