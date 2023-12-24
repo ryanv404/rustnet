@@ -193,6 +193,7 @@ impl Default for Status {
         Self(StatusCode::default())
     }
 }
+
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{} {}", self.code(), self.msg())

@@ -229,7 +229,9 @@ impl Client {
 
     /// Receives an HTTP response from the remote host.
     #[allow(clippy::missing_errors_doc)]
-    pub fn recv(&mut self) {
-        self.res = self.conn.recv_response().ok();
+    pub fn recv(&mut self) -> NetResult<()> {
+        let res = self.conn.recv_response()?;
+        self.res = Some(res);
+        Ok(())
     }
 }

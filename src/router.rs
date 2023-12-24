@@ -236,8 +236,8 @@ impl Router {
 
         // Implement HEAD routes for all GET routes.
         if target.is_not_found() && route.is_head() {
-            if let Route::Head(path) = route {
-                let get_route = Route::Get(path.to_string());
+            if let Some(head_path) = route.path() {
+                let get_route = Route::Get(head_path.to_string());
                 let new_target = self.get_target(&get_route);
 
                 if !new_target.is_not_found() {

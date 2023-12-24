@@ -1,12 +1,12 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{BufWriter, StdoutLock, Write};
 use std::str::{self, FromStr};
-use std::string::ToString;
 
 use crate::{
     Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
     NetParseError, NetResult, Route, Version,
 };
+use crate::util;
 
 /// Contains the components of an HTTP request line.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -32,6 +32,33 @@ impl Display for RequestLine {
     }
 }
 
+impl TryFrom<&[u8]> for RequestLine {
+    type Error = NetError;
+
+    fn try_from(line: &[u8]) -> NetResult<Self> {
+        let line = util::trim_whitespace_bytes(line);
+        let mut tokens = line.splitn(3, |b| *b == b' ');
+
+        let method = tokens
+            .next()
+            .ok_or::<NetError>(NetParseError::Method.into())
+            .and_then(|method| Method::try_from(method))?;
+
+        let path = tokens
+            .next()
+            .ok_or::<NetError>(NetParseError::Path.into())
+            .and_then(|path| String::from_utf8(path.to_vec())
+                .map_err(|_| NetParseError::Path.into()))?;
+
+        let version = tokens
+            .next()
+            .ok_or::<NetError>(NetParseError::Version.into())
+            .and_then(Version::try_from)?;
+
+        Ok(Self { method, path, version })
+    }
+}
+
 impl FromStr for RequestLine {
     type Err = NetError;
 
@@ -41,12 +68,13 @@ impl FromStr for RequestLine {
         let method = tokens
             .next()
             .ok_or::<NetError>(NetParseError::Method.into())
-            .map(Into::into)?;
+            .map(|method| Method::from(method))?;
 
         let path = tokens
             .next()
-            .map(ToString::to_string)
-            .ok_or(NetParseError::Path)?;
+            .ok_or::<NetError>(NetParseError::Path.into())
+            .and_then(|path| String::from_utf8(Vec::from(path))
+                .map_err(|_| NetParseError::Path.into()))?;
 
         let version = tokens
             .next()
@@ -64,7 +92,7 @@ impl RequestLine {
     pub fn new(method: &Method, path: &str) -> Self {
         Self {
             method: method.clone(),
-            path: path.to_string(),
+            path: path.into(),
             version: Version::OneDotOne,
         }
     }
@@ -75,7 +103,7 @@ impl RequestLine {
         &self.method
     }
 
-    /// Returns the requested URI path.
+    /// Returns the requested URI path as a string slice.
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
@@ -117,7 +145,7 @@ impl RequestLine {
 }
 
 /// Contains the components of an HTTP request.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Request {
     pub request_line: RequestLine,
     pub headers: Headers,

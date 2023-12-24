@@ -308,13 +308,10 @@ impl Output {
             req.headers.write_color(writer)?;
         }
 
-        if self.req_body() && req.body.is_printable() {
-            if self.req_line() || self.req_headers() {
-                // Separate the body from the rest of the request.
-                writeln!(writer, "\n{}", &req.body)?;
-            } else {
-                writeln!(writer, "{}", &req.body)?;
-            }
+        if self.req_body()
+            && req.body.is_printable()
+        {
+            writeln!(writer, "{}", &req.body)?;
         }
 
         Ok(())
@@ -327,9 +324,15 @@ impl Output {
     /// Returns an error if writing the response to stdout fails.
     pub fn write_response(
         &self,
+        do_separator: bool,
+        is_head_route: bool,
         res: &Response,
         writer: &mut BufWriter<StdoutLock<'_>>
     ) -> NetResult<()> {
+        if do_separator {
+            writeln!(writer)?;
+        }
+
         if self.status_line_plain() {
             res.status_line.write_plain(writer)?;
         } else if self.status_line_color() {
@@ -342,11 +345,10 @@ impl Output {
             res.headers.write_color(writer)?;
         }
 
-        if self.res_body() && res.body.is_printable() {
-            // Separate the body from the rest of the response with a newline.
-            if self.status_line() || self.res_headers() {
-                writeln!(writer, "\n{}", &res.body)?;
-            } else {
+        if !is_head_route
+                && self.res_body()
+                && res.body.is_printable()
+            {
                 writeln!(writer, "{}", &res.body)?;
             }
         }

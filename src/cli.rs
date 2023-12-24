@@ -51,40 +51,33 @@ impl ServerCli {
         let token2 = tokens.next();
         let token3 = tokens.next();
 
-        match (opt, token1, token2, token3) {
-            ("--favicon-route", Some(path), _, _) => {
-                dbg!(&path);
-                self.router.insert_favicon(path)
+        match opt {
+            "--favicon-route" => match token1 {
+                Some(path) => self.router.insert_favicon(path),
+                None => self.invalid_arg(opt, arg),
             },
-            ("--not-found-route", Some(path), _, _) => {
-                dbg!(&path);
-                self.router.insert_not_found(path)
+            "--not-found-route" => match token1 {
+                Some(path) => self.router.insert_not_found(path),
+                None => self.invalid_arg(opt, arg),
             },
-            (
-                "--file-route" | "--text-route",
-                Some(method),
-                Some(path),
-                Some(target)
-            ) => {
-                let uppercase = method.to_ascii_uppercase();
-                let method = Method::from(uppercase.as_str());
-                let route = Route::new(&method, path);
+            "--file-route" | "--text-route" => match (token1, token2, token3) {
+                (Some(method), Some(path), Some(target)) => {
+                    let uppercase = method.to_ascii_uppercase();
+                    let method = Method::from(uppercase.as_str());
 
-                let target = if opt == "--text-route" {
-                    Target::Text(target.to_string())
-                } else {
-                    Target::File(PathBuf::from(target))
-                };
+                    let route = Route::new(&method, path);
 
-                self.router.mount(route, target);
+                    let target = if opt == "--text-route" {
+                        Target::Text(target.to_string())
+                    } else {
+                        Target::File(PathBuf::from(target))
+                    };
+
+                    self.router.mount(route, target);
+                },
+                (_, _, _) => self.invalid_arg(opt, arg),
             },
-            ("--favicon-route", None, _, _)
-                | ("--not-found-route", None, _, _)
-                | ("--file-route" | "--text-route", _, _, _) =>
-            {
-                self.invalid_arg(opt, arg)
-            },
-            (_, _, _, _) => unreachable!(),
+            _ => unreachable!(),
         }
     }
 

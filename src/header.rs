@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::{Body, NetError, NetParseError, NetResult};
+use crate::util;
 
 pub mod names;
 pub mod values;
@@ -31,6 +32,23 @@ impl Display for Header {
     }
 }
 
+impl TryFrom<&[u8]> for Header {
+    type Error = NetError;
+
+    fn try_from(header: &[u8]) -> NetResult<Self> {
+        let mut tokens = util::trim_whitespace_bytes(header)
+            .splitn(2, |b| *b == b':');
+
+        let token1 = tokens.next();
+        let token2 = tokens.next();
+
+        match (token1, token2) {
+            (Some(name), Some(value)) => Self::try_from((name, value)),
+            (_, _) => Err(NetParseError::Header)?,
+        }
+    }
+}
+
 impl FromStr for Header {
     type Err = NetError;
 
@@ -42,9 +60,25 @@ impl FromStr for Header {
     }
 }
 
+impl TryFrom<(&[u8], &[u8])> for Header {
+    type Error = NetError;
+
+    fn try_from((name, value): (&[u8], &[u8])) -> NetResult<Self> {
+        let name = util::trim_whitespace_bytes(name);
+        let name = HeaderName::try_from(name)?;
+
+        let value = util::trim_whitespace_bytes(value);
+        let value = HeaderValue::from(value);
+
+        Ok(Self { name, value })
+    }
+}
+
 impl From<(&str, &str)> for Header {
     fn from((name, value): (&str, &str)) -> Self {
-        Self { name: name.into(), value: value.into() }
+        let name = HeaderName::from(name);
+        let value = HeaderValue::from(value);
+        Self { name, value }
     }
 }
 
@@ -61,7 +95,7 @@ impl FromStr for Headers {
         let mut lines = many_headers.trim().lines();
 
         while let Some(line) = lines.next() {
-            headers.parse_and_insert_header(line)?;
+            headers.insert_parsed_header_str(line)?;
         }
 
         Ok(headers)
@@ -126,9 +160,24 @@ impl Headers {
     ///
     /// # Errors
     ///
-    /// Returns an error if `Header::from_str` returns an error.
-    pub fn parse_and_insert_header(&mut self, line: &str) -> NetResult<()> {
+    /// Returns an error if `Header` parsing fails.
+    pub fn insert_parsed_header_str(&mut self, line: &str) -> NetResult<()> {
         let header = Header::from_str(line)?;
+        self.insert(header.name.clone(), header.value);
+        Ok(())
+    }
+
+    /// Parses a `Header` from the given bytes slice and inserts the
+    /// resulting header into this `Headers` map.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Header` parsing fails.
+    pub fn insert_parsed_header_bytes(
+        &mut self,
+        line: &[u8]
+    ) -> NetResult<()> {
+        let header = Header::try_from(line)?;
         self.insert(header.name.clone(), header.value);
         Ok(())
     }
@@ -251,40 +300,5 @@ impl Headers {
         }
 
         Ok(())
-    }
-
-    /// Returns the Content-Length and Content-Type header values from this
-    /// `Headers` map.
-    pub fn get_content_len_and_type(&self) -> NetResult<(u64, String)> {
-        let cl_value = self.get(&CONTENT_LENGTH);
-        let ct_value = self.get(&CONTENT_TYPE);
-
-        if cl_value.is_none() || ct_value.is_none() {
-            return Ok((0, String::new()));
-        }
-
-        let body_len = cl_value
-            .ok_or(NetParseError::Body.into())
-            .map(ToString::to_string)
-            .and_then(|len| len.trim().parse::<usize>()
-                .map_err(|_| NetParseError::Body))?;
-
-        if body_len == 0 {
-            return Ok((0, String::new()));
-        }
-
-        let content_len = u64::try_from(body_len)
-            .map_err(|_| NetParseError::Body)?;
-
-        let content_type = ct_value
-            .map(ToString::to_string)
-            .ok_or(NetParseError::Body)?;
-
-        if content_type.is_empty() {
-            // Return error since content length is greater than zero.
-            return Err(NetParseError::Body)?;
-        }
-
-        Ok((content_len, content_type))
     }
 }

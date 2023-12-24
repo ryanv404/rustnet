@@ -38,7 +38,7 @@ fn main() -> NetResult<()> {
 
     match builder.send() {
         Ok(mut client) => {
-            client.recv();
+            client.recv()?;
             handle_output(&mut client, &mut cli)
         },
         Err(e) => {
@@ -57,11 +57,14 @@ fn handle_output(
         client.remove_date_headers();
     }
 
+    let mut is_head_route = false;
     let mut w = BufWriter::new(stdout().lock());
 
     // Handle request output.
     if let Some(req) = client.req.as_ref() {
         cli.output.write_request(req, &mut w)?;
+
+        is_head_route = req.route().is_head();
     }
 
     // Exit if the "--request" option was provided.
@@ -69,13 +72,16 @@ fn handle_output(
         return Ok(());
     }
 
-    if cli.output.include_separator() {
-        writeln!(&mut w)?;
-    }
-
     // Handle response output.
     if let Some(res) = client.res.as_ref() {
-        cli.output.write_response(res, &mut w)?;
+        let do_separator = cli.output.include_separator();
+
+        cli.output.write_response(
+            do_separator,
+            is_head_route,
+            res,
+            &mut w
+        )?;
     }
 
     writeln!(&mut w)?;

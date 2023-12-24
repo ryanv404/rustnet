@@ -143,11 +143,11 @@ impl Body {
         match self {
             Self::Empty => None,
             Self::Bytes(buf)
-            | Self::Favicon(buf)
-            | Self::Text(buf)
-            | Self::Html(buf)
-            | Self::Json(buf)
-            | Self::Xml(buf) => Some(buf.as_slice()),
+                | Self::Favicon(buf)
+                | Self::Text(buf)
+                | Self::Html(buf)
+                | Self::Json(buf)
+                | Self::Xml(buf) => Some(buf.as_slice()),
         }
     }
 
@@ -195,8 +195,10 @@ impl Body {
         }
     }
 
-    pub fn from_content_type(buf: Vec<u8>, content_type: &str) -> Body {
-        match content_type {
+    pub fn from_content_type(buf: &Vec<u8>, content_type: &str) -> Body {
+        let buf = buf.clone();
+
+        match content_type.trim_start() {
             s if s.starts_with("text/html") => Self::Html(buf),
             s if s.starts_with("text/plain") => Self::Text(buf),
             s if s.starts_with("application/xml") => Self::Xml(buf),

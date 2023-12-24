@@ -22,6 +22,30 @@ impl Display for StatusLine {
     }
 }
 
+impl TryFrom<&[u8]> for StatusLine {
+    type Error = NetError;
+
+    fn try_from(line: &[u8]) -> NetResult<Self> {
+        let start = line
+            .iter()
+            .position(|b| *b == b'H')
+            .ok_or(NetParseError::StatusLine)?;
+
+        let mut tokens = (&line[start..]).splitn(2, |b| *b == b' ');
+        let token1 = tokens.next();
+        let token2 = tokens.next();
+
+        match (token1, token2) {
+            (Some(token1), Some(token2)) => {
+                let version = Version::try_from(token1)?;
+                let status = Status::try_from(token2)?;
+                Ok(Self { version, status })
+            },
+            (_, _) => Err(NetParseError::StatusLine)?,
+        }
+    }
+}
+
 impl FromStr for StatusLine {
     type Err = NetError;
 
@@ -30,7 +54,7 @@ impl FromStr for StatusLine {
             .find("HTTP")
             .ok_or(NetParseError::StatusLine)?;
 
-        line[start..]
+        (&line[start..])
             .trim()
             .split_once(' ')
             .ok_or(NetParseError::StatusLine.into())
@@ -88,7 +112,7 @@ impl StatusLine {
 }
 
 /// Contains the components of an HTTP response.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Response {
     pub status_line: StatusLine,
     pub headers: Headers,

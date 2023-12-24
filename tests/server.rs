@@ -1,5 +1,4 @@
 use std::process::{Command, Stdio};
-use std::str;
 
 #[macro_use]
 mod common;

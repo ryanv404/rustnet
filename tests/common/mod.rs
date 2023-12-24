@@ -73,18 +73,20 @@ macro_rules! run_server_tests {
                     "--no-dates", "--", "127.0.0.1:7878"
                 ];
 
-                let output = Command::new("cargo")
-                    .args(&args[..])
-                    .output()
-                    .map(|output| {
-                        let input = str::from_utf8(&output.stdout).unwrap();
-                        get_test_output_server(input)
-                    })
+                let output = Command::new("cargo").args(&args[..]).output()
                     .unwrap();
-
+                let input = String::from_utf8(output.stdout.clone())
+                    .unwrap();
+                let test = get_test_output_server(&input);
                 let expected = get_expected_output_server($method, $uri_path);
 
-                assert_eq!(output, expected);
+                assert_eq!(
+                    test,
+                    expected,
+                    "Test failed at {} {}.\nINPUT\n{input:?}\nOUTPUT\n{test:?}\nEXPECTED\n{expected:?}",
+                    $method,
+                    $uri_path
+                );
             )+
         }
     };
@@ -142,7 +144,7 @@ macro_rules! get_responses {
             res.headers.remove(&DATE);
             res.body = Body::Empty;
 
-            assert_eq!(res, expected);
+            assert_eq!(res, expected, "Test failed at code {}.\n{req}\n{res}", $code);
         )+
     };
 }
@@ -461,59 +463,87 @@ pub fn get_expected_output_server(method: &str, path: &str) -> Response {
 }
 
 pub fn get_test_output_client(input: &str) -> (Request, Response) {
-    // Get rid of the first "HTTP/1.1" occurrence from "rest".
-    let (request_line, rest) = input
-        .trim_start()
-        .split_once('\n')
-        .map(|(req_line, rest)| {
-            let req_line = RequestLine::from_str(req_line).unwrap();
-            (req_line, rest)
-        })
-        .unwrap();
+    let mut req = Request::default();
+    let mut res = Response::default();
+    let mut lines = input.trim_start().lines();
 
-    // Use second "HTTP/1.1" occurrence to get the response start.
-    let idx = rest.find("HTTP/1.1").unwrap();
-
-    let mut headers = Headers::from_str(&rest[..idx]).unwrap();
-    headers.insert(HOST, "httpbin.org:80".into());
-
-    let mut req = Request {
-        request_line,
-        headers,
-        body: Body::Empty
+    let Some(req_line) = lines.next() else {
+        panic!("Can't parse client test req line.");
     };
 
-    let (status_line, rest) = (&rest[idx..])
-        .split_once('\n')
-        .map(|(stat_line, rest)| {
-            let stat_line = StatusLine::from_str(stat_line).unwrap();
-            (stat_line, rest)
-        })
-        .unwrap();
-
-    let headers = Headers::from_str(rest).unwrap();
-
-    let res = Response {
-        status_line,
-        headers,
-        body: Body::Empty
+    let Ok(request_line) = RequestLine::from_str(req_line.trim()) else {
+        panic!("Can't parse client test req line.");
     };
+
+    req.request_line = request_line;
+
+    while let Some(line) = lines.next() {
+        let trim = line.trim();
+
+        if trim.is_empty() {
+            break;
+        }
+
+        if let Err(e) = req.headers.insert_parsed_header_str(trim) {
+            panic!("Can't parse client test req headers.");
+        }
+    }
+
+    req.headers.insert(HOST, "httpbin.org:80".into());
+
+    while let Some(line) = lines.next() {
+        let trim = line.trim();
+
+        if trim.starts_with("HTTP") {
+            let Ok(status_line) = StatusLine::from_str(trim) else {
+                panic!("Can't parse client test req line.");
+            };
+
+            res.status_line = status_line;
+            break;
+        }
+    }
+
+    while let Some(line) = lines.next() {
+        let trim = line.trim();
+
+        if trim.is_empty() {
+            break;
+        }
+
+        if let Err(e) = res.headers.insert_parsed_header_str(trim) {
+            panic!("Can't parse client test res headers.");
+        }
+    }
 
     (req, res)
 }
 
 pub fn get_test_output_server(input: &str) -> Response {
-    let (stat_line, headers_str) = input
-        .trim_start()
-        .split_once('\n')
-        .unwrap();
+    let mut res = Response::default();
+    let mut lines = input.trim_start().lines();
 
-    let status_line = StatusLine::from_str(stat_line).unwrap();
-    let headers = Headers::from_str(headers_str).unwrap();
+    let Some(stat_line) = lines.next() else {
+        panic!("Can't parse server test status line 1.");
+    };
 
-    Response {
-        status_line,
-        headers,
-        body: Body::Empty
+    let Ok(status_line) = StatusLine::from_str(stat_line.trim()) else {
+        panic!("Can't parse server test status line 2.");
+    };
+
+    res.status_line = status_line;
+
+    while let Some(line) = lines.next() {
+        let trim = line.trim();
+
+        if trim.is_empty() {
+            break;
+        }
+
+        if let Err(e) = res.headers.insert_parsed_header_str(trim) {
+            panic!("Can't parse client test res headers.");
+        }
     }
+
+    res
 }
