@@ -1,10 +1,11 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, StdoutLock, Write};
+use std::io::{BufWriter, Write};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::{Body, NetError, NetParseError, NetResult};
+use crate::colors::{BLU, CLR, CYAN};
 use crate::util;
 
 pub mod names;
@@ -273,9 +274,9 @@ impl Headers {
     /// # Errors
     ///
     /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn write_plain(
+    pub fn print_plain<W: Write>(
         &self,
-        writer: &mut BufWriter<StdoutLock<'_>>
+        writer: &mut BufWriter<W>
     ) -> NetResult<()> {
         for (name, value) in &self.0 {
             writeln!(writer, "{name}: {value}")?;
@@ -289,12 +290,10 @@ impl Headers {
     /// # Errors
     ///
     /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn write_color(
+    pub fn print_color<W: Write>(
         &self,
-        writer: &mut BufWriter<StdoutLock<'_>>
+        writer: &mut BufWriter<W>
     ) -> NetResult<()> {
-        use crate::colors::{BLU, CLR, CYAN};
-
         for (name, value) in &self.0 {
             writeln!(writer, "{BLU}{name}{CLR}: {CYAN}{value}{CLR}")?;
         }

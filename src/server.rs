@@ -274,7 +274,7 @@ impl<T> ServerHandle<T> {
     ///
     /// An error is returned if the server's listener thread panics.
     pub fn join(self) -> NetResult<T> {
-        self.handle.join().map_err(|_| NetError::JoinFail)
+        self.handle.join().map_err(|_| NetError::JoinFailure)
     }
 }
 

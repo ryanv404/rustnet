@@ -1,7 +1,7 @@
-use std::io::{BufWriter, StdoutLock, Write};
+use std::io::{BufWriter, Write};
 use std::process;
 
-use crate::{NetResult, Request, Response};
+use crate::{Request, Response, NetResult};
 use crate::colors::{CLR, RED};
 
 /// A trait containing methods for printing CLI argument errors.
@@ -25,16 +25,59 @@ pub trait WriteCliError {
     }
 }
 
-/// Describes the output style for an HTTP client.
+/// Describes which components are output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Parts {
+    Line,
+    Hdrs,
+    Body,
+    LineHdrs,
+    LineBody,
+    HdrsBody,
+    All,
+}
+
+impl Parts {
+    /// Returns true if this `Parts` variant includes the first line.
+    pub fn includes_first_line(&self) -> bool {
+        matches!(
+            self,
+            Self::Line
+                | Self::LineHdrs
+                | Self::LineBody
+                | Self::All
+        )
+    }
+
+    /// Returns true if this `Parts` variant includes the headers.
+    pub fn includes_headers(&self) -> bool {
+        matches!(
+            self,
+            Self::Hdrs
+                | Self::LineHdrs
+                | Self::HdrsBody
+                | Self::All
+        )
+    }
+
+    /// Returns true if this `Parts` variant includes the body.
+    pub fn includes_body(&self) -> bool {
+        matches!(
+            self,
+            Self::Body
+                | Self::LineBody
+                | Self::HdrsBody
+                | Self::All
+        )
+    }
+}
+
+/// Describes the formatting of `Parts` components.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Style {
     None,
-    PlainReq,
-    PlainRes,
-    PlainBoth,
-    ColorReq,
-    ColorRes,
-    ColorBoth,
+    Plain(Parts),
+    Color(Parts),
 }
 
 impl Style {
@@ -47,330 +90,262 @@ impl Style {
     /// Returns true if this `Style` is a plain variant.
     #[must_use]
     pub const fn is_plain(&self) -> bool {
-        matches!(self, Self::PlainReq | Self::PlainRes | Self::PlainBoth)
+        matches!(self, Self::Plain(_))
     }
-
+    
     /// Returns true if this `Style` is a color variant.
     #[must_use]
     pub const fn is_color(&self) -> bool {
-        matches!(self, Self::ColorReq | Self::ColorRes | Self::ColorBoth)
+        matches!(self, Self::Color(_))
     }
 
-    /// Returns true if this `Style` outputs a request.
+    /// Returns true if this `Style` prints in not `Style::None`.
     #[must_use]
-    pub const fn has_request(&self) -> bool {
-        matches!(self, Self::PlainReq
-            | Self::ColorReq
-            | Self::PlainBoth
-            | Self::ColorBoth
-        )
+    pub const fn is_printed(&self) -> bool {
+        !self.is_none()
     }
 
-    /// Returns true if this `Style` outputs a response.
+    /// Returns true if this `Style` prints the `RequestLine` or `StatusLine`.
     #[must_use]
-    pub const fn has_response(&self) -> bool {
-        matches!(self, Self::PlainRes
-            | Self::ColorRes
-            | Self::PlainBoth
-            | Self::ColorBoth
-        )
+    pub fn first_line_is_printed(&self) -> bool {
+        match self {
+            Self::None => false,
+            Self::Plain(s) | Self::Color(s) => s.includes_first_line(),
+        }
+    }
+
+    /// Returns true if this `Style` prints the `Headers`.
+    #[must_use]
+    pub fn headers_are_printed(&self) -> bool {
+        match self {
+            Self::None => false,
+            Self::Plain(s) | Self::Color(s) => s.includes_headers(),
+        }
+    }
+
+    /// Returns true if this `Style` prints the `Body`.
+    #[must_use]
+    pub fn body_is_printed(&self) -> bool {
+        match self {
+            Self::None => false,
+            Self::Plain(s) | Self::Color(s) => s.includes_body(),
+        }
     }
 }
 
-/// The output configuration settings for an HTTP client.
+/// The output configuration settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Output {
+pub struct OutputStyle {
     pub no_dates: bool,
-    pub first_line: Style,
-    pub headers: Style,
-    pub body: Style,
+    pub req_style: Style,
+    pub res_style: Style,
 }
 
-impl Default for Output {
+impl Default for OutputStyle {
     fn default() -> Self {
         Self {
             no_dates: false,
-            first_line: Style::ColorRes,
-            headers: Style::ColorRes,
-            body: Style::PlainRes
+            req_style: Style::None,
+            res_style: Style::Color(Parts::All)
         }
     }
 }
 
-impl WriteCliError for Output {}
+impl WriteCliError for OutputStyle {}
 
-impl Output {
-    /// Returns true if the request line is output.
+impl OutputStyle {
+    /// Prints the request line if appropriate for this `OutputStyle`.
     #[must_use]
-    pub const fn req_line(&self) -> bool {
-        matches!(self.first_line, Style::PlainReq
-            | Style::PlainBoth
-            | Style::ColorReq
-            | Style::ColorBoth
-        )
+    pub fn print_request_line<W: Write>(
+        &self,
+        req: &Request,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        match self.req_style {
+            Style::Plain(parts) if parts.includes_first_line() => {
+                req.request_line.print_plain(out)
+            },
+            Style::Color(parts) if parts.includes_first_line() => {
+                req.request_line.print_color(out)
+            },
+            _ => Ok(()),
+        }
     }
 
-    /// Returns true if the request line is output with plain style.
+    /// Prints the status line if appropriate for this `OutputStyle`.
     #[must_use]
-    pub const fn req_line_plain(&self) -> bool {
-        matches!(self.first_line, Style::PlainReq | Style::PlainBoth)
+    pub fn print_status_line<W: Write>(
+        &self,
+        res: &Response,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        match self.res_style {
+            Style::Plain(parts) if parts.includes_first_line() => {
+                res.status_line.print_plain(out)
+            },
+            Style::Color(parts) if parts.includes_first_line() => {
+                res.status_line.print_color(out)
+            },
+            _ => Ok(()),
+        }
     }
 
-    /// Returns true if the request line is output with color style.
+    /// Prints the request headers if appropriate for this `OutputStyle`.
     #[must_use]
-    pub const fn req_line_color(&self) -> bool {
-        matches!(self.first_line, Style::ColorReq | Style::ColorBoth)
+    pub fn print_req_headers<W: Write>(
+        &self,
+        req: &Request,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        match self.req_style {
+            Style::Plain(parts) if parts.includes_headers() => {
+                req.headers.print_plain(out)
+            },
+            Style::Color(parts) if parts.includes_headers() => {
+                req.headers.print_color(out)
+            },
+            _ => Ok(()),
+        }
     }
 
-    /// Returns true if the request headers are output.
+    /// Prints the response headers if appropriate for this `OutputStyle`.
     #[must_use]
-    pub const fn req_headers(&self) -> bool {
-        matches!(self.headers, Style::PlainReq
-            | Style::PlainBoth
-            | Style::ColorReq
-            | Style::ColorBoth)
+    pub fn print_res_headers<W: Write>(
+        &self,
+        res: &Response,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        match self.res_style {
+            Style::Plain(parts) if parts.includes_headers() => {
+                res.headers.print_plain(out)
+            },
+            Style::Color(parts) if parts.includes_headers() => {
+                res.headers.print_color(out)
+            },
+            _ => Ok(()),
+        }
     }
 
-    /// Returns true if the request headers are output with plain style.
+    /// Prints the request body if appropriate for this `OutputStyle`.
     #[must_use]
-    pub const fn req_headers_plain(&self) -> bool {
-        matches!(self.headers, Style::PlainReq | Style::PlainBoth)
+    pub fn print_req_body<W: Write>(
+        &self,
+        req: &Request,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        match self.req_style {
+            Style::Plain(parts) | Style::Color(parts) => {
+                if parts.includes_body() {
+                    writeln!(out, "{}", &req.body)?;
+                }
+            },
+            _ => {},
+        }
+
+        Ok(())
     }
 
-    /// Returns true if the request headers are output with color style.
+    /// Prints the response body if appropriate for this `OutputStyle`.
     #[must_use]
-    pub const fn req_headers_color(&self) -> bool {
-        matches!(self.headers, Style::ColorReq | Style::ColorBoth)
-    }
+    pub fn print_res_body<W: Write>(
+        &self,
+        res: &Response,
+        is_head_route: bool,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        if !is_head_route && res.body.is_printable() {
+            match self.res_style {
+                Style::Plain(parts) | Style::Color(parts) => {
+                    if parts.includes_body() {
+                        writeln!(out, "{}", &res.body)?;
+                    }
+                },
+                _ => {},
+            }
+        }
 
-    /// Returns true if the request body is output.
-    #[must_use]
-    pub const fn req_body(&self) -> bool {
-        matches!(self.body, Style::PlainReq | Style::PlainBoth)
-    }
-
-    /// Returns true if the status line is output.
-    #[must_use]
-    pub const fn status_line(&self) -> bool {
-        matches!(self.first_line, Style::PlainReq
-            | Style::PlainBoth
-            | Style::ColorReq
-            | Style::ColorBoth
-        )
-    }
-
-    /// Returns true if the status line is output with plain style.
-    #[must_use]
-    pub const fn status_line_plain(&self) -> bool {
-        matches!(self.first_line, Style::PlainRes | Style::PlainBoth)
-    }
-
-    /// Returns true if the status line is output with color style.
-    #[must_use]
-    pub const fn status_line_color(&self) -> bool {
-        matches!(self.first_line, Style::ColorRes | Style::ColorBoth)
-    }
-
-    /// Returns true if the response headers are output.
-    #[must_use]
-    pub const fn res_headers(&self) -> bool {
-        matches!(self.headers, Style::PlainReq
-            | Style::PlainBoth
-            | Style::ColorReq
-            | Style::ColorBoth
-        )
-    }
-
-    /// Returns true if the response headers are output with plain style.
-    #[must_use]
-    pub const fn res_headers_plain(&self) -> bool {
-        matches!(self.headers, Style::PlainRes | Style::PlainBoth)
-    }
-
-    /// Returns true if the response headers are output with color style.
-    #[must_use]
-    pub const fn res_headers_color(&self) -> bool {
-        matches!(self.headers, Style::ColorRes | Style::ColorBoth)
-    }
-
-    /// Returns true if the response body is output.
-    #[must_use]
-    pub const fn res_body(&self) -> bool {
-        matches!(self.body, Style::PlainRes | Style::PlainBoth)
+        Ok(())
     }
 
     /// Returns true if a component of both the request and the response are
-    /// set to be output.
+    /// printed.
     #[must_use]
     pub const fn include_separator(&self) -> bool {
-        let req = self.req_line()
-            || self.req_headers()
-            || self.req_body();
-
-        let res = self.status_line()
-            || self.res_headers()
-            || self.res_body();
-
-        req && res
-    }
-
-    /// Clear all styles by setting them to `Style::None`.
-    pub fn clear_style(&mut self) {
-        self.first_line = Style::None;
-        self.headers = Style::None;
-        self.body = Style::None;
+        self.req_style.is_printed() && self.res_style.is_printed()
     }
 
     /// Set the output style based on the given format string.
-    pub fn set_style(&mut self, format_str: &str) {
+    pub fn format_str(&mut self, format_str: &str) {
+        let mut req_num = 0;
+        let mut res_num = 0;
+
         // Disable default output style first.
-        self.clear_style();
+        self.clear_styles();
 
-        format_str.chars().for_each(|c| match c {
-            'R' if self.first_line.is_none() => {
-                self.first_line = Style::ColorReq;
-            },
-            'R' if self.first_line.has_response() => {
-                self.first_line = Style::ColorBoth;
-            },
-            'H' if self.headers.is_none() => {
-                self.headers = Style::ColorReq;
-            },
-            'H' if self.headers.has_response() => {
-                self.headers = Style::ColorBoth;
-            },
-            'B' if self.body.is_none() => {
-                self.body = Style::PlainReq;
-            },
-            'B' if self.body.has_response() => {
-                self.body = Style::PlainBoth;
-            },
-            's' if self.first_line.is_none() => {
-                self.first_line = Style::ColorRes;
-            },
-            's' if self.first_line.has_request() => {
-                self.first_line = Style::ColorBoth;
-            },
-            'h' if self.headers.is_none() => {
-                self.headers = Style::ColorRes;
-            },
-            'h' if self.headers.has_request() => {
-                self.headers = Style::ColorBoth;
-            },
-            'b' if self.body.is_none() => {
-                self.body = Style::PlainRes;
-            },
-            'b' if self.body.has_request() => {
-                self.body = Style::PlainBoth;
-            },
-            // Ignore quotation marks.
-            '\'' | '"' => {},
-            _ => self.invalid_arg("--output", format_str),
-        });
+        for c in format_str.chars() {
+            match c as u8 as u32 {
+                42 => {
+                    req_num = 220;
+                    res_num = 317;
+                    break;
+                },
+                109 => {
+                    req_num = 82;
+                    res_num = 115;
+                    break;
+                },
+                114 => {
+                    req_num = 220;
+                    res_num = 0;
+                    break;
+                },
+                n if n < 97 => req_num += n,
+                n => res_num += n,
+            }
+        }
+
+        let req_style = match req_num {
+            0 => Style::None,
+            66 => Style::Color(Parts::Body),
+            72 => Style::Color(Parts::Hdrs),
+            82 => Style::Color(Parts::Line),
+            138 => Style::Color(Parts::HdrsBody),
+            148 => Style::Color(Parts::LineBody),
+            154 => Style::Color(Parts::LineHdrs),
+            220 => Style::Color(Parts::All),
+            _ => return self.invalid_arg("--output", format_str),
+        };
+
+        let res_style = match res_num {
+            0 => Style::None,
+            98 => Style::Color(Parts::Body),
+            104 => Style::Color(Parts::Hdrs),
+            115 => Style::Color(Parts::Line),
+            202 => Style::Color(Parts::HdrsBody),
+            213 => Style::Color(Parts::LineBody),
+            219 => Style::Color(Parts::LineHdrs),
+            317 => Style::Color(Parts::All),
+            _ => return self.invalid_arg("--output", format_str),
+        };
+
+        self.req_style = req_style;
+        self.res_style = res_style;
     }
 
-    /// Sets all color `Style` variants to their plain counterparts.
+    /// Converts all `Style::Color` variants to `Style::Plain`.
     pub fn make_plain(&mut self) {
-        match self.first_line {
-            Style::ColorReq => self.first_line = Style::PlainReq,
-            Style::ColorRes => self.first_line = Style::PlainRes,
-            Style::ColorBoth => self.first_line = Style::PlainBoth,
-            _ => {},
+        if let Style::Color(parts) = self.req_style {
+            self.req_style = Style::Plain(parts);
         }
 
-        match self.headers {
-            Style::ColorReq => self.headers = Style::PlainReq,
-            Style::ColorRes => self.headers = Style::PlainRes,
-            Style::ColorBoth => self.headers = Style::PlainBoth,
-            _ => {},
+        if let Style::Color(parts) = self.res_style {
+            self.res_style = Style::Plain(parts);
         }
     }
 
-    /// Handles the writing of request components to stdout.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing the request to stdout fails.
-    pub fn write_request(
-        &self,
-        req: &Request,
-        writer: &mut BufWriter<StdoutLock<'_>>
-    ) -> NetResult<()> {
-        if self.req_line_plain() {
-            req.request_line.write_plain(writer)?;
-        } else if self.req_line_color() {
-            req.request_line.write_color(writer)?;
-        }
-
-        if self.req_headers_plain() {
-            req.headers.write_plain(writer)?;
-        } else if self.req_headers_color() {
-            req.headers.write_color(writer)?;
-        }
-
-        if self.req_body() && req.body.is_printable() {
-            writeln!(writer, "{}", &req.body)?;
-        }
-
-        Ok(())
-    }
-
-    /// Handles the writing of response components to stdout.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing the response to stdout fails.
-    pub fn write_response(
-        &self,
-        do_separator: bool,
-        is_head_route: bool,
-        res: &Response,
-        writer: &mut BufWriter<StdoutLock<'_>>
-    ) -> NetResult<()> {
-        if do_separator {
-            writeln!(writer)?;
-        }
-
-        if self.status_line_plain() {
-            res.status_line.write_plain(writer)?;
-        } else if self.status_line_color() {
-            res.status_line.write_color(writer)?;
-        }
-
-        if self.res_headers_plain() {
-            res.headers.write_plain(writer)?;
-        } else if self.res_headers_color() {
-            res.headers.write_color(writer)?;
-        }
-
-        if !is_head_route
-                && self.res_body()
-                && res.body.is_printable()
-        {
-            writeln!(writer, "{}", &res.body)?;
-        }
-
-        Ok(())
-    }
-
-    /// Sets the "minimal" output style. 
-    pub fn set_minimal(&mut self) {
-        self.first_line = Style::ColorBoth;
-        self.headers = Style::None;
-        self.body = Style::None;
-    }
-
-    /// Sets the "request" output style. 
-    pub fn set_request(&mut self) {
-        self.first_line = Style::ColorReq;
-        self.headers = Style::ColorReq;
-        self.body = Style::PlainReq;
-    }
-
-    /// Sets the "verbose" output style. 
-    pub fn set_verbose(&mut self) {
-        self.first_line = Style::ColorBoth;
-        self.headers = Style::ColorBoth;
-        self.body = Style::PlainBoth;
+    /// Clear all styles by setting them to `Style::None`.
+    pub fn clear_styles(&mut self) {
+        self.req_style = Style::None;
+        self.res_style = Style::None;
     }
 }

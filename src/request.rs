@@ -1,11 +1,12 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, StdoutLock, Write};
+use std::io::{BufWriter, Write};
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError,
     NetParseError, NetResult, Route, Version,
 };
+use crate::colors::{CLR, YLW};
 use crate::util;
 
 /// Contains the components of an HTTP request line.
@@ -120,9 +121,9 @@ impl RequestLine {
     /// # Errors
     ///
     /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn write_plain(
+    pub fn print_plain<W: Write>(
         &self,
-        writer: &mut BufWriter<StdoutLock<'_>>
+        writer: &mut BufWriter<W>
     ) -> NetResult<()> {
         writeln!(writer, "{self}")?;
         Ok(())
@@ -133,12 +134,10 @@ impl RequestLine {
     /// # Errors
     ///
     /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn write_color(
+    pub fn print_color<W: Write>(
         &self,
-        writer: &mut BufWriter<StdoutLock<'_>>
+        writer: &mut BufWriter<W>
     ) -> NetResult<()> {
-        use crate::colors::{CLR, YLW};
-
         writeln!(writer, "{YLW}{self}{CLR}")?;
         Ok(())
     }
@@ -221,23 +220,5 @@ impl Request {
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body
-    }
-
-    /// Writes an HTTP request to a `Connection`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if `Connection::send_request` fails.
-    pub fn send(&mut self, conn: &mut Connection) -> NetResult<()> {
-        conn.send_request(self)
-    }
-
-    /// Reads and parses an HTTP request from a `Connection`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if `Connection::recv_request` fails.
-    pub fn recv(conn: &mut Connection) -> NetResult<Self> {
-        conn.recv_request()
     }
 }

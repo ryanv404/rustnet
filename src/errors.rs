@@ -50,11 +50,14 @@ impl From<NetParseError> for IoError {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetError {
-    JoinFail,
+    ConnectFailure,
+    JoinFailure,
     Https,
     Io(IoErrorKind),
+    NoRequest,
+    NoResponse,
     NotConnected,
     Other(&'static str),
     Parse(NetParseError),
@@ -68,11 +71,12 @@ impl StdError for NetError {}
 impl Display for NetError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::JoinFail => {
-                f.write_str("Could not join the main server thread.")
-            },
+            Self::ConnectFailure => f.write_str("Could not connect."),
+            Self::JoinFailure => f.write_str("Could not join server thread."),
             Self::Https => f.write_str("HTTPS not implemented"),
             Self::Io(kind) => write!(f, "I/O error: {kind}"),
+            Self::NoRequest => f.write_str("No request found."),
+            Self::NoResponse => f.write_str("No response found."),
             Self::NotConnected => f.write_str("No active TCP stream"),
             Self::Other(msg) => write!(f, "{msg}"),
             Self::Parse(kind) => write!(f, "{kind}"),
@@ -115,10 +119,16 @@ impl From<NetError> for IoError {
     fn from(err: NetError) -> Self {
         match err {
             NetError::Https => Self::new(IoErrorKind::Unsupported, err),
-            NetError::NotConnected
-                | NetError::JoinFail
+            NetError::NotConnected | NetError::ConnectFailure => {
+                Self::from(IoErrorKind::NotConnected)
+            },
+            NetError::UnexpectedEof => {
+                Self::from(IoErrorKind::UnexpectedEof)
+            },
+            NetError::JoinFailure
+                | NetError::NoRequest
+                | NetError::NoResponse
                 | NetError::Other(_)
-                | NetError::UnexpectedEof
                 | NetError::Parse(_) => Self::new(IoErrorKind::Other, err),
             NetError::Read(kind)
                 | NetError::Write(kind)

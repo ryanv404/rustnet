@@ -1,9 +1,9 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, StdoutLock, Write};
+use std::io::{BufWriter, Write};
 use std::str::FromStr;
 
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
+    Body, HeaderName, HeaderValue, Headers, Method, NetError,
     NetParseError, NetResult, Status, StatusCode, Target, Version,
 };
 use crate::colors::{CLR, PURP};
@@ -89,9 +89,9 @@ impl StatusLine {
     /// # Errors
     ///
     /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn write_plain(
+    pub fn print_plain<W: Write>(
         &self,
-        writer: &mut BufWriter<StdoutLock<'_>>
+        writer: &mut BufWriter<W>
     ) -> NetResult<()> {
         writeln!(writer, "{self}")?;
         Ok(())
@@ -102,9 +102,9 @@ impl StatusLine {
     /// # Errors
     ///
     /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn write_color(
+    pub fn print_color<W: Write>(
         &self,
-        writer: &mut BufWriter<StdoutLock<'_>>
+        writer: &mut BufWriter<W>
     ) -> NetResult<()> {
         writeln!(writer, "{PURP}{self}{CLR}")?;
         Ok(())
@@ -251,23 +251,5 @@ impl Response {
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body
-    }
-
-    /// Writes an HTTP response to a `Connection`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if `Connection::send_response` fails.
-    pub fn send(&mut self, conn: &mut Connection) -> NetResult<()> {
-        conn.send_response(self)
-    }
-
-    /// Reads and parses an HTTP response from a `Connection`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if `Connection::recv_response` fails.
-    pub fn recv(conn: &mut Connection) -> NetResult<Self> {
-        conn.recv_response()
     }
 }

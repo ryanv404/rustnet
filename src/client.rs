@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::io::{BufWriter, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 
 use crate::{
@@ -9,7 +10,10 @@ use crate::header_name::DATE;
 use crate::util;
 
 pub mod output;
-pub use output::{WriteCliError, Output};
+pub mod tui;
+
+pub use output::{OutputStyle, WriteCliError};
+pub use tui::Tui;
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,6 +27,7 @@ where
     pub version: Version,
     pub headers: Headers,
     pub body: Body,
+    pub output: OutputStyle,
 }
 
 impl<A> Default for ClientBuilder<A>
@@ -37,6 +42,7 @@ where
             version: Version::OneDotOne,
             headers: Headers::new(),
             body: Body::Empty,
+            output: OutputStyle::default()
         }
     }
 }
@@ -99,18 +105,26 @@ where
         self
     }
 
-    /// Builds and returns a new `Client` instance.
-    #[allow(clippy::missing_errors_doc)]
+    /// Sets the request body.
+    #[must_use]
+    pub fn output(mut self, output: &OutputStyle) -> Self {
+        self.output = output.clone();
+        self
+    }
+
+    /// Builds and returns a new `Client`.
+    ///
+    /// # Errors
+    /// 
+    /// Returns an error if establishing a TCP connection fails.
     pub fn build(mut self) -> NetResult<Client> {
         let Some(addr) = self.addr.as_ref() else {
-            return Err(NetError::NotConnected);
+            return Err(NetError::ConnectFailure);
         };
 
         let conn = TcpStream::connect(addr)
-            .map_err(Into::into)
+            .map_err(|_| NetError::ConnectFailure)
             .and_then(Connection::try_from)?;
-
-        self.headers.default_request_headers(&self.body, &conn.remote_addr);
 
         let path = self
             .path
@@ -129,26 +143,34 @@ where
             body: self.body,
         });
 
-        let res = None;
-
-        Ok(Client { req, res, conn })
+        Ok(Client {
+            req,
+            res: None,
+            conn: Some(conn),
+            output: self.output
+        })
     }
 
-    /// Sends an HTTP request and then returns a `Client` instance.
-    #[allow(clippy::missing_errors_doc)]
+    /// Sends an HTTP `Request` and returns the `Client`.
+    ///
+    /// # Errors
+    /// 
+    /// Returns an error if building the `Client` or sending the `Request`
+    /// fails.
     pub fn send(self) -> NetResult<Client> {
         let mut client = self.build()?;
-        client.send()?;
+        client.send_request()?;
         Ok(client)
     }
 }
 
 /// An HTTP client.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Client {
     pub req: Option<Request>,
     pub res: Option<Response>,
-    pub conn: Connection,
+    pub conn: Option<Connection>,
+    pub output: OutputStyle,
 }
 
 impl Display for Client {
@@ -181,15 +203,18 @@ impl Client {
     ///
     /// Returns an error if building the `Client` or sending the request
     /// fails.
-    pub fn get(uri: &str) -> NetResult<Self> {
-        util::parse_uri(uri)
+    pub fn get(uri: &str) -> NetResult<()> {
+        let mut client = util::parse_uri(uri)
             .and_then(|(ref addr, ref path)| {
                 ClientBuilder::new()
                     .method(&Method::Get)
                     .addr(addr)
                     .path(path)
-                    .send()
-            })
+                    .build()
+            })?;
+
+        client.output.format_str("b");
+        client.send_request()
     }
 
     /// Sends a custom SHUTDOWN request to the provided test server address.
@@ -199,12 +224,13 @@ impl Client {
     /// Returns an error if building the `Client` or sending the request
     /// fails.
     pub fn shutdown(addr: &str) -> NetResult<()> {
-        ClientBuilder::new()
+        let mut client = ClientBuilder::new()
             .method(&Method::Custom("SHUTDOWN".to_string()))
             .addr(addr)
-            .send()?;
+            .build()?;
 
-        Ok(())
+        client.output.format_str("b");
+        client.send_request()
     }
 
     /// Removes Date header field entries from requests and responses.
@@ -218,20 +244,140 @@ impl Client {
         }
     }
 
-    /// Sends an HTTP request to a remote host.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn send(&mut self) -> NetResult<()> {
-        self.req
-            .as_mut()
-            .ok_or(NetError::NotConnected)
-            .and_then(|req| self.conn.send_request(req))
+    /// Prints the request to stdout, based on the output style settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing the request to stdout fails.
+    pub fn print_request<W: Write>(
+        &self,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        if let Some(req) = self.req.as_ref() {
+            self.output.print_request_line(req, out)?;
+            self.output.print_req_headers(req, out)?;
+            self.output.print_req_body(req, out)?;
+        }
+
+        Ok(())
     }
 
-    /// Receives an HTTP response from the remote host.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn recv(&mut self) -> NetResult<()> {
-        let res = self.conn.recv_response()?;
+    /// Prints the response to stdout, based on the output style settings.
+    /// 
+    /// # Errors
+    ///
+    /// Returns an error if writing the response to stdout fails.
+    pub fn print_response<W: Write>(
+        &self,
+        out: &mut BufWriter<W>
+    ) -> NetResult<()> {
+        if let Some(res) = self.res.as_ref() {
+            if self.output.include_separator() {
+                writeln!(out)?;
+            }
+
+            let is_head_route = self
+                .req
+                .as_ref()
+                .map(|req| req.route().is_head())
+                .unwrap_or(false);
+
+            self.output.print_status_line(res, out)?;
+            self.output.print_res_headers(res, out)?;
+            self.output.print_res_body(res, is_head_route, out)?;
+        }
+
+        Ok(())
+    }
+
+    /// Prints the request and the response to stdout, based on the
+    /// output style settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing the request to stdout fails.
+    pub fn print<W: Write>(&mut self, out: &mut BufWriter<W>) -> NetResult<()> {
+        // Ignore Date headers.
+        if self.output.no_dates {
+            self.remove_date_headers();
+        }
+
+        // Handle request output.
+        if self.req.is_some() {
+            self.print_request(out)?;
+        }
+
+        // Handle response output.
+        if self.res.is_some() {
+            self.print_response(out)?;
+        }
+
+        writeln!(out)?;
+        out.flush()?;
+        Ok(())
+    }
+
+    /// Writes an HTTP `Request` to a `Connection`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `Connection::send_request` fails.
+    pub fn send_request(&mut self) -> NetResult<()> {
+        match self.req.as_mut() {
+            None => Err(NetError::NoRequest),
+            Some(req) => match self.conn.as_mut() {
+                None => Err(NetError::NotConnected),
+                Some(conn) => conn.send_request(req),
+            },
+        }
+    }
+
+    /// Writes an HTTP `Response` to a `Connection`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `Connection::send_response` fails.
+    pub fn send_response(&mut self) -> NetResult<()> {
+        match self.res.as_mut() {
+            None => Err(NetError::NoResponse),
+            Some(res) => match self.conn.as_mut() {
+                None => Err(NetError::NotConnected),
+                Some(conn) => conn.send_response(res),
+            },
+        }
+    }
+
+    /// Reads and parse an HTTP `Request` from the contained `Connection`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `Connection::recv_request` fails.
+    pub fn recv_request(&mut self) -> NetResult<()> {
+        let req = self
+            .conn
+            .as_mut()
+            .ok_or(NetError::NotConnected)
+            .and_then(|conn| conn.recv_request())?;
+
+        self.req = Some(req);
+
+        Ok(())
+    }
+
+    /// Reads and parses an HTTP `Response` from the contained `Connection`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `Connection::recv_response` fails.
+    pub fn recv_response(&mut self) -> NetResult<()> {
+        let res = self
+            .conn
+            .as_mut()
+            .ok_or(NetError::NotConnected)
+            .and_then(|conn| conn.recv_response())?;
+
         self.res = Some(res);
+
         Ok(())
     }
 }

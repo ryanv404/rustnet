@@ -357,7 +357,6 @@ pub fn get_expected_req_client(
 ) -> Request {
     let mut req_headers = Headers::new();
     req_headers.accept("*/*");
-    req_headers.content_length(0);
     req_headers.user_agent("rustnet/0.1");
     req_headers.insert(HOST, "httpbin.org:80".into());
 

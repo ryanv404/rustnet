@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-use crate::{Body, Connection, Response, ServerConfig};
+use crate::{Connection, ServerConfig};
 
 /// Contains the ID and handle for a single worker thread.
 #[derive(Debug)]
@@ -33,14 +33,7 @@ impl Worker {
                     },
                 };
 
-                let (target, status) = config.router.resolve(&route);
-
-                let mut resp = match Response::from_target(target, status) {
-                    Ok(mut resp) if route.is_head() => {
-                        // Remove body for HEAD requests.
-                        resp.body = Body::Empty;
-                        resp
-                    },
+                let mut resp = match config.router.resolve(&route) {
                     Ok(resp) => resp,
                     Err(ref err) => {
                         config.send_500_error(err, &mut conn);
@@ -59,7 +52,7 @@ impl Worker {
                     break;
                 }
 
-                config.log_route(status, &route, &conn);
+                config.log_route(resp.status_code(), &route, &conn);
             }
         });
 

@@ -33,7 +33,7 @@ pub mod util;
 
 pub use body::Body;
 pub use cli::{ClientCli, ServerCli};
-pub use client::{Client, ClientBuilder, Output, WriteCliError};
+pub use client::{Client, ClientBuilder, OutputStyle, Tui, WriteCliError};
 pub use errors::{NetError, NetParseError, NetResult};
 pub use header::{
     Header, HeaderName, HeaderNameInner, HeaderValue, Headers, header_name,

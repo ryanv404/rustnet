@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::{Path, PathBuf};
 
 use crate::util::get_extension;
-use crate::Method;
+use crate::{Body, Method, NetResult, Response};
 
 /// Represents a server endpoint defined by an HTTP method and a URI path.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -231,7 +231,7 @@ impl Router {
 
     /// Returns the `Target` and status code for the given `Route`.
     #[must_use]
-    pub fn resolve(&self, route: &Route) -> (Target, u16) {
+    pub fn resolve(&self, route: &Route) -> NetResult<Response> {
         let mut target = self.get_target(route);
 
         // Implement HEAD routes for all GET routes.
@@ -246,14 +246,22 @@ impl Router {
             }
         }
 
-        match target {
+        let (target, status) = match target {
             Target::NotFound => {
                 target = self.get_not_found_target();
                 (target, 404)
             },
             _ if route.is_post() => (target, 201),
             _ => (target, 200),
+        };
+
+        let mut res = Response::from_target(target, status)?;
+
+        if route.is_head() {
+            res.body = Body::Empty;
         }
+
+        Ok(res)
     }
 
     /// Configures handling of a GET request.

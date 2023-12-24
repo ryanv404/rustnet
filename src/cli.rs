@@ -1,12 +1,13 @@
 use std::env::Args;
+use std::iter::Skip;
 use std::path::PathBuf;
 use std::process;
 
 use crate::{
-    Body, Client, Headers, Method, Output, Route, Router, Target,
-    WriteCliError,
+    Body, Client, Headers, Method, NetResult, OutputStyle, Route, Router,
+    Target, Tui, WriteCliError,
 };
-use crate::colors::{CLR, GRN, RED};
+use crate::colors::{CLR, GRN};
 use crate::util;
 
 /// Contains the parsed server command line arguments.
@@ -176,7 +177,6 @@ impl ServerCli {
 /// Contains the parsed client command line arguments.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientCli {
-    pub run_tui: bool,
     pub debug: bool,
     pub do_not_send: bool,
     pub method: Method,
@@ -184,13 +184,12 @@ pub struct ClientCli {
     pub addr: String,
     pub headers: Headers,
     pub body: Body,
-    pub output: Output,
+    pub output: OutputStyle,
 }
 
 impl Default for ClientCli {
     fn default() -> Self {
         Self {
-            run_tui: false,
             debug: false,
             do_not_send: false,
             method: Method::Get,
@@ -198,7 +197,7 @@ impl Default for ClientCli {
             addr: String::new(),
             headers: Headers::new(),
             body: Body::Empty,
-            output: Output::default()
+            output: OutputStyle::default()
         }
     }
 }
@@ -212,11 +211,17 @@ impl ClientCli {
         Self::default()
     }
 
-    /// Sets up a server shutdown request.
-    pub fn set_shutdown(&mut self) {
-        self.output.make_plain();
-        self.headers.connection("close");
-        self.method = Method::Custom("SHUTDOWN".to_string());
+    pub fn do_shutdown(&self, args: Skip<Args>) {
+        match args.last().as_deref() {
+            Some(addr) => {
+                if let Err(e) = Client::shutdown(addr) {
+                    eprintln!("Could not send shutdown request.\n{e}");
+                }
+
+                process::exit(0);
+            },
+            None => self.missing_arg("URI"),
+        }
     }
 
     /// Prints the client help message and exits the program.
@@ -254,64 +259,67 @@ impl ClientCli {
 
     /// Parses command line arguments into a `ClientCli` object.
     #[must_use]
-    pub fn parse_args(args: Args) -> Self {
-        let mut do_shutdown = false;
+    pub fn parse_args(args: Args) -> NetResult<Self> {
         let mut cli = Self::new();
-        let mut args = args.skip(1);
 
-        while let Some(ref opt) = args.next() {
+        let mut opts = args.skip(1);
+
+        while let Some(ref opt) = opts.next() {
             match opt.len() {
                 // End of options flag.
                 2 if opt == "--" => {
-                    cli.handle_uri(args.next().as_deref());
+                    cli.handle_uri(opts.next().as_deref());
                     break;
                 },
                 // Run the client TUI.
                 5 if opt == "--tui" => {
-                    cli.run_tui = true;
-                    return cli;
+                    Tui::run();
+                    process::exit(0);
                 },
                 // Set request body data.
                 6 if opt == "--text" => {
-                    cli.handle_body(args.next().as_deref());
+                    cli.handle_body(opts.next().as_deref());
                 },
                 // Path component of the requested HTTP URI.
-                6 if opt == "--path" => match args.next() {
+                6 if opt == "--path" => match opts.next() {
                     None => cli.missing_arg("--path"),
                     Some(path) => cli.path = path,
                 },
                 // Print the help message.
                 6 if opt == "--help" => cli.print_help(),
                 // Only print the response body.
-                6 if opt == "--body" => cli.output.set_style("b"),
+                6 if opt == "--body" => cli.output.format_str("b"),
                 // Do not colorize output.
                 7 if opt == "--plain" => cli.output.make_plain(),
                 // Enable debugging.
                 7 if opt == "--debug" => cli.debug = true,
                 // Set request method.
                 8 if opt == "--method" => {
-                    cli.handle_method(args.next().as_deref());
+                    cli.handle_method(opts.next().as_deref());
                 },
                 // Set the output style.
-                8 if opt == "--output" => match args.next() {
+                8 if opt == "--output" => match opts.next() {
                     None => cli.missing_arg("--output"),
-                    Some(ref style) => cli.output.set_style(style),
+                    Some(ref format) => cli.output.format_str(format),
                 },
                 // Add a request header.
                 8 if opt == "--header" => {
-                    cli.handle_header(args.next().as_deref());
+                    cli.handle_header(opts.next().as_deref());
                 },
                 // Only print the request line and status line.
-                9 if opt == "--minimal" => cli.output.set_minimal(),
+                9 if opt == "--minimal" => cli.output.format_str("Rs"),
                 // Set the request output style and the do_not_send option.
                 9 if opt == "--request" => {
-                    cli.output.set_request();
                     cli.do_not_send = true;
+                    cli.output.format_str("RHB");
                 },
                 // Set verbose output style.
-                9 if opt == "--verbose" => cli.output.set_verbose(),
+                9 if opt == "--verbose" => cli.output.format_str("RHBshb"),
                 // Set request output style and no send option.
-                10 if opt == "--shutdown" => do_shutdown = true,
+                10 if opt == "--shutdown" => {
+                    cli.do_shutdown(opts);
+                    break;
+                },
                 // Remove Date headers before printing.
                 10 if opt == "--no-dates" => cli.output.no_dates = true,
                 // Handle an unknown option.
@@ -328,15 +336,7 @@ impl ClientCli {
             cli.missing_arg("URI");
         }
 
-        if do_shutdown {
-            if let Err(e) = Client::shutdown(&cli.addr) {
-                eprintln!("{RED}Unable to send SHUTDOWN.\n{e}{CLR}");
-            };
-
-            process::exit(0);
-        }
-
-        cli
+        Ok(cli)
     }
 
     pub fn handle_method(&mut self, method: Option<&str>) {

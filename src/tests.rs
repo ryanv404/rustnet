@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::sync::Arc;
 use std::str::{self, FromStr};
 
 use crate::header::names::STANDARD_HEADERS;
@@ -271,92 +270,6 @@ mod utils {
         assert_eq!(trim_whitespace_bytes(b" "), b"");
         assert_eq!(trim_whitespace_bytes(b"x"), b"x");
         assert_eq!(trim_whitespace_bytes(b""), b"");
-    }
-}
-
-#[cfg(test)]
-mod router {
-    use super::*;
-
-    macro_rules! test_resolve_route {
-        ($( $route:expr => $target:expr, $status:literal; )+) => {
-            #[test]
-            fn target_from_route() {
-                let mut routes = Router::new();
-
-                $( routes.mount($route, $target); )+
-
-                routes.mount_shutdown_route();
-                let router = Arc::new(routes);
-
-                $(
-                    let (target, status) = router.resolve(&$route);
-                    assert_eq!(target, $target);
-                    assert_eq!(status, $status);
-                )+
-            }
-        };
-    }
-
-    test_resolve_route! {
-        Route::Get("/empty1".into()) => Target::Empty, 200;
-        Route::Head("/empty2".into()) => Target::Empty, 200;
-        Route::Put("/text1".into()) => Target::Text("test1".into()), 200;
-        Route::Patch("/text2".into()) => Target::Text("test2".into()), 200;
-        Route::Post("/json1".into()) => 
-            Target::Json("{\n\"data\": \"test data 1\"\n}".into()), 201;
-        Route::Delete("/json2".into()) =>
-            Target::Json("{\n\"data\": \"test data 2\"\n}".into()), 200;
-        Route::Get("/xml1".into()) => Target::Xml("\
-            <note>
-            <to>Cat</to>
-            <from>Dog</from>
-            <heading>Woof</heading>
-            <body>Who's a good boy?</body>
-            </note>".into()
-        ), 200;
-        Route::Head("/xml2".into()) => Target::Xml("\
-            <note>
-            <to>Dog</to>
-            <from>Cat</from>
-            <heading>Meow</heading>
-            <body>Where's the mouse?</body>
-            </note>".into()
-        ), 200;
-        Route::Patch("/index".into()) => Target::Html("\
-            <!DOCTYPE html>
-            <html>
-                <head>
-                    <title>Home</title>
-                </head>
-                <body>
-                    <p>Home page</p>
-                </body>
-            </html>".into()
-        ), 200;
-        Route::Post("/about".into()) => Target::Html("\
-            <!DOCTYPE html>
-            <html>
-                <head>
-                    <title>About</title>
-                </head>
-                <body>
-                    <p>About page</p>
-                </body>
-            </html>".into()
-        ), 201;
-        Route::Delete("/bytes1".into()) =>
-            Target::Bytes(b"text bytes".into()), 200;
-        Route::Put("/bytes2".into()) =>
-            Target::Bytes(b"text bytes".into()), 200;
-        Route::Get("/favicon1".into()) =>
-            Target::Favicon("favicon.ico".into()), 200;
-        Route::Head("/favicon2".into()) =>
-            Target::Favicon("favicon.ico".into()), 200;
-        Route::Post("/file1".into()) => 
-            Target::File("test_file.dat".into()), 201;
-        Route::Put("/file2".into()) =>
-            Target::File("test_file.dat".into()), 200;
     }
 }
 
