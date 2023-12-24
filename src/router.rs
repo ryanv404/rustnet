@@ -185,7 +185,7 @@ impl Router {
         Self::default()
     }
 
-    /// Returns true if there is an entry associated with `Route`.
+    /// Returns true if there is an entry associated with the provided route.
     #[must_use]
     pub fn contains(&self, route: &Route) -> bool {
         self.0.contains_key(route)
@@ -197,66 +197,70 @@ impl Router {
         self.0.is_empty()
     }
 
-    /// Appends the routes from `other` into this router.
+    /// Appends the routes from `other` into this `Router`.
     pub fn append(&mut self, other: &mut Self) {
         self.0.append(&mut other.0);
     }
 
-    /// Mount a new route to the router.
+    /// Mount a new route to the `Router`.
     pub fn mount(&mut self, route: Route, target: Target) {
         self.0.insert(route, target);
     }
 
-    /// Mount a shutdown route.
+    /// Mount a shutdown route to the `Router`.
     pub fn mount_shutdown_route(&mut self) {
         let route = Route::Shutdown;
         let target = Target::Shutdown;
         self.0.insert(route, target);
     }
 
-    /// Returns the `Target` of the given `Route`.
-    #[must_use]
+    /// Returns the `Target` for the given `Route` or `Target::NotFound` if
+    /// the route does not exist in the `Router`.
     pub fn get_target(&self, route: &Route) -> Target {
-        self.0.get(route).cloned().unwrap_or(Target::NotFound)
+        match self.0.get(route).cloned() {
+            // Allow HEAD requests for all configured GET routes.
+            None if route.is_head() => match route.path() {
+                None => Target::NotFound,
+                Some(head_path) => {
+                    let get_route = Route::Get(head_path.to_string());
+                    self.0.get(&get_route)
+                        .cloned()
+                        .unwrap_or(Target::NotFound)
+                },
+            },
+            None => Target::NotFound,
+            Some(target) => target,
+        }
     }
 
-    /// Returns the `Target` for non-existent routes.
+    /// Returns the `Target`, if configured, for requests to routes that do
+    /// not exist.
     #[must_use]
     pub fn get_not_found_target(&self) -> Target {
-        self.0
-            .get(&Route::NotFound)
-            .cloned()
-            .unwrap_or(Target::Empty)
+        self.0.get(&Route::NotFound).cloned().unwrap_or(Target::Empty)
     }
 
-    /// Returns the `Target` and status code for the given `Route`.
+    /// Resolves the given `Route` into a `Response`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Response::from_target` is unable to construct a
+    /// `Response` from the provided `Target` and status code.
     #[must_use]
     pub fn resolve(&self, route: &Route) -> NetResult<Response> {
-        let mut target = self.get_target(route);
-
-        // Implement HEAD routes for all GET routes.
-        if target.is_not_found() && route.is_head() {
-            if let Some(head_path) = route.path() {
-                let get_route = Route::Get(head_path.to_string());
-                let new_target = self.get_target(&get_route);
-
-                if !new_target.is_not_found() {
-                    target = new_target;
-                }
-            }
-        }
-
-        let (target, status) = match target {
+        let mut res = match self.get_target(route) {
+            // Route not found.
             Target::NotFound => {
-                target = self.get_not_found_target();
-                (target, 404)
+                let target = self.get_not_found_target();
+                Response::from_target(target, 404)?
             },
-            _ if route.is_post() => (target, 201),
-            _ => (target, 200),
+            // POST route found.
+            target if route.is_post() => Response::from_target(target, 201)?,
+            // Non-POST route found.
+            target => Response::from_target(target, 200)?,
         };
 
-        let mut res = Response::from_target(target, status)?;
-
+        // Remove the response body for HEAD requests.
         if route.is_head() {
             res.body = Body::Empty;
         }

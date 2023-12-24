@@ -244,7 +244,8 @@ impl Client {
         }
     }
 
-    /// Prints the request to stdout, based on the output style settings.
+    /// Prints the request to the provided `BufWriter`, based on the output
+    /// style settings.
     ///
     /// # Errors
     ///
@@ -262,7 +263,8 @@ impl Client {
         Ok(())
     }
 
-    /// Prints the response to stdout, based on the output style settings.
+    /// Prints the response to the provided `BufWriter`, based on the output
+    /// style settings.
     /// 
     /// # Errors
     ///
@@ -276,22 +278,25 @@ impl Client {
                 writeln!(out)?;
             }
 
+            self.output.print_status_line(res, out)?;
+            self.output.print_res_headers(res, out)?;
+
             let is_head_route = self
                 .req
                 .as_ref()
                 .map(|req| req.route().is_head())
                 .unwrap_or(false);
 
-            self.output.print_status_line(res, out)?;
-            self.output.print_res_headers(res, out)?;
-            self.output.print_res_body(res, is_head_route, out)?;
+            if !is_head_route {
+                self.output.print_res_body(res, out)?;
+            }
         }
 
         Ok(())
     }
 
-    /// Prints the request and the response to stdout, based on the
-    /// output style settings.
+    /// Prints the request and the response to the provided `BufWriter`,
+    /// based on the output style settings.
     ///
     /// # Errors
     ///

@@ -6,6 +6,12 @@ use crate::colors::{CLR, RED};
 
 /// A trait containing methods for printing CLI argument errors.
 pub trait WriteCliError {
+    /// Prints unknown option error message and exits the program.
+    fn unknown_opt(&self, name: &str) {
+        eprintln!("{RED}Unknown option: `{name}`{CLR}");
+        process::exit(1);
+    }
+
     /// Prints unknown argument error message and exits the program.
     fn unknown_arg(&self, name: &str) {
         eprintln!("{RED}Unknown argument: `{name}`{CLR}");
@@ -250,10 +256,9 @@ impl OutputStyle {
     pub fn print_res_body<W: Write>(
         &self,
         res: &Response,
-        is_head_route: bool,
         out: &mut BufWriter<W>
     ) -> NetResult<()> {
-        if !is_head_route && res.body.is_printable() {
+        if res.body.is_printable() {
             match self.res_style {
                 Style::Plain(parts) | Style::Color(parts) => {
                     if parts.includes_body() {
@@ -267,14 +272,25 @@ impl OutputStyle {
         Ok(())
     }
 
-    /// Returns true if a component of both the request and the response are
+    /// Returns true if a component of both the request and the response is
     /// printed.
     #[must_use]
     pub const fn include_separator(&self) -> bool {
         self.req_style.is_printed() && self.res_style.is_printed()
     }
 
-    /// Set the output style based on the given format string.
+    /// Sets the `OutputStyle` for requests and responses based upon a
+    /// format string provided by the caller.
+    ///
+    /// Format string key:
+    ///   R: Request line
+    ///   H: Request headers
+    ///   B: Request body
+    ///   s: Status line
+    ///   h: Response headers
+    ///   b: Response body
+    ///   *: "Verbose" style
+    ///   r: "Request" style
     pub fn format_str(&mut self, format_str: &str) {
         let mut req_num = 0;
         let mut res_num = 0;
@@ -283,28 +299,27 @@ impl OutputStyle {
         self.clear_styles();
 
         for c in format_str.chars() {
-            match c as u8 as u32 {
+            match u32::from(c) {
                 42 => {
-                    req_num = 220;
-                    res_num = 317;
-                    break;
-                },
-                109 => {
-                    req_num = 82;
-                    res_num = 115;
-                    break;
+                    // "Verbose" style.
+                    self.req_style = Style::Color(Parts::All);
+                    self.res_style = Style::Color(Parts::All);
+                    return;
                 },
                 114 => {
-                    req_num = 220;
-                    res_num = 0;
-                    break;
+                    // "Request" style.
+                    self.req_style = Style::Color(Parts::All);
+                    self.res_style = Style::None;
+                    return;
                 },
+                // Request styles.
                 n if n < 97 => req_num += n,
+                // Response styles.
                 n => res_num += n,
             }
         }
 
-        let req_style = match req_num {
+        self.req_style = match req_num {
             0 => Style::None,
             66 => Style::Color(Parts::Body),
             72 => Style::Color(Parts::Hdrs),
@@ -316,7 +331,7 @@ impl OutputStyle {
             _ => return self.invalid_arg("--output", format_str),
         };
 
-        let res_style = match res_num {
+        self.res_style = match res_num {
             0 => Style::None,
             98 => Style::Color(Parts::Body),
             104 => Style::Color(Parts::Hdrs),
@@ -327,12 +342,10 @@ impl OutputStyle {
             317 => Style::Color(Parts::All),
             _ => return self.invalid_arg("--output", format_str),
         };
-
-        self.req_style = req_style;
-        self.res_style = res_style;
     }
 
-    /// Converts all `Style::Color` variants to `Style::Plain`.
+    /// Converts all `Style::Color` variants to `Style::Plain` variants
+    /// without changing the inner `Parts` selection.
     pub fn make_plain(&mut self) {
         if let Style::Color(parts) = self.req_style {
             self.req_style = Style::Plain(parts);

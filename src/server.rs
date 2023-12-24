@@ -69,7 +69,7 @@ where
 
     /// Enable logging of new connections to stdout (default: disabled).
     #[must_use]
-    pub const fn log_connections(mut self, do_log: bool) -> Self {
+    pub const fn do_log(mut self, do_log: bool) -> Self {
         self.do_logging = do_log;
         self
     }
@@ -119,7 +119,7 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    /// Logs a message to the terminal on server start up..
+    /// Logs a server start up message.
     pub fn log_start_up(&self, addr: &SocketAddr) {
         if self.do_logging {
             let ip = addr.ip();
@@ -128,7 +128,7 @@ impl ServerConfig {
         }
     }
 
-    /// Logs a message to the terminal on server shutdown.
+    /// Logs a server shutdown message.
     pub fn log_shutdown(&self, conn: &Connection) {
         if self.do_logging {
             let ip = conn.remote_ip();
@@ -136,15 +136,20 @@ impl ServerConfig {
         }
     }
 
-    /// Logs a server error to the terminal.
+    /// Logs a server error.
     pub fn log_error(&self, err: &NetError) {
         if self.do_logging {
             println!("[SERVER] Error: {err}");
         }
     }
 
-    /// Logs an incoming request and the response status to the terminal.
-    pub fn log_route(&self, status: u16, route: &Route, conn: &Connection) {
+    /// Logs an incoming request and the response status.
+    pub fn log_route(
+        &self,
+        status: u16,
+        route: &Route,
+        conn: &Connection
+    ) {
         if self.do_logging {
             let ip = conn.remote_ip();
             println!("[{ip}|{status}] {route}");
@@ -152,7 +157,11 @@ impl ServerConfig {
     }
 
     /// Sends a 500 status response to the client if there is an error.
-    pub fn send_500_error(&self, err: &NetError, conn: &mut Connection) {
+    pub fn send_500_error(
+        &self,
+        err: &NetError,
+        conn: &mut Connection
+    ) {
         self.log_error(err);
 
         if let Err(err2) = conn.send_500_error(&err.to_string()) {
@@ -171,10 +180,9 @@ impl ServerConfig {
 
         match TcpStream::connect_timeout(&conn.local_addr, timeout) {
             Err(e) => self.log_error(&e.into()),
-            Ok(stream) => {
-                if let Err(e) = stream.shutdown(Shutdown::Both) {
-                    self.log_error(&e.into());
-                }
+            Ok(stream) => match stream.shutdown(Shutdown::Both) {
+                Err(e2) => self.log_error(&e2.into()),
+                Ok(_) => {},
             },
         }
 

@@ -4,7 +4,7 @@ use rustnet::{NetResult, Router, Server, ServerCli};
 
 fn main() -> NetResult<()> {
     // Handle command-line options.
-    let mut cli = ServerCli::parse_args(env::args());
+    let mut cli = ServerCli::parse_args(&mut env::args());
 
     // Add some static HTML routes.
     let mut router = Router::new()
@@ -42,21 +42,21 @@ fn main() -> NetResult<()> {
 
     // Build the HTTP server.
     let server = Server::http(&cli.addr)
-        .router(&router)
-        .log_connections(cli.do_logging)
+        .do_log(cli.do_log)
         .is_test_server(cli.is_test_server)
-        .build()?;
+        .router(&router);
 
     // Print and exit if "--debug" was selected.
-    if cli.debug_cli {
+    if cli.debug {
         dbg!(&server);
         return Ok(());
     }
 
     // Start the HTTP server.
-    let handle = server.start();
+    let handle = server.start()?;
 
     // Wait for the server to exit.
     handle.join()?;
+
     Ok(())
 }

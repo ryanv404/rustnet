@@ -22,7 +22,7 @@ macro_rules! run_server_tests {
         #[test]
         fn test_server_started() {
             let args = [
-                "run", "--bin", "server", "--", "--test-server", "--",
+                "run", "--bin", "server", "--", "--test", "--",
                 "127.0.0.1:7878"
             ];
 
@@ -77,16 +77,11 @@ macro_rules! run_server_tests {
                     .unwrap();
                 let input = String::from_utf8(output.stdout.clone())
                     .unwrap();
+
                 let test = get_test_output_server(&input);
                 let expected = get_expected_output_server($method, $uri_path);
 
-                assert_eq!(
-                    test,
-                    expected,
-                    "Test failed at {} {}.\nINPUT\n{input:?}\nOUTPUT\n{test:?}\nEXPECTED\n{expected:?}",
-                    $method,
-                    $uri_path
-                );
+                assert_eq!(test, expected);
             )+
         }
     };
@@ -144,7 +139,7 @@ macro_rules! get_responses {
             res.headers.remove(&DATE);
             res.body = Body::Empty;
 
-            assert_eq!(res, expected, "Test failed at code {}.\n{req}\n{res}", $code);
+            assert_eq!(res, expected);
         )+
     };
 }
@@ -464,6 +459,7 @@ pub fn get_expected_output_server(method: &str, path: &str) -> Response {
 pub fn get_test_output_client(input: &str) -> (Request, Response) {
     let mut req = Request::default();
     let mut res = Response::default();
+
     let mut lines = input.trim_start().lines();
 
     let Some(req_line) = lines.next() else {
