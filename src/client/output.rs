@@ -308,9 +308,7 @@ impl Output {
             req.headers.write_color(writer)?;
         }
 
-        if self.req_body()
-            && req.body.is_printable()
-        {
+        if self.req_body() && req.body.is_printable() {
             writeln!(writer, "{}", &req.body)?;
         }
 
@@ -348,9 +346,8 @@ impl Output {
         if !is_head_route
                 && self.res_body()
                 && res.body.is_printable()
-            {
-                writeln!(writer, "{}", &res.body)?;
-            }
+        {
+            writeln!(writer, "{}", &res.body)?;
         }
 
         Ok(())
