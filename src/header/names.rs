@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
@@ -163,7 +164,7 @@ macro_rules! impl_standard_header_names {
 
         impl Display for StandardHeaderName {
             fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-                write!(f, "{}", unsafe { self.as_str() })
+                write!(f, "{}", self.as_str())
             }
         }
 
@@ -198,15 +199,10 @@ macro_rules! impl_standard_header_names {
                 }
             }
 
-            /// Returns a string slice representation of the `StandardHeaderName`.
-            ///
-            /// # Safety
-            /// We know that all of the bytes slices returned by
-            /// `StandardHeaderName::as_bytes` are valid UTF-8 since we
-            /// provided them.
+            /// Returns a copy-on-write string slice of the `StandardHeaderName`.
             #[must_use]
-            pub const unsafe fn as_str(&self) -> &'static str {
-                unsafe { str::from_utf8_unchecked(self.as_bytes()) }
+            pub fn as_str(&self) -> Cow<'_, str> {
+                String::from_utf8_lossy(self.as_bytes())
             }
         }
 

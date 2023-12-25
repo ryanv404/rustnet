@@ -5,7 +5,7 @@ use crate::header::names::STANDARD_HEADERS;
 use crate::header_name::{
     ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
 };
-use crate::util::{self, trim_whitespace_bytes};
+use crate::util::{self, trim_bytes, trim_start_bytes, trim_end_bytes};
 use crate::{
     Body, Client, Connection, Header, HeaderName, HeaderNameInner,
     HeaderValue, Headers, Method, NetError, NetParseError, NetResult,
@@ -43,11 +43,10 @@ macro_rules! test_parsing_from_int {
 }
 
 #[cfg(test)]
-mod parse {
+mod method {
     use super::*;
-
     test_parsing_from_str! {
-        Method method_from_str:
+        Method from_str:
         "GET" => Method::Get;
         "HEAD" => Method::Head;
         "POST" => Method::Post;
@@ -61,9 +60,13 @@ mod parse {
         "Foo" => Method::Custom("Foo".to_string());
         "get" => Method::Custom("get".to_string());
     }
+}
 
+#[cfg(test)]
+mod status_code {
+    use super::*;
     test_parsing_from_str! {
-        StatusCode status_code_from_str:
+        StatusCode from_str:
         "101" => StatusCode(101u16);
         "201" => StatusCode(201u16);
         "300" => StatusCode(300u16);
@@ -75,7 +78,7 @@ mod parse {
     }
 
     test_parsing_from_int! {
-        StatusCode status_code_from_int:
+        StatusCode from_int:
         201_u16 => StatusCode(201u16);
         202_u32 => StatusCode(202u16);
         203_i32 => StatusCode(203u16);
@@ -83,9 +86,13 @@ mod parse {
         BAD_INPUT: -123_i32;
         BAD_INPUT: 0_u16;
     }
+}
 
+#[cfg(test)]
+mod status {
+    use super::*;
     test_parsing_from_str! {
-        Status status_from_str:
+        Status from_str:
         "101 Switching Protocols" => Status(StatusCode(101u16));
         "201 Created" => Status(StatusCode(201u16));
         "300 Multiple Choices" => Status(StatusCode(300u16));
@@ -96,7 +103,7 @@ mod parse {
     }
 
     test_parsing_from_int! {
-        Status status_from_int:
+        Status from_int:
         201_u16 => Status(StatusCode(201u16));
         202_u32 => Status(StatusCode(202u16));
         203_i32 => Status(StatusCode(203u16));
@@ -104,9 +111,13 @@ mod parse {
         BAD_INPUT: -123_i32;
         BAD_INPUT: 0_u16;
     }
+}
 
+#[cfg(test)]
+mod version {
+    use super::*;
     test_parsing_from_str! {
-        Version version_from_str:
+        Version from_str:
         "HTTP/0.9" => Version::ZeroDotNine;
         "HTTP/1.0" => Version::OneDotZero;
         "HTTP/1.1" => Version::OneDotOne;
@@ -117,9 +128,13 @@ mod parse {
         BAD_INPUT: "HTTP/1.2";
         BAD_INPUT: "HTTP/1.10";
     }
+}
 
+#[cfg(test)]
+mod request_line {
+    use super::*;
     test_parsing_from_str! {
-        RequestLine request_line_from_str:
+        RequestLine from_str:
         "GET /test HTTP/1.1\r\n" =>
             RequestLine::new(&Method::Get, "/test");
         "HEAD /test HTTP/1.1\r\n" =>
@@ -142,9 +157,13 @@ mod parse {
         BAD_INPUT: "GET /test";
         BAD_INPUT: "GET";
     }
+}
 
+#[cfg(test)]
+mod status_line {
+    use super::*;
     test_parsing_from_str! {
-        StatusLine status_line_from_str:
+        StatusLine from_str:
         "HTTP/1.1 100 Continue\r\n" =>
             StatusLine::from(StatusCode(100u16));
         "HTTP/1.1 200 OK\r\n" =>
@@ -159,9 +178,13 @@ mod parse {
         BAD_INPUT: "200 OK";
         BAD_INPUT: "FOO bar baz";
     }
+}
 
+#[cfg(test)]
+mod header {
+    use super::*;
     test_parsing_from_str! {
-        Header header_from_str:
+        Header from_str:
         "Accept: */*\r\n" =>
             Header { name: ACCEPT, value: "*/*".into() };
         "Host: rustnet/0.1\r\n" =>
@@ -174,9 +197,13 @@ mod parse {
             Header { name: CONTENT_TYPE, value: "text/plain".into() };
         BAD_INPUT: "bad header";
     }
+}
 
+#[cfg(test)]
+mod standard_headers {
+    use super::*;
     #[test]
-    fn standard_headers_from_str() {
+    fn from_str() {
         for &(std, lowercase) in STANDARD_HEADERS {
             let lower = str::from_utf8(lowercase).unwrap();
             let upper = lower.to_ascii_uppercase();
@@ -187,9 +214,13 @@ mod parse {
             assert_eq!(HeaderName::from(upper.as_str()), expected);
         }
     }
+}
 
+#[cfg(test)]
+mod uri {
+    use super::*;
     #[test]
-    fn uri_from_str() {
+    fn from_str() {
         macro_rules! test_uri_parser {
             ( $(SHOULD_ERROR: $uri:literal;)+ ) => {{
                 $(
@@ -228,12 +259,11 @@ mod parse {
 }
 
 #[cfg(test)]
-mod many_headers {
+mod headers {
     use super::*;
-
     #[test]
     fn from_str() {
-        let headers_str = "\
+        let input = "\
             Accept: */*\r\n\
             Accept-Encoding: gzip, deflate, br\r\n\
             Connection: keep-alive\r\n\
@@ -241,7 +271,7 @@ mod many_headers {
             User-Agent: xh/0.19.3\r\n\
             Pineapple: pizza\r\n\r\n";
 
-        let test_hdrs = Headers::from_str(headers_str).unwrap();
+        let test_hdrs = Headers::from_str(input).unwrap();
 
         let mut expected_hdrs = Headers::new();
         expected_hdrs.accept("*/*");
@@ -256,23 +286,90 @@ mod many_headers {
 }
 
 #[cfg(test)]
+mod request {
+    use super::*;
+    #[test]
+    fn from_bytes() {
+        let input = b"\
+            GET /test HTTP/1.1\r\n\
+            Accept: */*\r\n\
+            Accept-Encoding: gzip, deflate, br\r\n\
+            Connection: keep-alive\r\n\
+            Content-Length: 0\r\n\
+            Host: example.com\r\n\
+            User-Agent: xh/0.19.3\r\n\
+            Pineapple: pizza\r\n\r\n";
+
+        let test_req = Request::try_from(&input[..]).unwrap();
+
+        let mut expected_req = Request::default();
+        expected_req.request_line.path = String::from("/test");
+        expected_req.headers.accept("*/*");
+        expected_req.headers.user_agent("xh/0.19.3");
+        expected_req.headers.connection("keep-alive");
+        expected_req.headers.content_length(0);
+        expected_req.headers.header("Pineapple", "pizza");
+        expected_req.headers.header("Host", "example.com");
+        expected_req.headers.accept_encoding("gzip, deflate, br");
+
+        assert_eq!(test_req, expected_req);
+    }
+}
+
+#[cfg(test)]
+mod response {
+    use super::*;
+
+    #[test]
+    fn from_bytes() {
+        let input = b"\
+            HTTP/1.1 200 OK\r\n\
+            Content-Length: 0\r\n\
+            Connection: keep-alive\r\n\
+            Server: example.com\r\n\
+            Pineapple: pizza\r\n\r\n";
+
+        let test_res = Response::try_from(&input[..]).unwrap();
+
+        let mut expected_res = Response::default();
+        expected_res.headers.content_length(0);
+        expected_res.headers.connection("keep-alive");
+        expected_res.headers.header("Server", "example.com");
+        expected_res.headers.header("Pineapple", "pizza");
+
+        assert_eq!(test_res, expected_res);
+    }
+}
+
+#[cfg(test)]
 mod utils {
     use super::*;
 
     #[test]
-    fn trim_whitespace() {
-        assert_eq!(trim_whitespace_bytes(b"  test"), b"test");
-        assert_eq!(trim_whitespace_bytes(b"test    "), b"test");
-        assert_eq!(trim_whitespace_bytes(b"         test       "), b"test");
-        assert_eq!(
-            trim_whitespace_bytes(b"  Hello \nworld       "),
-            b"Hello \nworld"
-        );
-        assert_eq!(trim_whitespace_bytes(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
-        assert_eq!(trim_whitespace_bytes(b"                   "), b"");
-        assert_eq!(trim_whitespace_bytes(b" "), b"");
-        assert_eq!(trim_whitespace_bytes(b"x"), b"x");
-        assert_eq!(trim_whitespace_bytes(b""), b"");
+    fn trim() {
+        assert_eq!(trim_bytes(b"  test"), b"test");
+        assert_eq!(trim_bytes(b"test    "), b"test");
+        assert_eq!(trim_bytes(b"         test       "), b"test");
+        assert_eq!(trim_bytes(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
+        assert_eq!(trim_bytes(b"                   "), b"");
+        assert_eq!(trim_bytes(b"x"), b"x");
+        assert_eq!(trim_bytes(b""), b"");
+    }
+
+    #[test]
+    fn trim_start() {
+        assert_eq!(trim_start_bytes(b"  test"), b"test");
+        assert_eq!(trim_start_bytes(b"test    "), b"test    ");
+        assert_eq!(trim_start_bytes(b"         test       "), b"test       ");
+        assert_eq!(trim_start_bytes(b"                   "), b"");
+    }
+
+    #[test]
+    fn trim_end() {
+        assert_eq!(trim_end_bytes(b"  test"), b"  test");
+        assert_eq!(trim_end_bytes(b"test    "), b"test");
+        assert_eq!(trim_end_bytes(b"         test       "), b"         test");
+        assert_eq!(trim_end_bytes(b"                   "), b"");
     }
 }
 

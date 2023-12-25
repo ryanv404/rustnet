@@ -192,12 +192,13 @@ impl Connection {
                 Err(e) => Err(NetError::Read(e.kind()))?,
                 Ok(0) => Err(NetError::UnexpectedEof)?,
                 Ok(_) => {
-                    let trim = util::trim_whitespace_bytes(&buf[..]);
-                    if trim.is_empty() {
+                    let trimmed = util::trim_bytes(&buf[..]);
+
+                    if trimmed.is_empty() {
                         break;
                     }
 
-                    headers.insert_parsed_header_bytes(&buf[..])?;
+                    headers.insert_parsed_header_bytes(trimmed)?;
                 },
             }
 

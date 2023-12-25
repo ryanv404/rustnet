@@ -16,7 +16,7 @@ pub struct Tui {
 }
 
 impl Tui {
-    fn new() -> Tui {
+    fn new() -> Self {
         Self {
             running: false,
             do_send: true,

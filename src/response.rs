@@ -76,6 +76,7 @@ impl From<StatusCode> for StatusLine {
 
 impl StatusLine {
     /// Returns the `StatusLine` as a `String` with color formatting.
+    #[must_use]
     pub fn to_color_string(&self) -> String {
         format!("{PURP}{self}{CLR}")
     }
@@ -131,8 +132,11 @@ impl TryFrom<&[u8]> for Response {
     type Error = NetError;
 
     fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        let mut lines = bytes.split(|b| *b == b'\n');
+        let trimmed = util::trim_start_bytes(bytes);
 
+        let mut lines = trimmed.split(|b| *b == b'\n');
+
+        // Parse the StatusLine.
         let status_line = lines
             .next()
             .ok_or(NetError::Parse(NetParseError::StatusLine))
@@ -140,10 +144,11 @@ impl TryFrom<&[u8]> for Response {
 
         let mut headers = Headers::new();
 
+        // Collect the trimmed header lines into a new iterator.
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let trimmed = util::trim_whitespace_bytes(line);
+                let trimmed = util::trim_bytes(line);
 
                 if trimmed.is_empty() {
                     None
@@ -152,25 +157,31 @@ impl TryFrom<&[u8]> for Response {
                 }
             });
 
-
+        // Parse and insert each header.
         for line in header_lines {
             headers.insert_parsed_header_bytes(line)?;
         }
 
+        // Collect the remaining bytes while restoring the newlines that were
+        // removed from each line due to the call to `split` above.
         let body_bytes = lines
             .flat_map(|line| line
                 .iter()
                 .copied()
-                // Add the newline back that was lost when calling `split`.
                 .chain(iter::once(b'\n'))
             )
             .collect::<Vec<u8>>();
 
+        // Determine `Body` type using the Content-Type header if present.
         let content_type = headers
             .get(&CONTENT_TYPE)
             .map_or(Cow::Borrowed(""), |value| value.as_str());
 
-        let body = Body::from_content_type(&body_bytes, &content_type);
+        let body = if content_type.is_empty() {
+            Body::Empty
+        } else {
+            Body::from_content_type(&body_bytes, &content_type)
+        };
 
         Ok(Self { status_line, headers, body })
     }
@@ -233,7 +244,7 @@ impl Response {
 
     /// Returns the reason phrase for the response `Status`.
     #[must_use]
-    pub fn status_msg(&self) -> &str {
+    pub fn status_msg(&self) -> Cow<'_, str> {
         self.status_line.status.msg()
     }
 

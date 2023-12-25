@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
@@ -38,7 +39,7 @@ impl Default for Method {
 
 impl Display for Method {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", unsafe { self.as_str() })
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -91,16 +92,9 @@ impl Method {
     }
 
     /// Returns the HTTP `Method` as a string slice.
-    ///
-    /// # Safety
-    ///
-    /// We know that all of the bytes slices are valid UTF-8 bytes
-    /// since we provided them for each of the standard `Method`s and 
-    /// since a custom `Method` contains a `String` which itself can only
-    /// contain valid UTF-8 bytes.
     #[must_use]
-    pub unsafe fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(self.as_bytes()) }
+    pub fn as_str(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(self.as_bytes())
     }
 }
 
@@ -358,25 +352,20 @@ impl Status {
     }
 
     /// Returns the `Status` as a string slice.
-    ///
-    /// # Safety
-    ///
-    /// We know that all of the bytes slices are valid UTF-8 since
-    /// we provided them.
     #[must_use]
-    pub const unsafe fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(self.as_bytes()) }
+    pub fn as_str(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(self.as_bytes())
     }
 
     /// Returns the `Status` reason phrase as a string slice.
     #[must_use]
-    pub fn msg(&self) -> &str {
-        let status = unsafe { self.as_str() };
+    pub fn msg(&self) -> Cow<'_, str> {
+        let status = self.as_bytes();
 
         if status.len() < 5 {
-            ""
+            Cow::Borrowed("")
         } else {
-            &status[4..]
+            String::from_utf8_lossy(&status[4..])
         }
     }
 
@@ -410,7 +399,7 @@ impl Default for Version {
 
 impl Display for Version {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", unsafe { self.as_str() })
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -468,14 +457,9 @@ impl Version {
     }
 
     /// Returns the the protocol `Version` as a string slice.
-    ///
-    /// # Safety
-    ///
-    /// We know that all of the bytes slices are valid UTF-8 since
-    /// we provided them.
     #[must_use]
-    pub const unsafe fn as_str(&self) -> &'static str {
-        unsafe { str::from_utf8_unchecked(self.as_bytes()) }
+    pub fn as_str(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(self.as_bytes())
     }
 
     /// Returns the major version number.

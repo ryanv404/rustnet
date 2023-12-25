@@ -2,57 +2,47 @@ use std::path::Path;
 
 use crate::{NetError, NetParseError, NetResult};
 
+// Trims ASCII whitespace bytes from the start of a slice of bytes.
+#[must_use]
+pub fn trim_start_bytes(bytes: &[u8]) -> &[u8] {
+    if bytes.is_empty() {
+        return bytes;
+    }
+
+    // Find the index of the first non-whitespace byte.
+    for i in 0..bytes.len() {
+        if !bytes[i].is_ascii_whitespace() {
+            return &bytes[i..];
+        }
+    }
+
+    // The slice only contains whitespace.
+    &[]
+}
+
+// Trims ASCII whitespace bytes from the end of a slice of bytes.
+#[must_use]
+pub fn trim_end_bytes(bytes: &[u8]) -> &[u8] {
+    if bytes.is_empty() {
+        return bytes;
+    }
+
+    // Find the index of the final non-whitespace byte.
+    for i in (0..bytes.len()).rev() {
+        if !bytes[i].is_ascii_whitespace() {
+            return &bytes[..=i];
+        }
+    }
+
+    // The slice only contains whitespace.
+    &[]
+}
+
 // Trims ASCII whitespace bytes from both ends of a slice of bytes.
 #[must_use]
-pub fn trim_whitespace_bytes(bytes: &[u8]) -> &[u8] {
-    const EMPTY: &[u8; 0] = &[];
-
-    let len = bytes.len();
-
-    // Dispense with simple cases first.
-    match len {
-        1 if bytes[0].is_ascii_whitespace() => return EMPTY,
-        0 | 1 => return bytes,
-        _ => {},
-    }
-
-    let mut first: usize = 0;
-    let mut last: usize = len - 1;
-    let mut is_only_whitespace = true;
-
-    // Find index of first non-whitespace byte.
-    for (i, byte) in bytes.iter().enumerate().take(len) {
-        if !byte.is_ascii_whitespace() {
-            first = i;
-            is_only_whitespace = false;
-            break;
-        }
-    }
-
-    // Slice only contains whitespace bytes.
-    if is_only_whitespace {
-        return EMPTY;
-    }
-
-    // Only the final byte was non-whitespace.
-    if first == last {
-        return &bytes[first..=first];
-    }
-
-    // Find index of last non-whitespace byte.
-    for i in (first..=last).rev() {
-        if !bytes[i].is_ascii_whitespace() {
-            last = i;
-            break;
-        }
-    }
-
-    // Return trimmed slice
-    if first == last {
-        &bytes[first..=first]
-    } else {
-        &bytes[first..=last]
-    }
+pub fn trim_bytes(bytes: &[u8]) -> &[u8] {
+    let trimmed = trim_start_bytes(bytes);
+    trim_end_bytes(trimmed)
 }
 
 /// Returns the file extension, if present, of a `Path` value.
@@ -131,12 +121,6 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
         },
     }
 }
-
-// pub fn is_file(path: &Path) -> bool {
-//     fs::metadata(path)
-//         .map(|meta| meta.is_file())
-//         .unwrap_or(false)
-// }
 
 //// Determines if byte is a token char.
 //#[allow(dead_code)]
@@ -252,7 +236,7 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
 //        .arg("+%a, %d %b %Y %T %Z")
 //        .output()
 //        .map_or(None, |out| {
-//            let trimmed = trim_whitespace_bytes(&out.stdout);
+//            let trimmed = trim_bytes(&out.stdout);
 //            let hdr_value = HeaderValue(trimmed.into());
 //            Some((DATE, hdr_value))
 //        })

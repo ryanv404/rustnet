@@ -40,10 +40,10 @@ impl TryFrom<&[u8]> for Header {
 
         match (tokens.next(), tokens.next()) {
             (Some(name), Some(value)) => {
-                let name = util::trim_whitespace_bytes(name);
-                let value = util::trim_whitespace_bytes(value);
-
+                let name = util::trim_bytes(name);
                 let name = HeaderName::try_from(name)?;
+
+                let value = util::trim_bytes(value);
                 let value = HeaderValue::from(value);
 
                 Ok(Self { name, value })
@@ -92,7 +92,7 @@ impl TryFrom<&[u8]> for Headers {
         let lines = many_headers
             .split(|b| *b == b'\n')
             .map_while(|line| {
-                let trimmed = util::trim_whitespace_bytes(line);
+                let trimmed = util::trim_bytes(line);
 
                 if trimmed.is_empty() {
                     None
@@ -280,6 +280,7 @@ impl Headers {
     }
 
     /// Returns the `Headers` as a `String` with color formatting.
+    #[must_use]
     pub fn to_color_string(&self) -> String {
         let mut headers = String::new();
 
