@@ -4,12 +4,14 @@ use std::io::{
     BufRead, BufReader, BufWriter, Read, Result as IoResult, Write,
 };
 use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::process;
 use std::str;
 
 use crate::{
     Body, Headers, NetError, NetParseError, NetResult, Request, RequestLine,
     Response, StatusLine, READER_BUFSIZE, WRITER_BUFSIZE,
 };
+use crate::colors::{CLR, RED};
 use crate::header::MAX_HEADERS;
 use crate::header_name::{
     ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER, USER_AGENT,
@@ -81,30 +83,6 @@ impl TryFrom<(TcpStream, SocketAddr)> for Connection {
 }
 
 impl Connection {
-    /// Returns a clone of this `Connection`.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned if cloning of the contained `TcpStream` fails.
-    pub fn try_clone(&self) -> NetResult<Self> {
-        let local_addr = self.local_addr;
-        let remote_addr = self.remote_addr;
-
-        let reader = self
-            .reader
-            .get_ref()
-            .try_clone()
-            .map(|stream| BufReader::with_capacity(READER_BUFSIZE, stream))?;
-
-        let writer = self
-            .writer
-            .get_ref()
-            .try_clone()
-            .map(|stream| BufWriter::with_capacity(WRITER_BUFSIZE, stream))?;
-
-        Ok(Self { reader, writer, local_addr, remote_addr })
-    }
-
     /// Returns the IP address for the remote half of the `TcpStream`.
     #[must_use]
     pub const fn remote_ip(&self) -> IpAddr {
@@ -127,6 +105,30 @@ impl Connection {
     #[must_use]
     pub const fn local_port(&self) -> u16 {
         self.local_addr.port()
+    }
+
+    /// Returns a clone of this `Connection`.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if cloning of the contained `TcpStream` fails.
+    pub fn try_clone(&self) -> NetResult<Self> {
+        let local_addr = self.local_addr;
+        let remote_addr = self.remote_addr;
+
+        let reader = self
+            .reader
+            .get_ref()
+            .try_clone()
+            .map(|stream| BufReader::with_capacity(READER_BUFSIZE, stream))?;
+
+        let writer = self
+            .writer
+            .get_ref()
+            .try_clone()
+            .map(|stream| BufWriter::with_capacity(WRITER_BUFSIZE, stream))?;
+
+        Ok(Self { reader, writer, local_addr, remote_addr })
     }
 
     /// Reads and parses a `RequestLine` from the underlying `TcpStream`.
@@ -193,9 +195,9 @@ impl Connection {
                     let trim = util::trim_whitespace_bytes(&buf[..]);
                     if trim.is_empty() {
                         break;
-                    } else {
-                        headers.insert_parsed_header_bytes(&buf[..])?;
                     }
+
+                    headers.insert_parsed_header_bytes(&buf[..])?;
                 },
             }
 
@@ -222,6 +224,7 @@ impl Connection {
         }
 
         let mut reader = self.take(content_len);
+
         reader.read_to_end(buf)?;
 
         Ok(Body::from_content_type(buf, content_type))
@@ -245,16 +248,18 @@ impl Connection {
         let content_len = headers
             .get(&CONTENT_LENGTH)
             .map(|value| value.as_str())
-            .and_then(|len| u64::from_str_radix(len.trim(), 10).ok())
+            .and_then(|len| len.trim().parse::<u64>().ok())
             .unwrap_or(0);
 
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map(|value| value.as_str())
-            .unwrap_or(Cow::Borrowed(""));
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
-        let body = self
-            .recv_body(&mut buf, content_len, content_type.as_ref())?;
+        let body = self.recv_body(
+            &mut buf,
+            content_len,
+            &content_type
+        )?;
 
         Ok(Request {request_line, headers, body })
     }
@@ -277,16 +282,18 @@ impl Connection {
         let content_len = headers
             .get(&CONTENT_LENGTH)
             .map(|value| value.as_str())
-            .and_then(|len| u64::from_str_radix(len.trim(), 10).ok())
+            .and_then(|len| len.trim().parse::<u64>().ok())
             .unwrap_or(0);
 
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map(|value| value.as_str())
-            .unwrap_or(Cow::Borrowed(""));
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
-        let body = self
-            .recv_body(&mut buf, content_len, content_type.as_ref())?;
+        let body = self.recv_body(
+            &mut buf,
+            content_len,
+            &content_type
+        )?;
 
         Ok(Response { status_line, headers, body })
     }
@@ -430,5 +437,32 @@ impl Connection {
         self.write_body(&res.body)?;
         self.flush()?;
         Ok(())
+    }
+}
+
+/// A trait containing methods for printing CLI argument errors.
+pub trait WriteCliError {
+    /// Prints unknown option error message and exits the program.
+    fn unknown_opt(&self, name: &str) {
+        eprintln!("{RED}Unknown option: `{name}`{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints unknown argument error message and exits the program.
+    fn unknown_arg(&self, name: &str) {
+        eprintln!("{RED}Unknown argument: `{name}`{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints missing argument error message and exits the program.
+    fn missing_arg(&self, name: &str) {
+        eprintln!("{RED}Missing `{name}` argument.{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints invalid argument error message and exits the program.
+    fn invalid_arg(&self, name: &str, arg: &str) {
+        eprintln!("{RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
+        process::exit(1);
     }
 }

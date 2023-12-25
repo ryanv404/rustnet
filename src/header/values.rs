@@ -1,9 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
-use std::str::FromStr;
-
-use crate::{NetError, NetResult};
 
 #[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
@@ -17,14 +14,6 @@ impl Display for HeaderValue {
 impl Debug for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{self}")
-    }
-}
-
-impl FromStr for HeaderValue {
-    type Err = NetError;
-
-    fn from_str(s: &str) -> NetResult<Self> {
-        Ok(Self(Vec::from(s.trim())))
     }
 }
 

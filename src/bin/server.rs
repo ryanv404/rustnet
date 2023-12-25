@@ -8,7 +8,7 @@ fn main() -> NetResult<()> {
 
     // Add some static HTML routes.
     let mut router = Router::new()
-        .get("/", "static/index.html")
+        .get("/get", "static/index.html")
         .get("/about", "static/about.html")
         .head("/head", "static/index.html")
         .post("/post", "static/index.html")

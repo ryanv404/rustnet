@@ -2,6 +2,9 @@ use std::error::Error;
 use std::str::{self, FromStr};
 
 use crate::header::names::STANDARD_HEADERS;
+use crate::header_name::{
+    ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
+};
 use crate::util::{self, trim_whitespace_bytes};
 use crate::{
     Body, Client, Connection, Header, HeaderName, HeaderNameInner,
@@ -160,15 +163,15 @@ mod parse {
     test_parsing_from_str! {
         Header header_from_str:
         "Accept: */*\r\n" =>
-            Header::from(("Accept", "*/*"));
+            Header { name: ACCEPT, value: "*/*".into() };
         "Host: rustnet/0.1\r\n" =>
-            Header::from(("Host", "rustnet/0.1"));
+            Header { name: HOST, value: "rustnet/0.1".into() };
         "Content-Length: 123\r\n" =>
-            Header::from(("Content-Length", "123"));
+            Header { name: CONTENT_LENGTH, value: "123".into() };
         "Connection: keep-alive\r\n" =>
-            Header::from(("Connection", "keep-alive"));
+            Header { name: CONNECTION, value: "keep-alive".into() };
         "Content-Type: text/plain\r\n" =>
-            Header::from(("Content-Type", "text/plain"));
+            Header { name: CONTENT_TYPE, value: "text/plain".into() };
         BAD_INPUT: "bad header";
     }
 
@@ -238,6 +241,8 @@ mod many_headers {
             User-Agent: xh/0.19.3\r\n\
             Pineapple: pizza\r\n\r\n";
 
+        let test_hdrs = Headers::from_str(headers_str).unwrap();
+
         let mut expected_hdrs = Headers::new();
         expected_hdrs.accept("*/*");
         expected_hdrs.user_agent("xh/0.19.3");
@@ -245,8 +250,6 @@ mod many_headers {
         expected_hdrs.header("Pineapple", "pizza");
         expected_hdrs.header("Host", "example.com");
         expected_hdrs.accept_encoding("gzip, deflate, br");
-
-        let test_hdrs = Headers::from_str(headers_str).unwrap();
 
         assert_eq!(test_hdrs, expected_hdrs);
     }

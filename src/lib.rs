@@ -18,7 +18,6 @@
 mod tests;
 
 pub mod body;
-pub mod cli;
 pub mod client;
 pub mod errors;
 pub mod header;
@@ -32,19 +31,18 @@ pub mod thread_pool;
 pub mod util;
 
 pub use body::Body;
-pub use cli::{ClientCli, ServerCli};
-pub use client::{Client, ClientBuilder, OutputStyle, Tui, WriteCliError};
+pub use client::{Client, ClientBuilder, ClientCli, OutputStyle, Tui};
 pub use errors::{NetError, NetParseError, NetResult};
 pub use header::{
     Header, HeaderName, HeaderNameInner, HeaderValue, Headers, header_name,
 };
-pub use io::Connection;
+pub use io::{Connection, WriteCliError};
 pub use http::{Method, Status, StatusCode, Version};
 pub use request::{Request, RequestLine};
 pub use response::{Response, StatusLine};
 pub use router::{Route, RouteBuilder, Router, Target};
 pub use server::{
-    Server, ServerBuilder, ServerConfig, ServerHandle,
+    Server, ServerBuilder, ServerCli, ServerConfig, ServerHandle,
 };
 pub use thread_pool::{ThreadPool, Worker};
 

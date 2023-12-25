@@ -59,7 +59,7 @@ impl TryFrom<&[u8]> for Method {
             b"CONNECT" => Ok(Self::Connect),
             custom => String::from_utf8(custom.to_vec())
                 .map_err(|_| NetParseError::Method.into())
-                .map(|method| Self::Custom(method)),
+                .map(Self::Custom),
         }
     }
 }
@@ -68,14 +68,7 @@ impl FromStr for Method {
     type Err = NetError;
 
     fn from_str(method: &str) -> NetResult<Self> {
-        Ok(Self::from(method))
-    }
-}
-
-impl From<&str> for Method {
-    fn from(method: &str) -> Self {
-        // Since the input is UTF-8 encoded we can just unwrap the result.
-        Self::try_from(method.as_bytes()).unwrap()
+        Self::try_from(method.as_bytes())
     }
 }
 
@@ -98,12 +91,15 @@ impl Method {
     }
 
     /// Returns the HTTP `Method` as a string slice.
+    ///
+    /// # Safety
+    ///
+    /// We know that all of the bytes slices are valid UTF-8 bytes
+    /// since we provided them for each of the standard `Method`s and 
+    /// since a custom `Method` contains a `String` which itself can only
+    /// contain valid UTF-8 bytes.
     #[must_use]
     pub unsafe fn as_str(&self) -> &str {
-        // SAFETY: We know that all of the bytes slices are valid UTF-8 bytes
-        // since we provided them for each of the standard `Method`s and 
-        // since a custom `Method` contains a `String` which itself can only
-        // contain valid UTF-8 bytes.
         unsafe { str::from_utf8_unchecked(self.as_bytes()) }
     }
 }
@@ -185,14 +181,8 @@ impl StatusCode {
 }
 
 /// HTTP response status.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Status(pub StatusCode);
-
-impl Default for Status {
-    fn default() -> Self {
-        Self(StatusCode::default())
-    }
-}
 
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -368,10 +358,13 @@ impl Status {
     }
 
     /// Returns the `Status` as a string slice.
+    ///
+    /// # Safety
+    ///
+    /// We know that all of the bytes slices are valid UTF-8 since
+    /// we provided them.
     #[must_use]
     pub const unsafe fn as_str(&self) -> &str {
-        // SAFETY: We know that all of the bytes slices are valid UTF-8 since
-        // we provided them.
         unsafe { str::from_utf8_unchecked(self.as_bytes()) }
     }
 
@@ -475,10 +468,13 @@ impl Version {
     }
 
     /// Returns the the protocol `Version` as a string slice.
+    ///
+    /// # Safety
+    ///
+    /// We know that all of the bytes slices are valid UTF-8 since
+    /// we provided them.
     #[must_use]
     pub const unsafe fn as_str(&self) -> &'static str {
-        // SAFETY: We know that all of the bytes slices are valid UTF-8 since
-        // we provided them.
         unsafe { str::from_utf8_unchecked(self.as_bytes()) }
     }
 

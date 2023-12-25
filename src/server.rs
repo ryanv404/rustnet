@@ -6,6 +6,9 @@ use std::sync::Arc;
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
+pub mod cli;
+pub use cli::ServerCli;
+
 use crate::{
     Connection, NetError, NetResult, Route, Router, ThreadPool, NUM_WORKERS,
 };
@@ -180,9 +183,10 @@ impl ServerConfig {
 
         match TcpStream::connect_timeout(&conn.local_addr, timeout) {
             Err(e) => self.log_error(&e.into()),
-            Ok(stream) => match stream.shutdown(Shutdown::Both) {
-                Err(e2) => self.log_error(&e2.into()),
-                Ok(_) => {},
+            Ok(stream) => {
+                if let Err(e2) = stream.shutdown(Shutdown::Both) {
+                    self.log_error(&e2.into());
+                }
             },
         }
 

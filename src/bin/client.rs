@@ -1,41 +1,48 @@
 use std::env;
 use std::io::{BufWriter, stdout};
 
-use rustnet::{Client, ClientCli, NetResult};
+use rustnet::{Client, ClientCli};
 
-fn main() -> NetResult<()> {
-    // Handle CLI arguments.
-    let cli = ClientCli::parse_args(&mut env::args())?;
+fn main() {
+    let cli = ClientCli::parse_args(&mut env::args());
 
-    // Create an HTTP client.
-    let builder = Client::builder()
-        .output(&cli.output)
+    let mut builder = Client::builder();
+    builder
         .addr(&cli.addr)
         .path(&cli.path)
-        .method(&cli.method)
-        .headers(&cli.headers)
-        .body(&cli.body);
+        .method(cli.method.clone())
+        .headers(cli.headers.clone())
+        .body(cli.body.clone())
+        .output(cli.output);
 
     if cli.debug {
         dbg!(&builder);
-        return Ok(());
+        return;
     }
 
-    let mut out = BufWriter::new(stdout().lock());
+    let mut client = match builder.build() {
+        Ok(client) => client,
+        Err(ref e) => {
+            eprintln!("Error while building client.\n{e}");
+            return;
+        },
+    };
 
-    if cli.do_not_send {
-        builder
-            .build()
-            .and_then(|mut client| client.print(&mut out))?;
+    if cli.do_send {
+        if let Err(ref e) = client.send_request() {
+            eprintln!("Error while sending request.\n{e}");
+            return;
+        }
 
-        return Ok(());
+        if let Err(ref e) = client.recv_response() {
+            eprintln!("Error while receiving response.\n{e}");
+            return;
+        }
     }
 
-    builder
-        .send()
-        .and_then(|mut client| {
-            client.recv_response()?;
-            client.print(&mut out)?;
-            Ok(())
-        })
+    let mut writer = BufWriter::new(stdout().lock());
+
+    if let Err(ref e) = client.print(&mut writer) {
+        eprintln!("Error while handling client output.\n{e}");
+    }
 }

@@ -1,5 +1,4 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, Write};
 use std::str::{self, FromStr};
 
 use crate::{
@@ -38,22 +37,23 @@ impl TryFrom<&[u8]> for RequestLine {
 
     fn try_from(line: &[u8]) -> NetResult<Self> {
         let line = util::trim_whitespace_bytes(line);
+
         let mut tokens = line.splitn(3, |b| *b == b' ');
 
         let method = tokens
             .next()
-            .ok_or::<NetError>(NetParseError::Method.into())
-            .and_then(|method| Method::try_from(method))?;
+            .ok_or(NetError::Parse(NetParseError::Method))
+            .and_then(Method::try_from)?;
 
         let path = tokens
             .next()
-            .ok_or::<NetError>(NetParseError::Path.into())
-            .and_then(|path| String::from_utf8(path.to_vec())
-                .map_err(|_| NetParseError::Path.into()))?;
+            .ok_or(NetError::Parse(NetParseError::Path))
+            .and_then(|token| String::from_utf8(token.to_vec())
+                .map_err(|_| NetError::Parse(NetParseError::Path)))?;
 
         let version = tokens
             .next()
-            .ok_or::<NetError>(NetParseError::Version.into())
+            .ok_or(NetError::Parse(NetParseError::Version))
             .and_then(Version::try_from)?;
 
         Ok(Self { method, path, version })
@@ -64,25 +64,7 @@ impl FromStr for RequestLine {
     type Err = NetError;
 
     fn from_str(line: &str) -> NetResult<Self> {
-        let mut tokens = line.trim().splitn(3, ' ');
-
-        let method = tokens
-            .next()
-            .ok_or::<NetError>(NetParseError::Method.into())
-            .map(|method| Method::from(method))?;
-
-        let path = tokens
-            .next()
-            .ok_or::<NetError>(NetParseError::Path.into())
-            .and_then(|path| String::from_utf8(Vec::from(path))
-                .map_err(|_| NetParseError::Path.into()))?;
-
-        let version = tokens
-            .next()
-            .ok_or::<NetError>(NetParseError::Version.into())
-            .and_then(Version::from_str)?;
-
-        Ok(Self { method, path, version })
+        Self::try_from(line.as_bytes())
     }
 }
 
@@ -93,7 +75,7 @@ impl RequestLine {
     pub fn new(method: &Method, path: &str) -> Self {
         Self {
             method: method.clone(),
-            path: path.into(),
+            path: path.to_string(),
             version: Version::OneDotOne,
         }
     }
@@ -116,30 +98,9 @@ impl RequestLine {
         &self.version
     }
 
-    /// Writes the `RequestLine` to a `BufWriter` with plain formatting.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn print_plain<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        writeln!(writer, "{self}")?;
-        Ok(())
-    }
-
-    /// Writes the `RequestLine` to a `BufWriter` with color formatting.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn print_color<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        writeln!(writer, "{YLW}{self}{CLR}")?;
-        Ok(())
+    /// Returns the `RequestLine` as a `String` with color formatting.
+    pub fn to_color_string(&self) -> String {
+        format!("{YLW}{self}{CLR}")
     }
 }
 
@@ -160,8 +121,7 @@ impl Display for Request {
         }
 
         if self.body.is_printable() {
-            let body = String::from_utf8_lossy(self.body.as_bytes());
-            writeln!(f, "{body}")?;
+            writeln!(f, "{}", &self.body)?;
         }
 
         Ok(())

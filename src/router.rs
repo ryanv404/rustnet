@@ -31,7 +31,7 @@ impl Default for Route {
 impl Display for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::NotFound => write!(f, "NOT FOUND"),
+            Self::NotFound => write!(f, "NOT_FOUND"),
             Self::Shutdown => write!(f, "SHUTDOWN"),
             Self::Get(ref path) => write!(f, "GET {path}"),
             Self::Head(ref path) => write!(f, "HEAD {path}"),
@@ -52,7 +52,7 @@ impl Display for Route {
 impl Debug for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::NotFound => write!(f, "NOT FOUND"),
+            Self::NotFound => write!(f, "NOT_FOUND"),
             Self::Shutdown => write!(f, "SHUTDOWN"),
             Self::Get(ref path) => write!(f, "GET({path:?})"),
             Self::Head(ref path) => write!(f, "HEAD({path:?})"),
@@ -216,18 +216,18 @@ impl Router {
 
     /// Returns the `Target` for the given `Route` or `Target::NotFound` if
     /// the route does not exist in the `Router`.
+    #[must_use]
     pub fn get_target(&self, route: &Route) -> Target {
         match self.0.get(route).cloned() {
             // Allow HEAD requests for all configured GET routes.
-            None if route.is_head() => match route.path() {
-                None => Target::NotFound,
-                Some(head_path) => {
+            None if route.is_head() => route.path().map_or(
+                Target::NotFound,
+                |head_path| {
                     let get_route = Route::Get(head_path.to_string());
                     self.0.get(&get_route)
                         .cloned()
                         .unwrap_or(Target::NotFound)
-                },
-            },
+                }),
             None => Target::NotFound,
             Some(target) => target,
         }
@@ -246,7 +246,6 @@ impl Router {
     ///
     /// Returns an error if `Response::from_target` is unable to construct a
     /// `Response` from the provided `Target` and status code.
-    #[must_use]
     pub fn resolve(&self, route: &Route) -> NetResult<Response> {
         let mut res = match self.get_target(route) {
             // Route not found.

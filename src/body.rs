@@ -195,8 +195,9 @@ impl Body {
         }
     }
 
-    pub fn from_content_type(buf: &Vec<u8>, content_type: &str) -> Body {
-        let buf = buf.clone();
+    #[must_use]
+    pub fn from_content_type(buf: &[u8], content_type: &str) -> Self {
+        let buf = buf.to_owned();
 
         match content_type.trim_start() {
             s if s.starts_with("text/html") => Self::Html(buf),

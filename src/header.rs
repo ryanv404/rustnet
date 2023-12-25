@@ -1,6 +1,5 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, Write};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -37,14 +36,18 @@ impl TryFrom<&[u8]> for Header {
     type Error = NetError;
 
     fn try_from(header: &[u8]) -> NetResult<Self> {
-        let mut tokens = util::trim_whitespace_bytes(header)
-            .splitn(2, |b| *b == b':');
+        let mut tokens = header.splitn(2, |b| *b == b':');
 
-        let token1 = tokens.next();
-        let token2 = tokens.next();
+        match (tokens.next(), tokens.next()) {
+            (Some(name), Some(value)) => {
+                let name = util::trim_whitespace_bytes(name);
+                let value = util::trim_whitespace_bytes(value);
 
-        match (token1, token2) {
-            (Some(name), Some(value)) => Self::try_from((name, value)),
+                let name = HeaderName::try_from(name)?;
+                let value = HeaderValue::from(value);
+
+                Ok(Self { name, value })
+            },
             (_, _) => Err(NetParseError::Header)?,
         }
     }
@@ -54,32 +57,7 @@ impl FromStr for Header {
     type Err = NetError;
 
     fn from_str(header: &str) -> NetResult<Self> {
-        header.trim()
-            .split_once(':')
-            .ok_or(NetParseError::Header.into())
-            .map(Into::into)
-    }
-}
-
-impl TryFrom<(&[u8], &[u8])> for Header {
-    type Error = NetError;
-
-    fn try_from((name, value): (&[u8], &[u8])) -> NetResult<Self> {
-        let name = util::trim_whitespace_bytes(name);
-        let name = HeaderName::try_from(name)?;
-
-        let value = util::trim_whitespace_bytes(value);
-        let value = HeaderValue::from(value);
-
-        Ok(Self { name, value })
-    }
-}
-
-impl From<(&str, &str)> for Header {
-    fn from((name, value): (&str, &str)) -> Self {
-        let name = HeaderName::from(name);
-        let value = HeaderValue::from(value);
-        Self { name, value }
+        Self::try_from(header.as_bytes())
     }
 }
 
@@ -87,16 +65,44 @@ impl From<(&str, &str)> for Header {
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
 
+impl Display for Headers {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        for (name, value) in &self.0 {
+            writeln!(f, "{name}: {value}")?;
+        }
+
+        Ok(())
+    }
+}
+
 impl FromStr for Headers {
     type Err = NetError;
 
     fn from_str(many_headers: &str) -> NetResult<Self> {
+        Self::try_from(many_headers.as_bytes())
+    }
+}
+
+impl TryFrom<&[u8]> for Headers {
+    type Error = NetError;
+
+    fn try_from(many_headers: &[u8]) -> NetResult<Self> {
         let mut headers = Self::new();
 
-        let mut lines = many_headers.trim().lines();
+        let lines = many_headers
+            .split(|b| *b == b'\n')
+            .map_while(|line| {
+                let trimmed = util::trim_whitespace_bytes(line);
 
-        while let Some(line) = lines.next() {
-            headers.insert_parsed_header_str(line)?;
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            });
+
+        for line in lines {
+            headers.insert_parsed_header_bytes(line)?;
         }
 
         Ok(headers)
@@ -164,7 +170,9 @@ impl Headers {
     /// Returns an error if `Header` parsing fails.
     pub fn insert_parsed_header_str(&mut self, line: &str) -> NetResult<()> {
         let header = Header::from_str(line)?;
+
         self.insert(header.name.clone(), header.value);
+
         Ok(())
     }
 
@@ -179,7 +187,9 @@ impl Headers {
         line: &[u8]
     ) -> NetResult<()> {
         let header = Header::try_from(line)?;
+
         self.insert(header.name.clone(), header.value);
+
         Ok(())
     }
 
@@ -269,35 +279,15 @@ impl Headers {
         self.insert(CACHE_CONTROL, directive.into());
     }
 
-    /// Writes the headers to a `BufWriter` with plain formatting.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn print_plain<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>
-    ) -> NetResult<()> {
+    /// Returns the `Headers` as a `String` with color formatting.
+    pub fn to_color_string(&self) -> String {
+        let mut headers = String::new();
+
         for (name, value) in &self.0 {
-            writeln!(writer, "{name}: {value}")?;
+            let header = format!("{BLU}{name}{CLR}: {CYAN}{value}{CLR}\n");
+            headers.push_str(&header);
         }
 
-        Ok(())
-    }
-
-    /// Writes the headers to a `BufWriter` with color formatting.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn print_color<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        for (name, value) in &self.0 {
-            writeln!(writer, "{BLU}{name}{CLR}: {CYAN}{value}{CLR}")?;
-        }
-
-        Ok(())
+        headers
     }
 }

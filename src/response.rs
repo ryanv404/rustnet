@@ -1,5 +1,6 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::{BufWriter, Write};
+use std::iter;
 use std::str::FromStr;
 
 use crate::{
@@ -7,7 +8,8 @@ use crate::{
     NetParseError, NetResult, Status, StatusCode, Target, Version,
 };
 use crate::colors::{CLR, PURP};
-use crate::header_name::CONNECTION;
+use crate::header_name::{CONNECTION, CONTENT_TYPE};
+use crate::util;
 
 /// Contains the components of an HTTP status line.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,18 +33,19 @@ impl TryFrom<&[u8]> for StatusLine {
             .position(|b| *b == b'H')
             .ok_or(NetParseError::StatusLine)?;
 
-        let mut tokens = (&line[start..]).splitn(2, |b| *b == b' ');
-        let token1 = tokens.next();
-        let token2 = tokens.next();
+        let mut tokens = line[start..].splitn(2, |b| *b == b' ');
 
-        match (token1, token2) {
-            (Some(token1), Some(token2)) => {
-                let version = Version::try_from(token1)?;
-                let status = Status::try_from(token2)?;
-                Ok(Self { version, status })
-            },
-            (_, _) => Err(NetParseError::StatusLine)?,
-        }
+        let version = tokens
+            .next()
+            .ok_or(NetError::Parse(NetParseError::StatusLine))
+            .and_then(Version::try_from)?;
+
+        let status = tokens
+            .next()
+            .ok_or(NetError::Parse(NetParseError::StatusLine))
+            .and_then(Status::try_from)?;
+
+        Ok(Self { version, status })
     }
 }
 
@@ -50,19 +53,7 @@ impl FromStr for StatusLine {
     type Err = NetError;
 
     fn from_str(line: &str) -> NetResult<Self> {
-        let start = line
-            .find("HTTP")
-            .ok_or(NetParseError::StatusLine)?;
-
-        (&line[start..])
-            .trim()
-            .split_once(' ')
-            .ok_or(NetParseError::StatusLine.into())
-            .and_then(|(token1, token2)| {
-                let version = Version::from_str(token1)?;
-                let status = Status::from_str(token2)?;
-                Ok(Self { version, status })
-            })
+        Self::try_from(line.as_bytes())
     }
 }
 
@@ -84,30 +75,9 @@ impl From<StatusCode> for StatusLine {
 }
 
 impl StatusLine {
-    /// Writes the `StatusLine` to a `BufWriter` with plain formatting.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn print_plain<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        writeln!(writer, "{self}")?;
-        Ok(())
-    }
-
-    /// Writes the `StatusLine` to a `BufWriter` with color formatting.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing to the provided `BufWriter` fails.
-    pub fn print_color<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        writeln!(writer, "{PURP}{self}{CLR}")?;
-        Ok(())
+    /// Returns the `StatusLine` as a `String` with color formatting.
+    pub fn to_color_string(&self) -> String {
+        format!("{PURP}{self}{CLR}")
     }
 }
 
@@ -128,8 +98,7 @@ impl Display for Response {
         }
 
         if self.body.is_printable() {
-            let body = String::from_utf8_lossy(self.body.as_bytes());
-            writeln!(f, "{body}")?;
+            writeln!(f, "{}", &self.body)?;
         }
 
         Ok(())
@@ -140,9 +109,68 @@ impl TryFrom<u16> for Response {
     type Error = NetError;
 
     fn try_from(code: u16) -> NetResult<Self> {
-        let status_line = StatusLine::try_from(code)?;
-        let headers = Headers::new();
-        let body = Body::Empty;
+        let res = Self {
+            status_line: StatusLine::try_from(code)?,
+            headers: Headers::new(),
+            body: Body::Empty
+        };
+
+        Ok(res)
+    }
+}
+
+impl FromStr for Response {
+    type Err = NetError;
+
+    fn from_str(res: &str) -> NetResult<Self> {
+        Self::try_from(res.as_bytes())
+    }
+}
+
+impl TryFrom<&[u8]> for Response {
+    type Error = NetError;
+
+    fn try_from(bytes: &[u8]) -> NetResult<Self> {
+        let mut lines = bytes.split(|b| *b == b'\n');
+
+        let status_line = lines
+            .next()
+            .ok_or(NetError::Parse(NetParseError::StatusLine))
+            .and_then(StatusLine::try_from)?;
+
+        let mut headers = Headers::new();
+
+        let header_lines = lines
+            .by_ref()
+            .map_while(|line| {
+                let trimmed = util::trim_whitespace_bytes(line);
+
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            });
+
+
+        for line in header_lines {
+            headers.insert_parsed_header_bytes(line)?;
+        }
+
+        let body_bytes = lines
+            .flat_map(|line| line
+                .iter()
+                .copied()
+                // Add the newline back that was lost when calling `split`.
+                .chain(iter::once(b'\n'))
+            )
+            .collect::<Vec<u8>>();
+
+        let content_type = headers
+            .get(&CONTENT_TYPE)
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
+
+        let body = Body::from_content_type(&body_bytes, &content_type);
 
         Ok(Self { status_line, headers, body })
     }

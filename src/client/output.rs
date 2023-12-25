@@ -1,35 +1,6 @@
 use std::io::{BufWriter, Write};
-use std::process;
 
-use crate::{Request, Response, NetResult};
-use crate::colors::{CLR, RED};
-
-/// A trait containing methods for printing CLI argument errors.
-pub trait WriteCliError {
-    /// Prints unknown option error message and exits the program.
-    fn unknown_opt(&self, name: &str) {
-        eprintln!("{RED}Unknown option: `{name}`{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints unknown argument error message and exits the program.
-    fn unknown_arg(&self, name: &str) {
-        eprintln!("{RED}Unknown argument: `{name}`{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints missing argument error message and exits the program.
-    fn missing_arg(&self, name: &str) {
-        eprintln!("{RED}Missing `{name}` argument.{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints invalid argument error message and exits the program.
-    fn invalid_arg(&self, name: &str, arg: &str) {
-        eprintln!("{RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
-        process::exit(1);
-    }
-}
+use crate::{Request, Response, NetResult, WriteCliError};
 
 /// Describes which components are output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -45,7 +16,8 @@ pub enum Parts {
 
 impl Parts {
     /// Returns true if this `Parts` variant includes the first line.
-    pub fn includes_first_line(&self) -> bool {
+    #[must_use]
+    pub const fn includes_first_line(&self) -> bool {
         matches!(
             self,
             Self::Line
@@ -56,7 +28,8 @@ impl Parts {
     }
 
     /// Returns true if this `Parts` variant includes the headers.
-    pub fn includes_headers(&self) -> bool {
+    #[must_use]
+    pub const fn includes_headers(&self) -> bool {
         matches!(
             self,
             Self::Hdrs
@@ -67,7 +40,8 @@ impl Parts {
     }
 
     /// Returns true if this `Parts` variant includes the body.
-    pub fn includes_body(&self) -> bool {
+    #[must_use]
+    pub const fn includes_body(&self) -> bool {
         matches!(
             self,
             Self::Body
@@ -113,7 +87,7 @@ impl Style {
 
     /// Returns true if this `Style` prints the `RequestLine` or `StatusLine`.
     #[must_use]
-    pub fn first_line_is_printed(&self) -> bool {
+    pub const fn first_line_is_printed(&self) -> bool {
         match self {
             Self::None => false,
             Self::Plain(s) | Self::Color(s) => s.includes_first_line(),
@@ -122,7 +96,7 @@ impl Style {
 
     /// Returns true if this `Style` prints the `Headers`.
     #[must_use]
-    pub fn headers_are_printed(&self) -> bool {
+    pub const fn headers_are_printed(&self) -> bool {
         match self {
             Self::None => false,
             Self::Plain(s) | Self::Color(s) => s.includes_headers(),
@@ -131,7 +105,7 @@ impl Style {
 
     /// Returns true if this `Style` prints the `Body`.
     #[must_use]
-    pub fn body_is_printed(&self) -> bool {
+    pub const fn body_is_printed(&self) -> bool {
         match self {
             Self::None => false,
             Self::Plain(s) | Self::Color(s) => s.includes_body(),
@@ -161,7 +135,7 @@ impl WriteCliError for OutputStyle {}
 
 impl OutputStyle {
     /// Prints the request line if appropriate for this `OutputStyle`.
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub fn print_request_line<W: Write>(
         &self,
         req: &Request,
@@ -169,17 +143,19 @@ impl OutputStyle {
     ) -> NetResult<()> {
         match self.req_style {
             Style::Plain(parts) if parts.includes_first_line() => {
-                req.request_line.print_plain(out)
+                writeln!(out, "{}", &req.request_line)?;
             },
             Style::Color(parts) if parts.includes_first_line() => {
-                req.request_line.print_color(out)
+                writeln!(out, "{}", req.request_line.to_color_string())?;
             },
-            _ => Ok(()),
+            _ => {},
         }
+
+        Ok(())
     }
 
     /// Prints the status line if appropriate for this `OutputStyle`.
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub fn print_status_line<W: Write>(
         &self,
         res: &Response,
@@ -187,17 +163,19 @@ impl OutputStyle {
     ) -> NetResult<()> {
         match self.res_style {
             Style::Plain(parts) if parts.includes_first_line() => {
-                res.status_line.print_plain(out)
+                writeln!(out, "{}", &res.status_line)?;
             },
             Style::Color(parts) if parts.includes_first_line() => {
-                res.status_line.print_color(out)
+                writeln!(out, "{}", res.status_line.to_color_string())?;
             },
-            _ => Ok(()),
+            _ => {},
         }
+
+        Ok(())
     }
 
     /// Prints the request headers if appropriate for this `OutputStyle`.
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub fn print_req_headers<W: Write>(
         &self,
         req: &Request,
@@ -205,17 +183,19 @@ impl OutputStyle {
     ) -> NetResult<()> {
         match self.req_style {
             Style::Plain(parts) if parts.includes_headers() => {
-                req.headers.print_plain(out)
+                write!(out, "{}", &req.headers)?;
             },
             Style::Color(parts) if parts.includes_headers() => {
-                req.headers.print_color(out)
+                write!(out, "{}", req.headers.to_color_string())?;
             },
-            _ => Ok(()),
+            _ => {},
         }
+
+        Ok(())
     }
 
     /// Prints the response headers if appropriate for this `OutputStyle`.
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub fn print_res_headers<W: Write>(
         &self,
         res: &Response,
@@ -223,17 +203,19 @@ impl OutputStyle {
     ) -> NetResult<()> {
         match self.res_style {
             Style::Plain(parts) if parts.includes_headers() => {
-                res.headers.print_plain(out)
+                write!(out, "{}", &res.headers)?;
             },
             Style::Color(parts) if parts.includes_headers() => {
-                res.headers.print_color(out)
+                write!(out, "{}", res.headers.to_color_string())?;
             },
-            _ => Ok(()),
+            _ => {},
         }
+
+        Ok(())
     }
 
     /// Prints the request body if appropriate for this `OutputStyle`.
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub fn print_req_body<W: Write>(
         &self,
         req: &Request,
@@ -242,17 +224,17 @@ impl OutputStyle {
         match self.req_style {
             Style::Plain(parts) | Style::Color(parts) => {
                 if parts.includes_body() {
-                    writeln!(out, "{}", &req.body)?;
+                   writeln!(out, "{}", &req.body)?;
                 }
             },
-            _ => {},
+            Style::None => {},
         }
 
         Ok(())
     }
 
     /// Prints the response body if appropriate for this `OutputStyle`.
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub fn print_res_body<W: Write>(
         &self,
         res: &Response,
@@ -265,7 +247,7 @@ impl OutputStyle {
                         writeln!(out, "{}", &res.body)?;
                     }
                 },
-                _ => {},
+                Style::None => {},
             }
         }
 

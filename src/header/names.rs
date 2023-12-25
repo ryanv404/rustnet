@@ -111,19 +111,18 @@ impl TryFrom<&[u8]> for HeaderNameInner {
     type Error = NetError;
 
     fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        match str::from_utf8(bytes) {
-            Ok(header) => Ok(header.into()),
-            Err(_) => Err(NetParseError::Header)?,
-        }
+        str::from_utf8(bytes)
+            .map_err(|_| NetError::Parse(NetParseError::Header))
+            .map(Into::into)
     }
 }
 
 impl From<&str> for HeaderNameInner {
     fn from(header_name: &str) -> Self {
-        match StandardHeaderName::from_str(header_name) {
-            Ok(std) => Self::Standard(std),
-            Err(_) => Self::Custom(header_name.to_string()),
-        }
+        StandardHeaderName::from_str(header_name)
+            .map_or_else(
+                |_| Self::Custom(header_name.to_string()),
+                Into::into)
     }
 }
 
@@ -200,11 +199,13 @@ macro_rules! impl_standard_header_names {
             }
 
             /// Returns a string slice representation of the `StandardHeaderName`.
+            ///
+            /// # Safety
+            /// We know that all of the bytes slices returned by
+            /// `StandardHeaderName::as_bytes` are valid UTF-8 since we
+            /// provided them.
             #[must_use]
-            pub unsafe fn as_str(&self) -> &'static str {
-                // SAFETY: We know that all of the bytes slices returned by
-                // `StandardHeaderName::as_bytes` are valid UTF-8 since we
-                // provided them.
+            pub const unsafe fn as_str(&self) -> &'static str {
                 unsafe { str::from_utf8_unchecked(self.as_bytes()) }
             }
         }

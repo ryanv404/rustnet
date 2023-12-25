@@ -3,16 +3,18 @@ use std::io::{BufWriter, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 
 use crate::{
-    Body, Connection, HeaderName, HeaderValue, Headers, Method, NetError,
-    NetResult, Request, RequestLine, Response, Version,
+    Body, Connection, Headers, Method, NetError, NetResult, Request,
+    RequestLine, Response, Version,
 };
 use crate::header_name::DATE;
 use crate::util;
 
+pub mod cli;
 pub mod output;
 pub mod tui;
 
-pub use output::{OutputStyle, WriteCliError};
+pub use cli::ClientCli;
+pub use output::OutputStyle;
 pub use tui::Tui;
 
 /// An HTTP request builder object.
@@ -21,13 +23,13 @@ pub struct ClientBuilder<A>
 where
     A: ToSocketAddrs,
 {
-    pub method: Method,
+    pub method: Option<Method>,
     pub addr: Option<A>,
     pub path: Option<String>,
-    pub version: Version,
-    pub headers: Headers,
-    pub body: Body,
-    pub output: OutputStyle,
+    pub version: Option<Version>,
+    pub headers: Option<Headers>,
+    pub body: Option<Body>,
+    pub output: Option<OutputStyle>,
 }
 
 impl<A> Default for ClientBuilder<A>
@@ -36,13 +38,13 @@ where
 {
     fn default() -> Self {
         Self {
-            method: Method::Get,
+            method: None,
             addr: None,
             path: None,
-            version: Version::OneDotOne,
-            headers: Headers::new(),
-            body: Body::Empty,
-            output: OutputStyle::default()
+            version: None,
+            headers: None,
+            body: None,
+            output: None
         }
     }
 }
@@ -58,22 +60,25 @@ where
     }
 
     /// Sets the HTTP method.
-    #[must_use]
-    pub fn method(mut self, method: &Method) -> Self {
-        self.method = method.clone();
+    pub fn method(&mut self, method: Method) -> &mut Self {
+        self.method = Some(method);
+        self
+    }
+
+    /// Sets the HTTP version.
+    pub fn version(&mut self, version: Version) -> &mut Self {
+        self.version = Some(version);
         self
     }
 
     /// Sets the socket address of the remote server.
-    #[must_use]
-    pub fn addr(mut self, addr: A) -> Self {
+    pub fn addr(&mut self, addr: A) -> &mut Self {
         self.addr = Some(addr);
         self
     }
 
     /// Sets the URI path to the target resource.
-    #[must_use]
-    pub fn path(mut self, path: &str) -> Self {
+    pub fn path(&mut self, path: &str) -> &mut Self {
         if !path.is_empty() {
             self.path = Some(path.to_string());
         }
@@ -82,33 +87,38 @@ where
     }
 
     /// Sets a request header field line.
-    #[must_use]
-    pub fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
-        self.headers.insert(name, value);
+    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
+        if self.headers.is_none() {
+            self.headers = Some(Headers::new());
+        }
+
+        if let Some(headers) = self.headers.as_mut() {
+            headers.header(name, value);
+        }
+
         self
     }
 
     /// Sets the request headers.
-    #[must_use]
-    pub fn headers(mut self, headers: &Headers) -> Self {
-        self.headers = headers.clone();
+    pub fn headers(&mut self, headers: Headers) -> &mut Self {
+        self.headers = Some(headers);
         self
     }
 
     /// Sets the request body.
-    #[must_use]
-    pub fn body(mut self, body: &Body) -> Self {
-        if !body.is_empty() {
-            self.body = body.clone();
+    pub fn body(&mut self, body: Body) -> &mut Self {
+        if body.is_empty() {
+            self.body = Some(Body::Empty);
+        } else {
+            self.body = Some(body);
         }
 
         self
     }
 
     /// Sets the request body.
-    #[must_use]
-    pub fn output(mut self, output: &OutputStyle) -> Self {
-        self.output = output.clone();
+    pub fn output(&mut self, output: OutputStyle) -> &mut Self {
+        self.output = Some(output);
         self
     }
 
@@ -117,7 +127,7 @@ where
     /// # Errors
     /// 
     /// Returns an error if establishing a TCP connection fails.
-    pub fn build(mut self) -> NetResult<Client> {
+    pub fn build(&mut self) -> NetResult<Client> {
         let Some(addr) = self.addr.as_ref() else {
             return Err(NetError::ConnectFailure);
         };
@@ -126,29 +136,26 @@ where
             .map_err(|_| NetError::ConnectFailure)
             .and_then(Connection::try_from)?;
 
-        let path = self
-            .path
-            .take()
-            .unwrap_or_else(|| String::from("/"));
+        let path = self.path.take().unwrap_or_else(|| String::from("/"));
 
-        let request_line = RequestLine {
-            method: self.method,
-            path,
-            version: self.version,
+        let req = Request {
+            request_line: RequestLine {
+                method: self.method.take().unwrap_or_default(),
+                path,
+                version: self.version.take().unwrap_or_default()
+            },
+            headers: self.headers.take().unwrap_or_default(),
+            body: self.body.take().unwrap_or_default()
         };
 
-        let req = Some(Request {
-            request_line,
-            headers: self.headers,
-            body: self.body,
-        });
-
-        Ok(Client {
-            req,
+        let client = Client {
+            req: Some(req),
             res: None,
             conn: Some(conn),
-            output: self.output
-        })
+            output: self.output.unwrap_or_default()
+        };
+
+        Ok(client)
     }
 
     /// Sends an HTTP `Request` and returns the `Client`.
@@ -157,9 +164,11 @@ where
     /// 
     /// Returns an error if building the `Client` or sending the `Request`
     /// fails.
-    pub fn send(self) -> NetResult<Client> {
+    pub fn send(&mut self) -> NetResult<Client> {
         let mut client = self.build()?;
+
         client.send_request()?;
+
         Ok(client)
     }
 }
@@ -204,16 +213,16 @@ impl Client {
     /// Returns an error if building the `Client` or sending the request
     /// fails.
     pub fn get(uri: &str) -> NetResult<()> {
-        let mut client = util::parse_uri(uri)
-            .and_then(|(ref addr, ref path)| {
-                ClientBuilder::new()
-                    .method(&Method::Get)
-                    .addr(addr)
-                    .path(path)
-                    .build()
-            })?;
+        let (addr, path) = util::parse_uri(uri)?;
+
+        let mut client = ClientBuilder::new()
+            .method(Method::Get)
+            .addr(&addr)
+            .path(&path)
+            .build()?;
 
         client.output.format_str("b");
+
         client.send_request()
     }
 
@@ -225,11 +234,12 @@ impl Client {
     /// fails.
     pub fn shutdown(addr: &str) -> NetResult<()> {
         let mut client = ClientBuilder::new()
-            .method(&Method::Custom("SHUTDOWN".to_string()))
+            .method(Method::Custom("SHUTDOWN".to_string()))
             .addr(addr)
             .build()?;
 
         client.output.format_str("b");
+
         client.send_request()
     }
 
@@ -242,57 +252,6 @@ impl Client {
         if let Some(res) = self.res.as_mut() {
             res.headers.remove(&DATE);
         }
-    }
-
-    /// Prints the request to the provided `BufWriter`, based on the output
-    /// style settings.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing the request to stdout fails.
-    pub fn print_request<W: Write>(
-        &self,
-        out: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        if let Some(req) = self.req.as_ref() {
-            self.output.print_request_line(req, out)?;
-            self.output.print_req_headers(req, out)?;
-            self.output.print_req_body(req, out)?;
-        }
-
-        Ok(())
-    }
-
-    /// Prints the response to the provided `BufWriter`, based on the output
-    /// style settings.
-    /// 
-    /// # Errors
-    ///
-    /// Returns an error if writing the response to stdout fails.
-    pub fn print_response<W: Write>(
-        &self,
-        out: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        if let Some(res) = self.res.as_ref() {
-            if self.output.include_separator() {
-                writeln!(out)?;
-            }
-
-            self.output.print_status_line(res, out)?;
-            self.output.print_res_headers(res, out)?;
-
-            let is_head_route = self
-                .req
-                .as_ref()
-                .map(|req| req.route().is_head())
-                .unwrap_or(false);
-
-            if !is_head_route {
-                self.output.print_res_body(res, out)?;
-            }
-        }
-
-        Ok(())
     }
 
     /// Prints the request and the response to the provided `BufWriter`,
@@ -308,17 +267,34 @@ impl Client {
         }
 
         // Handle request output.
-        if self.req.is_some() {
-            self.print_request(out)?;
+        if let Some(req) = self.req.as_ref() {
+            self.output.print_request_line(req, out)?;
+            self.output.print_req_headers(req, out)?;
+            self.output.print_req_body(req, out)?;
         }
 
         // Handle response output.
-        if self.res.is_some() {
-            self.print_response(out)?;
+        if let Some(res) = self.res.as_ref() {
+            let is_head_route = self.req
+                .as_ref()
+                .is_some_and(|req| req.route().is_head());
+
+            if self.output.include_separator() {
+                writeln!(out)?;
+            }
+
+            self.output.print_status_line(res, out)?;
+            self.output.print_res_headers(res, out)?;
+
+            if !is_head_route {
+                self.output.print_res_body(res, out)?;
+            }
         }
 
         writeln!(out)?;
+
         out.flush()?;
+
         Ok(())
     }
 
@@ -328,13 +304,12 @@ impl Client {
     ///
     /// An error is returned if `Connection::send_request` fails.
     pub fn send_request(&mut self) -> NetResult<()> {
-        match self.req.as_mut() {
-            None => Err(NetError::NoRequest),
-            Some(req) => match self.conn.as_mut() {
-                None => Err(NetError::NotConnected),
-                Some(conn) => conn.send_request(req),
-            },
-        }
+        let req = self.req.as_mut().ok_or(NetError::NoRequest)?;
+
+        self.conn
+            .as_mut()
+            .ok_or(NetError::NotConnected)
+            .and_then(|conn| conn.send_request(req))
     }
 
     /// Writes an HTTP `Response` to a `Connection`.
@@ -343,13 +318,12 @@ impl Client {
     ///
     /// An error is returned if `Connection::send_response` fails.
     pub fn send_response(&mut self) -> NetResult<()> {
-        match self.res.as_mut() {
-            None => Err(NetError::NoResponse),
-            Some(res) => match self.conn.as_mut() {
-                None => Err(NetError::NotConnected),
-                Some(conn) => conn.send_response(res),
-            },
-        }
+        let res = self.res.as_mut().ok_or(NetError::NoResponse)?;
+
+        self.conn
+            .as_mut()
+            .ok_or(NetError::NotConnected)
+            .and_then(|conn| conn.send_response(res))
     }
 
     /// Reads and parse an HTTP `Request` from the contained `Connection`.
@@ -358,11 +332,10 @@ impl Client {
     ///
     /// An error is returned if `Connection::recv_request` fails.
     pub fn recv_request(&mut self) -> NetResult<()> {
-        let req = self
-            .conn
+        let req = self.conn
             .as_mut()
             .ok_or(NetError::NotConnected)
-            .and_then(|conn| conn.recv_request())?;
+            .and_then(Connection::recv_request)?;
 
         self.req = Some(req);
 
@@ -379,7 +352,7 @@ impl Client {
             .conn
             .as_mut()
             .ok_or(NetError::NotConnected)
-            .and_then(|conn| conn.recv_response())?;
+            .and_then(Connection::recv_response)?;
 
         self.res = Some(res);
 
