@@ -298,33 +298,32 @@ impl Client {
 
         // Handle request output.
         if let Some(req) = self.req.as_ref() {
-            self.output.print_request_line(req, out)?;
-            self.output.print_req_headers(req, out)?;
-            self.output.print_req_body(req, out)?;
+            self.output.print_request_line(&req.request_line, out)?;
+            self.output
+                .print_headers(&req.headers, &self.output.req_style, out)?;
+            self.output.print_body(&req.body, &self.output.req_style, out)?;
         }
 
         // Handle response output.
         if let Some(res) = self.res.as_ref() {
-            let is_head_route = self.req
-                .as_ref()
-                .is_some_and(|req| req.route().is_head());
-
             if self.output.include_separator() {
                 writeln!(out)?;
             }
 
-            self.output.print_status_line(res, out)?;
-            self.output.print_res_headers(res, out)?;
+            self.output.print_status_line(&res.status_line, out)?;
+            self.output
+                .print_headers(&res.headers, &self.output.res_style, out)?;
 
-            if !is_head_route {
-                self.output.print_res_body(res, out)?;
+            if self.req
+                .as_ref()
+                .is_some_and(|req| req.route().is_head() == false)
+            {
+                self.output.print_body(&res.body, &self.output.res_style, out)?;
             }
         }
 
         writeln!(out)?;
-
         out.flush()?;
-
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 use std::io::{BufWriter, Write};
 
-use crate::{Request, Response, NetResult, WriteCliError};
+use crate::{Body, Headers, NetResult, RequestLine, StatusLine, WriteCliError};
 
 /// Describes which components are output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -138,15 +138,15 @@ impl OutputStyle {
     #[allow(clippy::missing_errors_doc)]
     pub fn print_request_line<W: Write>(
         &self,
-        req: &Request,
+        request_line: &RequestLine,
         out: &mut BufWriter<W>
     ) -> NetResult<()> {
         match self.req_style {
             Style::Plain(parts) if parts.includes_first_line() => {
-                writeln!(out, "{}", &req.request_line)?;
+                writeln!(out, "{request_line}")?;
             },
             Style::Color(parts) if parts.includes_first_line() => {
-                writeln!(out, "{}", req.request_line.to_color_string())?;
+                writeln!(out, "{}", request_line.to_color_string())?;
             },
             _ => {},
         }
@@ -158,15 +158,15 @@ impl OutputStyle {
     #[allow(clippy::missing_errors_doc)]
     pub fn print_status_line<W: Write>(
         &self,
-        res: &Response,
+        status_line: &StatusLine,
         out: &mut BufWriter<W>
     ) -> NetResult<()> {
         match self.res_style {
             Style::Plain(parts) if parts.includes_first_line() => {
-                writeln!(out, "{}", &res.status_line)?;
+                writeln!(out, "{status_line}")?;
             },
             Style::Color(parts) if parts.includes_first_line() => {
-                writeln!(out, "{}", res.status_line.to_color_string())?;
+                writeln!(out, "{}", status_line.to_color_string())?;
             },
             _ => {},
         }
@@ -174,19 +174,20 @@ impl OutputStyle {
         Ok(())
     }
 
-    /// Prints the request headers if appropriate for this `OutputStyle`.
+    /// Prints the `Headers` if appropriate for this `OutputStyle`.
     #[allow(clippy::missing_errors_doc)]
-    pub fn print_req_headers<W: Write>(
+    pub fn print_headers<W: Write>(
         &self,
-        req: &Request,
+        headers: &Headers,
+        style: &Style,
         out: &mut BufWriter<W>
     ) -> NetResult<()> {
-        match self.req_style {
+        match style {
             Style::Plain(parts) if parts.includes_headers() => {
-                write!(out, "{}", &req.headers)?;
+                write!(out, "{headers}")?;
             },
             Style::Color(parts) if parts.includes_headers() => {
-                write!(out, "{}", req.headers.to_color_string())?;
+                write!(out, "{}", headers.to_color_string())?;
             },
             _ => {},
         }
@@ -194,71 +195,33 @@ impl OutputStyle {
         Ok(())
     }
 
-    /// Prints the response headers if appropriate for this `OutputStyle`.
+    /// Prints the `Body` if appropriate for this `OutputStyle`.
     #[allow(clippy::missing_errors_doc)]
-    pub fn print_res_headers<W: Write>(
+    pub fn print_body<W: Write>(
         &self,
-        res: &Response,
+        body: &Body,
+        style: &Style,
         out: &mut BufWriter<W>
     ) -> NetResult<()> {
-        match self.res_style {
-            Style::Plain(parts) if parts.includes_headers() => {
-                write!(out, "{}", &res.headers)?;
-            },
-            Style::Color(parts) if parts.includes_headers() => {
-                write!(out, "{}", res.headers.to_color_string())?;
-            },
-            _ => {},
-        }
-
-        Ok(())
-    }
-
-    /// Prints the request body if appropriate for this `OutputStyle`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn print_req_body<W: Write>(
-        &self,
-        req: &Request,
-        out: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        match self.req_style {
+        match style {
+            Style::None => Ok(()),
             Style::Plain(parts) | Style::Color(parts) => {
-                if parts.includes_body() {
-                   writeln!(out, "{}", &req.body)?;
+                if parts.includes_body() && body.is_printable() {
+                    writeln!(out, "{body}")?;
                 }
+
+                Ok(())
             },
-            Style::None => {},
         }
-
-        Ok(())
-    }
-
-    /// Prints the response body if appropriate for this `OutputStyle`.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn print_res_body<W: Write>(
-        &self,
-        res: &Response,
-        out: &mut BufWriter<W>
-    ) -> NetResult<()> {
-        if res.body.is_printable() {
-            match self.res_style {
-                Style::Plain(parts) | Style::Color(parts) => {
-                    if parts.includes_body() {
-                        writeln!(out, "{}", &res.body)?;
-                    }
-                },
-                Style::None => {},
-            }
-        }
-
-        Ok(())
     }
 
     /// Returns true if a component of both the request and the response is
     /// printed.
     #[must_use]
     pub const fn include_separator(&self) -> bool {
-        self.req_style.is_printed() && self.res_style.is_printed()
+        self.req_style.is_printed()
+            && self.res_style.is_printed()
+            && !self.is_minimal()
     }
 
     /// Sets the `OutputStyle` for requests and responses based upon a
@@ -272,7 +235,6 @@ impl OutputStyle {
     ///   h: Response headers
     ///   b: Response body
     ///   *: "Verbose" style
-    ///   r: "Request" style
     pub fn format_str(&mut self, format_str: &str) {
         let mut req_num = 0;
         let mut res_num = 0;
@@ -286,12 +248,6 @@ impl OutputStyle {
                     // "Verbose" style.
                     self.req_style = Style::Color(Parts::All);
                     self.res_style = Style::Color(Parts::All);
-                    return;
-                },
-                114 => {
-                    // "Request" style.
-                    self.req_style = Style::Color(Parts::All);
-                    self.res_style = Style::None;
                     return;
                 },
                 // Request styles.
@@ -342,5 +298,16 @@ impl OutputStyle {
     pub fn clear_styles(&mut self) {
         self.req_style = Style::None;
         self.res_style = Style::None;
+    }
+
+    /// Returns true if this `OutputStyle` is the "minimal" style.
+    #[must_use]
+    pub const fn is_minimal(&self) -> bool {
+        self.req_style.first_line_is_printed()
+            && !self.req_style.headers_are_printed()
+            && !self.req_style.body_is_printed()
+            && self.res_style.first_line_is_printed()
+            && !self.res_style.headers_are_printed()
+            && !self.res_style.body_is_printed()
     }
 }

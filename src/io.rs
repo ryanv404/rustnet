@@ -379,7 +379,7 @@ impl Connection {
         if !req.headers.contains(&HOST) {
             let stream = self.writer.get_ref();
             let remote = stream.peer_addr()?;
-            req.headers.host(&remote);
+            req.headers.host(remote);
         }
 
         if !req.headers.contains(&USER_AGENT) {

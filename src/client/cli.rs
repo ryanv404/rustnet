@@ -143,7 +143,7 @@ impl ClientCli {
                 },
                 9 => match opt {
                     // Only print the status line.
-                    "--minimal" => cli.output.format_str("s"),
+                    "--minimal" => cli.output.format_str("Rs"),
                     // Set verbose output style.
                     "--verbose" => cli.output.format_str("RHBshb"),
                     // Set the request output style and do not send.

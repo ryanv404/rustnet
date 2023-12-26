@@ -10,7 +10,7 @@ use crate::{
     RequestBuilder,
 };
 use crate::colors::{BLU, CLR, CYAN, GRN, PURP, RED, YLW};
-use crate::header_name::CONNECTION;
+use crate::header_name::{ACCEPT, CONNECTION, HOST, USER_AGENT};
 use crate::util;
 
 /// A shell-like TUI for an HTTP client.
@@ -39,7 +39,7 @@ impl<'out> Tui<'out> {
     }
 
     pub fn run() {
-        if let Err(e) = Self::start_main_loop() {
+        if let Err(e) = Self::run_main_loop() {
             eprintln!("{RED}Error: {e}{CLR}");
             process::exit(1);
         }
@@ -47,7 +47,7 @@ impl<'out> Tui<'out> {
         process::exit(0);
     }
 
-    fn start_main_loop() -> NetResult<()> {
+    fn run_main_loop() -> NetResult<()> {
         let mut tui = Self::new();
         tui.print_intro()?;
 
@@ -82,16 +82,45 @@ impl<'out> Tui<'out> {
             "kill-server" => self.kill_server(false)?,
             "log-server" => self.toggle_server_logging()?,
             "start-server" => self.start_server()?,
-            "body" | "request" | "response" | "status" | "verbose" => {
+            "body" | "request" | "response" | "minimal" | "verbose" => {
                 self.output_style(input)?;
             },
-            uri => self.handle_uri(uri)?,
+            _ => {
+                self.parse_input(input)?;
+
+                if self.do_send {
+                    self.send()?;
+                    self.recv()?;
+                } else if let Some(req) = self.client.req.as_mut() {
+                    // Update request headers for the "request" output style.
+                    if !req.headers.contains(&ACCEPT) {
+                        req.headers.accept("*/*");
+                    }
+
+                    if !req.headers.contains(&HOST) {
+                        if let Some(conn) = self.client.conn.as_mut() {
+                            let stream = conn.writer.get_ref();
+
+                            if let Ok(remote) = stream.peer_addr() {
+                                req.headers.host(remote);
+                            }
+                        }
+                    }
+
+                    if !req.headers.contains(&USER_AGENT) {
+                        req.headers.user_agent("rustnet/0.1");
+                    }
+                }
+
+                self.print_output()?;
+            },
         }
 
         Ok(())
     }
 
-    fn handle_uri(&mut self, input: &str) -> NetResult<()> {
+    // Parses an input string into a request.
+    fn parse_input(&mut self, input: &str) -> NetResult<()> {
         self.client.req = None;
         self.client.res = None;
 
@@ -114,7 +143,10 @@ impl<'out> Tui<'out> {
         match util::parse_uri(uri).ok() {
             Some((addr, path)) => {
                 // Only make a new connection if it is necessary.
-                if self.client.conn.is_none() || self.last_addr != addr {
+                if self.client.conn.is_none()
+                    || self.last_addr != addr
+                    || self.last_addr == "localhost:7878"
+                {
                     let Ok(conn) = Connection::try_from(addr.as_str()) else {
                         return self.warn_no_connection(&addr);
                     };
@@ -125,18 +157,42 @@ impl<'out> Tui<'out> {
 
                 req.path(&path);
             },
-            None if uri.starts_with("/") => { req.path(uri); },
+            None if uri.starts_with("/") => {
+                if self.last_addr == "localhost:7878" {
+                    let Ok(conn) = Connection::try_from("localhost:7878") else {
+                        return self.warn_no_connection("localhost:7878");
+                    };
+
+                    self.client.conn = Some(conn);
+                }
+
+                req.path(uri);
+            },
             None => return self.warn_invalid_input(uri),
         }
 
         self.client.req = Some(req.build());
+        Ok(())
+    }
 
-        if self.do_send {
-            self.send()?;
-            self.recv()?;
+    fn output_style(&mut self, style: &str) -> NetResult<()> {
+        self.do_send = true;
+
+        match style {
+            "body" => self.client.output.format_str("b"),
+            "response" => self.client.output.format_str("shb"),
+            "minimal" => self.client.output.format_str("Rs"),
+            "verbose" => self.client.output.format_str("*"),
+            "request" => {
+                self.do_send = false;
+                self.client.output.format_str("RHB");
+            },
+            _ => unreachable!(),
         }
 
-        self.print_output()?;
+        let msg = format!("Output set to {PURP}{style}{CLR} style.\n");
+        writeln!(&mut self.writer, "{msg}")?;
+
         Ok(())
     }
 
@@ -153,45 +209,11 @@ impl<'out> Tui<'out> {
         Ok(())
     }
 
-    fn toggle_server_logging(&mut self) -> NetResult<()> {
-        self.do_log_server = !self.do_log_server;
-
-        let status = if self.do_log_server {
-            "enabled"
-        } else {
-            "disabled"
-        };
-
-        writeln!(&mut self.writer, "Server logging {PURP}{status}{CLR}.\n")?;
-        Ok(())
-    }
-
-    fn output_style(&mut self, style: &str) -> NetResult<()> {
-        self.do_send = true;
-
-        match style {
-            "body" => self.client.output.format_str("b"),
-            "response" => self.client.output.format_str("shb"),
-            "status" => self.client.output.format_str("s"),
-            "verbose" => self.client.output.format_str("*"),
-            "request" => {
-                self.do_send = false;
-                self.client.output.format_str("r");
-            },
-            _ => unreachable!(),
-        }
-
-        writeln!(&mut self.writer,
-            "Output set to {PURP}{style}{CLR} style.\n")?;
-
-        Ok(())
-    }
-
     fn print_intro(&mut self) -> NetResult<()> {
-        const FACE: &str =
-r#"              .-''''''-.
+        let face = format!(r#"
+              .-''''''-.
             .' _      _ '.
-           /   O      O   \
+           /   {CYAN}O      {CYAN}O{PURP}   \
           :                :
           |                |
           :       __       :
@@ -199,22 +221,11 @@ r#"              .-''''''-.
             '.          .'
               '-......-'
 
-         YOU SHOULDN'T BE HERE"#;
+         YOU SHOULDN'T BE HERE"#);
 
 
         self.clear_screen()?;
-        writeln!(&mut self.writer, "{PURP}http_tui/0.1\n\n{FACE}{CLR}\n")?;
-        Ok(())
-    }
-
-    fn warn_invalid_input(&mut self, input: &str) -> NetResult<()> {
-        writeln!(&mut self.writer, "{RED}Invalid input: \"{input}\"{CLR}\n")?;
-        Ok(())
-    }
-
-    fn warn_no_connection(&mut self, addr: &str) -> NetResult<()> {
-        writeln!(&mut self.writer,
-            "{RED}Unable to connect to \"{addr}\"{CLR}\n")?;
+        writeln!(&mut self.writer, "{PURP}http_tui/0.1\n\n{face}{CLR}\n")?;
         Ok(())
     }
 
@@ -229,8 +240,8 @@ r#"              .-''''''-.
                     code => (YLW, code),
                 };
 
-                write!(&mut self.writer,
-                    "{CYAN}[{color}{code}{CYAN}]${CLR} ")?;
+                let prompt = format!("{CYAN}[{color}{code}{CYAN}]${CLR} ");
+                write!(&mut self.writer, "{prompt}")?;
             },
         }
 
@@ -239,7 +250,8 @@ r#"              .-''''''-.
     }
 
     fn print_help(&mut self) -> NetResult<()> {
-        writeln!(&mut self.writer,
+        writeln!(
+            &mut self.writer,
             "\
 {PURP}http_tui{CLR} is a shell-like HTTP client.\n
 Enter a `{PURP}URI{CLR}` to send a GET request.
@@ -248,16 +260,17 @@ To send a request with a different method enter `{PURP}METHOD URI{CLR}`.
     e.g. \"POST httpbin.org/status/201\"\n
 Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
     e.g. \"/status/201\"\n
+The prior response's status code is displayed in the prompt.\n
 {PURP}COMMANDS:{CLR}
-    body          Only print response bodies.
+    body          Only print the response bodies.
     clear         Clear the screen.
     help          Print this help message.
     kill-server   Shut down the test server.
+    minimal       Only print the request lines and status lines.
     quit          Quit the program.
-    request       Only print requests (but do not send them).
-    response      Only print responses (default).
+    request       Only print the requests (but do not send them).
+    response      Only print the responses (default).
     start-server  Start a test server at localhost:7878.
-    status        Only print status lines.
     verbose       Print both requests and responses.\n"
         )?;
         Ok(())
@@ -268,28 +281,36 @@ Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
         Ok(())
     }
 
+    fn warn_invalid_input(&mut self, input: &str) -> NetResult<()> {
+        writeln!(&mut self.writer, "{RED}Invalid input: \"{input}\"{CLR}\n")?;
+        Ok(())
+    }
+
+    fn warn_no_connection(&mut self, addr: &str) -> NetResult<()> {
+        let msg = format!("{RED}Unable to connect to \"{addr}\"{CLR}\n");
+        writeln!(&mut self.writer, "{msg}")?;
+        Ok(())
+    }
+
     fn start_server(&mut self) -> NetResult<()> {
         if self.server.is_some() {
-            writeln!(
-                &mut self.writer,
-                "{YLW}Server is already running.\n\
-                Please run `kill-server` to shut that server down first \
-                before starting\na new one.{CLR}\n"
-            )?;
+            let msg = format!(
+                "{YLW}Server is already running.\nPlease run \
+                `kill-server` to shut that server down first before \
+                starting\na new one.{CLR}\n"
+            );
+            writeln!(&mut self.writer, "{msg}")?;
             return Ok(());
         }
 
         if let Err(e) = util::build_server() {
-            writeln!(
-                &mut self.writer,
-                "{RED}Server failed to build.\n{e}{CLR}\n"
-            )?;
+            let msg = format!("{RED}Server failed to build.\n{e}{CLR}\n");
+            writeln!(&mut self.writer, "{msg}")?;
             return Ok(());
         }
 
         let args = [
-            "run", "--bin", "server", "--", "--test", "--",
-            "127.0.0.1:7878"
+            "run", "--bin", "server", "--", "--test", "--", "127.0.0.1:7878"
         ];
 
         match Command::new("cargo")
@@ -300,10 +321,8 @@ Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
         {
             Ok(server) => self.check_server_connection(server)?,
             Err(e) => {
-                writeln!(
-                    &mut self.writer,
-                    "{RED}Failed to start.\n{e}{CLR}\n"
-                )?;
+                let msg = format!("{RED}Failed to start.\n{e}{CLR}\n");
+                writeln!(&mut self.writer, "{msg}")?;
             },
         }
 
@@ -313,10 +332,8 @@ Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
     fn kill_server(&mut self, quiet: bool) -> NetResult<()> {
         let Some(mut server) = self.server.take() else {
             if !quiet {
-                writeln!(
-                    &mut self.writer,
-                    "{YLW}No active server found.{CLR}\n"
-                )?;
+                let msg = format!("{YLW}No active server found.{CLR}\n");
+                writeln!(&mut self.writer, "{msg}")?;
             }
             return Ok(());
         };
@@ -325,16 +342,14 @@ Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
 
         match server.kill() {
             Ok(()) if !quiet => {
-                writeln!(
-                    &mut self.writer,
-                    "{GRN}Server has been shut down.{CLR}\n"
-                )?;
+                let msg = format!("{GRN}Server has been shut down.{CLR}\n");
+                writeln!(&mut self.writer, "{msg}")?;
             },
             Err(e) if !quiet => {
-                writeln!(
-                    &mut self.writer,
+                let msg = format!(
                     "{RED}Unable to shut down server.\n{e}{CLR}\n"
-                )?;
+                );
+                writeln!(&mut self.writer, "{msg}")?;
             },
             _ => {},
         }
@@ -364,10 +379,26 @@ Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
         Ok(())
     }
 
+    fn toggle_server_logging(&mut self) -> NetResult<()> {
+        self.do_log_server = !self.do_log_server;
+
+        let status = if self.do_log_server {
+            "enabled"
+        } else {
+            "disabled"
+        };
+
+        let msg = format!("Server logging {PURP}{status}{CLR}.\n");
+        writeln!(&mut self.writer, "{msg}")?;
+
+        Ok(())
+    }
+
     fn connection_is_closed(&self) -> bool {
         match self.client.res.as_ref() {
             Some(res) => {
-                res.headers.get(&CONNECTION) == Some(&HeaderValue::from("close"))
+                let value = res.headers.get(&CONNECTION);
+                value == Some(&HeaderValue::from("close"))
             },
             None => false,
         }
@@ -375,24 +406,27 @@ Additional requests to the same address can be entered `{PURP}/PATH{CLR}`.
 
     fn send(&mut self) -> NetResult<()> {
         if let Err(e) = self.client.send_request() {
-            writeln!(
-                &mut self.writer,
+            let msg = format!(
                 "{RED}Error while sending request:\n{}{CLR}\n",
                 e.to_string().trim_end()
-            )?;
+            );
+
+            self.client.conn = None;
+            return Err(NetError::Other(msg));
         }
 
-        self.client.req = None;
         Ok(())
     }
 
     fn recv(&mut self) -> NetResult<()> {
         if let Err(e) = self.client.recv_response() {
-            writeln!(
-                &mut self.writer,
+            let msg = format!(
                 "{RED}Error while receiving response:\n{}{CLR}\n",
                 e.to_string().trim_end()
-            )?;
+            );
+
+            self.client.conn = None;
+            return Err(NetError::Other(msg));
         }
 
         if self.connection_is_closed() {

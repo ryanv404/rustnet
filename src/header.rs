@@ -233,7 +233,7 @@ impl Headers {
     }
 
     /// Inserts a Host header that is parsed from the given `SocketAddr`.
-    pub fn host(&mut self, host: &SocketAddr) {
+    pub fn host(&mut self, host: SocketAddr) {
         let ip = host.ip();
         let port = host.port();
         self.insert(HOST, format!("{ip}:{port}").into());
