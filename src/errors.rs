@@ -52,7 +52,7 @@ impl From<NetParseError> for IoError {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetError {
     ConnectFailure,
     JoinFailure,
@@ -61,7 +61,7 @@ pub enum NetError {
     NoRequest,
     NoResponse,
     NotConnected,
-    Other(&'static str),
+    Other(String),
     Parse(NetParseError),
     Read(IoErrorKind),
     UnexpectedEof,
@@ -80,7 +80,7 @@ impl Display for NetError {
             Self::NoRequest => f.write_str("No request found."),
             Self::NoResponse => f.write_str("No response found."),
             Self::NotConnected => f.write_str("No active TCP stream"),
-            Self::Other(msg) => write!(f, "{msg}"),
+            Self::Other(ref msg) => write!(f, "{msg}"),
             Self::Parse(kind) => write!(f, "{kind}"),
             Self::Read(kind) => write!(f, "Read error: {kind}"),
             Self::UnexpectedEof => f.write_str("Received unexpected EOF"),

@@ -151,7 +151,7 @@ impl Body {
         }
     }
 
-    /// Returns the `Body` as a slice of bytes.
+    /// Returns the `Body` as a bytes slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         self.get_ref().unwrap_or(&b""[..])

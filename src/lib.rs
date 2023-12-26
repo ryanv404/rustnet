@@ -28,23 +28,25 @@ pub mod response;
 pub mod router;
 pub mod server;
 pub mod thread_pool;
+pub mod tui;
 pub mod util;
 
 pub use body::Body;
-pub use client::{Client, ClientBuilder, ClientCli, OutputStyle, Tui};
+pub use client::{Client, ClientBuilder, ClientCli, OutputStyle};
 pub use errors::{NetError, NetParseError, NetResult};
 pub use header::{
     Header, HeaderName, HeaderNameInner, HeaderValue, Headers, header_name,
 };
 pub use io::{Connection, WriteCliError};
 pub use http::{Method, Status, StatusCode, Version};
-pub use request::{Request, RequestLine};
-pub use response::{Response, StatusLine};
+pub use request::{Path, Request, RequestBuilder, RequestLine};
+pub use response::{Response, ResponseBuilder, StatusLine};
 pub use router::{Route, RouteBuilder, Router, Target};
 pub use server::{
     Server, ServerBuilder, ServerCli, ServerConfig, ServerHandle,
 };
 pub use thread_pool::{ThreadPool, Worker};
+pub use tui::Tui;
 
 pub mod colors {
     pub const RED: &str = "\x1b[91m";

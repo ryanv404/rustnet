@@ -3,7 +3,7 @@ use std::io::{BufWriter, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 
 use crate::{
-    Body, Connection, Headers, Method, NetError, NetResult, Request,
+    Body, Connection, Headers, Method, NetError, NetResult, Path, Request,
     RequestLine, Response, Version,
 };
 use crate::header_name::DATE;
@@ -11,13 +11,11 @@ use crate::util;
 
 pub mod cli;
 pub mod output;
-pub mod tui;
 
 pub use cli::ClientCli;
 pub use output::OutputStyle;
-pub use tui::Tui;
 
-/// An HTTP request builder object.
+/// An HTTP client builder object.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientBuilder<A>
 where
@@ -25,7 +23,7 @@ where
 {
     pub method: Option<Method>,
     pub addr: Option<A>,
-    pub path: Option<String>,
+    pub path: Option<Path>,
     pub version: Option<Version>,
     pub headers: Option<Headers>,
     pub body: Option<Body>,
@@ -80,13 +78,13 @@ where
     /// Sets the URI path to the target resource.
     pub fn path(&mut self, path: &str) -> &mut Self {
         if !path.is_empty() {
-            self.path = Some(path.to_string());
+            self.path = Some(path.into());
         }
 
         self
     }
 
-    /// Sets a request header field line.
+    /// Inserts a request header.
     pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
         if self.headers.is_none() {
             self.headers = Some(Headers::new());
@@ -136,16 +134,20 @@ where
             .map_err(|_| NetError::ConnectFailure)
             .and_then(Connection::try_from)?;
 
-        let path = self.path.take().unwrap_or_else(|| String::from("/"));
+        let method = self.method.take().unwrap_or_default();
+        let path = self.path.take().unwrap_or_default();
+        let version = self.version.take().unwrap_or_default();
+        let headers = self.headers.take().unwrap_or_default();
+        let body = self.body.take().unwrap_or_default();
 
         let req = Request {
             request_line: RequestLine {
-                method: self.method.take().unwrap_or_default(),
+                method,
                 path,
-                version: self.version.take().unwrap_or_default()
+                version
             },
-            headers: self.headers.take().unwrap_or_default(),
-            body: self.body.take().unwrap_or_default()
+            headers,
+            body
         };
 
         let client = Client {
@@ -166,9 +168,7 @@ where
     /// fails.
     pub fn send(&mut self) -> NetResult<Client> {
         let mut client = self.build()?;
-
         client.send_request()?;
-
         Ok(client)
     }
 }
@@ -206,12 +206,42 @@ impl Client {
         ClientBuilder::new()
     }
 
+    /// Returns a new `ClientBuilder` instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error `TcpStream::connect` is unable to connect to the the
+    /// given `addr`.
+    #[must_use]
+    pub fn new(method: Method, addr: &str, path: &str) -> NetResult<Self> {
+        Client::builder()
+            .method(method)
+            .addr(&addr)
+            .path(&path)
+            .build()
+    }
+
+    /// Returns a new `ClientBuilder` instance.
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error `TcpStream::connect` is unable to connect to the the
+    /// given `addr`.
+    #[must_use]
+    pub fn send(method: Method, addr: &str, path: &str) -> NetResult<Self> {
+        Client::builder()
+            .method(method)
+            .addr(&addr)
+            .path(&path)
+            .send()
+    }
+
     /// Sends a GET request to the provided address.
     ///
     /// # Errors
     ///
-    /// Returns an error if building the `Client` or sending the request
-    /// fails.
+    /// Returns an error `TcpStream::connect` is unable to connect to the the
+    /// given `addr` or if sending the request fails.
     pub fn get(uri: &str) -> NetResult<()> {
         let (addr, path) = util::parse_uri(uri)?;
 
@@ -230,8 +260,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns an error if building the `Client` or sending the request
-    /// fails.
+    /// Returns an error `TcpStream::connect` is unable to connect to the the
+    /// given `addr` or if sending the request fails.
     pub fn shutdown(addr: &str) -> NetResult<()> {
         let mut client = ClientBuilder::new()
             .method(Method::Custom("SHUTDOWN".to_string()))

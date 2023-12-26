@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::{NetError, NetParseError, NetResult};
 
@@ -45,6 +46,25 @@ pub fn trim_bytes(bytes: &[u8]) -> &[u8] {
     trim_end_bytes(trimmed)
 }
 
+/// Builds the server binary using `cargo`.
+/// 
+/// # Errors
+/// 
+/// Returns an error if `cargo build` does not return an exit status of 0.
+pub fn build_server() -> NetResult<()> {
+    let mut build_handle = Command::new("cargo")
+        .args(["build", "--bin", "server"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    match build_handle.wait() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(NetError::Other(format!("Status: {status}"))),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Returns the file extension, if present, of a `Path` value.
 #[must_use]
 pub fn get_extension(path: &Path) -> Option<&str> {
@@ -52,7 +72,11 @@ pub fn get_extension(path: &Path) -> Option<&str> {
 }
 
 /// Parses a string slice into a host address and a URI path.
-#[allow(clippy::missing_errors_doc)]
+/// 
+/// # Errors
+/// 
+/// Returns an error if the `uri` argument cannot be parsed into an address
+/// `String` and a path `String`.
 pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
     match uri.trim().split_once("://") {
         Some((scheme, rest)) => {
@@ -122,108 +146,6 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
     }
 }
 
-//// Determines if byte is a token char.
-//#[allow(dead_code)]
-//#[must_use]
-//pub const fn is_token(b: u8) -> bool {
-//    b > 0x1F && b < 0x7F
-//}
-//
-//// ASCII codes to accept URI string.
-//// i.e. A-Za-z0-9!#$%&'*+-._();:@=,/?[]~^
-//#[rustfmt::skip]
-//#[allow(dead_code)]
-//static URI_MAP: [u8; 256] = [
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x0x
-////  \0                            \n
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x1x
-////  commands
-//    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 0x2x
-////  \w !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, // 0x3x
-////  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 0x4x
-////  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 0x5x
-////  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 0x6x
-////  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, // 0x7x
-////  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  del
-////   ====== Extended ASCII (aka. obs-text) ======
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x8x
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x9x
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xAx
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xBx
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xCx
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xDx
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xEx
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0xFx
-//];
-
-///// Returns true if the given byte corresponds to a valid URI token.
-//#[allow(dead_code)]
-//#[must_use]
-//pub fn is_uri_token(b: u8) -> bool {
-//    URI_MAP[b as usize] == 1
-//}
-//
-//#[rustfmt::skip]
-//#[allow(dead_code)]
-//static HEADER_NAME_MAP: [u8; 256] = [
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-//    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//];
-//
-///// Returns true if the given byte corresponds to a valid header name token.
-//#[allow(dead_code)]
-//#[must_use]
-//pub fn is_header_name_token(b: u8) -> bool {
-//    HEADER_NAME_MAP[b as usize] == 1
-//}
-//
-//#[rustfmt::skip]
-//#[allow(dead_code)]
-//static HEADER_VALUE_MAP: [u8; 256] = [
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
-//    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//];
-//
-///// Returns true if the given byte corresponds to a valid header value token.
-//#[allow(dead_code)]
-//#[must_use]
-//pub fn is_header_value_token(b: u8) -> bool {
-//    HEADER_VALUE_MAP[b as usize] == 1
-//}
-//
 ///// Get the current date and time if the `date` program exists.
 //#[must_use]
 //pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
@@ -257,30 +179,3 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
 //
 //    false
 //}
-
-// HTTP Message Format:
-//
-// ( request-line / status-line ) CRLF
-// *( field-line CRLF )
-// CRLF
-// [ message-body ]
-//
-// URI: scheme ":" "//" authority *(path) ["?" query] ["#" fragment]
-// HTTP-URI: "http" "://" authority path-abempty [ "?" query ]
-//
-// authority     = host [":" port]
-// host          = IP-literal / IPv4address / reg-name
-// path          = *("/" *pchar)
-// query         = ["?" *(pchar / "/" / "?")]
-// fragment      = ["#" *(pchar / "/" / "?")]
-// pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
-// pct-encoded   = "%" HEXDIG HEXDIG
-// unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
-// reserved      = gen-delims / sub-delims
-// gen-delims    = ":" / "/" / "?" / "#" / "[" / "]" / "@"
-// sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" /
-//                 "*" / "+" / "," / ";" / "="
-//
-// start-line = request-line / status-line
-// request-line = method SP request-target SP HTTP-version
-// status-line = HTTP-version SP status-code SP [ reason-phrase ]

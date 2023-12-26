@@ -303,7 +303,7 @@ mod request {
         let test_req = Request::try_from(&input[..]).unwrap();
 
         let mut expected_req = Request::default();
-        expected_req.request_line.path = String::from("/test");
+        expected_req.request_line.path = "/test".into();
         expected_req.headers.accept("*/*");
         expected_req.headers.user_agent("xh/0.19.3");
         expected_req.headers.connection("keep-alive");

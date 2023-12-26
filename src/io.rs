@@ -57,6 +57,16 @@ impl Write for Connection {
     }
 }
 
+impl TryFrom<&str> for Connection {
+    type Error = NetError;
+
+    fn try_from(addr: &str) -> NetResult<Self> {
+        TcpStream::connect(addr)
+            .map_err(|_| NetError::ConnectFailure)
+            .and_then(Self::try_from)
+    }
+}
+
 impl TryFrom<TcpStream> for Connection {
     type Error = NetError;
 
@@ -309,11 +319,7 @@ impl Connection {
         &mut self,
         request_line: &RequestLine,
     ) -> NetResult<()> {
-        self.write_all(request_line.method.as_bytes())?;
-        self.write_all(b" ")?;
-        self.write_all(request_line.path.as_bytes())?;
-        self.write_all(b" ")?;
-        self.write_all(request_line.version.as_bytes())?;
+        self.write_all(request_line.to_string().as_bytes())?;
         self.write_all(b"\r\n")?;
         Ok(())
     }
@@ -328,9 +334,7 @@ impl Connection {
         &mut self,
         status_line: &StatusLine,
     ) -> NetResult<()> {
-        self.write_all(status_line.version.as_bytes())?;
-        self.write_all(b" ")?;
-        self.write_all(status_line.status.as_bytes())?;
+        self.write_all(status_line.to_string().as_bytes())?;
         self.write_all(b"\r\n")?;
         Ok(())
     }
@@ -342,13 +346,7 @@ impl Connection {
     /// An error is returned if a problem was encountered while writing the
     /// `Headers` to the underlying `TcpStream`.
     pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
-        for (hdr_name, hdr_value) in &headers.0 {
-            self.write_all(hdr_name.as_bytes())?;
-            self.write_all(b": ")?;
-            self.write_all(hdr_value.as_bytes())?;
-            self.write_all(b"\r\n")?;
-        }
-
+        self.write_all(headers.to_string().as_bytes())?;
         self.write_all(b"\r\n")?;
         Ok(())
     }

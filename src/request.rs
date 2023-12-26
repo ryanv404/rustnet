@@ -11,22 +11,147 @@ use crate::colors::{CLR, YLW};
 use crate::header_name::CONTENT_TYPE;
 use crate::util;
 
-/// Contains the components of an HTTP request line.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RequestLine {
-    pub method: Method,
-    pub path: String,
-    pub version: Version,
+/// An HTTP request builder object.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RequestBuilder {
+    pub method: Option<Method>,
+    pub path: Option<Path>,
+    pub version: Option<Version>,
+    pub headers: Option<Headers>,
+    pub body: Option<Body>,
 }
 
-impl Default for RequestLine {
+impl Default for RequestBuilder {
     fn default() -> Self {
         Self {
-            method: Method::Get,
-            path: String::from("/"),
-            version: Version::OneDotOne,
+            method: None,
+            path: None,
+            version: None,
+            headers: None,
+            body: None
         }
     }
+}
+
+impl RequestBuilder {
+    /// Returns a new `RequestBuilder` instance.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the HTTP method.
+    pub fn method(&mut self, method: Method) -> &mut Self {
+        self.method = Some(method);
+        self
+    }
+
+    /// Sets the HTTP version.
+    pub fn version(&mut self, version: Version) -> &mut Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Sets the URI path to the target resource.
+    pub fn path(&mut self, path: &str) -> &mut Self {
+        if !path.is_empty() {
+            self.path = Some(path.into());
+        }
+
+        self
+    }
+
+    /// Inserts a request header.
+    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
+        if self.headers.is_none() {
+            self.headers = Some(Headers::new());
+        }
+
+        if let Some(headers) = self.headers.as_mut() {
+            headers.header(name, value);
+        }
+
+        self
+    }
+
+    /// Sets the request headers.
+    pub fn headers(&mut self, headers: Headers) -> &mut Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    /// Sets the request body.
+    pub fn body(&mut self, body: Body) -> &mut Self {
+        if body.is_empty() {
+            self.body = Some(Body::Empty);
+        } else {
+            self.body = Some(body);
+        }
+
+        self
+    }
+
+    /// Builds and returns a new `Request`.
+    pub fn build(&mut self) -> Request {
+        let request_line = RequestLine {
+            method: self.method.take().unwrap_or_default(),
+            path: self.path.take().unwrap_or_default(),
+            version: self.version.take().unwrap_or_default()
+        };
+
+        let headers = self.headers.take().unwrap_or_default();
+        let body = self.body.take().unwrap_or_default();
+
+        Request { request_line, headers, body }
+    }
+}
+
+/// The path component of an HTTP URI.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Path(pub String);
+
+impl Default for Path {
+    fn default() -> Self {
+        Self(String::from("/"))
+    }
+}
+
+impl Display for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", &self.0)
+    }
+}
+
+impl TryFrom<&[u8]> for Path {
+    type Error = NetError;
+
+    fn try_from(bytes: &[u8]) -> NetResult<Self> {
+        let inner = String::from_utf8(bytes.to_vec())
+            .map_err(|_| NetError::Parse(NetParseError::Path))?;
+
+        Ok(Self(inner))
+    }
+}
+
+impl From<&str> for Path {
+    fn from(path: &str) -> Self {
+        Self(path.to_string())
+    }
+}
+
+impl Path {
+    /// Returns the path as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// Contains the components of an HTTP request line.
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RequestLine {
+    pub method: Method,
+    pub path: Path,
+    pub version: Version,
 }
 
 impl Display for RequestLine {
@@ -59,8 +184,7 @@ impl TryFrom<&[u8]> for RequestLine {
         let path = tokens
             .next()
             .ok_or(NetError::Parse(NetParseError::Path))
-            .and_then(|token| String::from_utf8(token.to_vec())
-                .map_err(|_| NetError::Parse(NetParseError::Path)))?;
+            .and_then(Path::try_from)?;
 
         let version = tokens
             .next()
@@ -78,7 +202,7 @@ impl RequestLine {
     pub fn new(method: &Method, path: &str) -> Self {
         Self {
             method: method.clone(),
-            path: path.to_string(),
+            path: path.into(),
             version: Version::OneDotOne,
         }
     }
@@ -92,7 +216,7 @@ impl RequestLine {
     /// Returns the requested URI path as a string slice.
     #[must_use]
     pub fn path(&self) -> &str {
-        &self.path
+        self.path.as_str()
     }
 
     /// Returns a reference to the HTTP protocol `Version`.
@@ -209,7 +333,7 @@ impl Request {
     /// Returns the requested URI path as a string slice.
     #[must_use]
     pub fn path(&self) -> &str {
-        &self.request_line.path
+        &self.request_line.path.as_str()
     }
 
     /// Returns a reference to the HTTP protocol `Version`.

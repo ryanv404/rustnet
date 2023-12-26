@@ -68,7 +68,7 @@ pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
 impl Display for Headers {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         for (name, value) in &self.0 {
-            writeln!(f, "{name}: {value}")?;
+            write!(f, "{name}: {value}\r\n")?;
         }
 
         Ok(())
@@ -211,7 +211,7 @@ impl Headers {
 
     /// Inserts sensible values for a default set of request headers if they
     /// are not already present.
-    pub fn default_request_headers(&mut self, body: &Body, addr: &SocketAddr) {
+    pub fn default_request_headers(&mut self, body: &Body, addr: SocketAddr) {
         self.insert_if_empty(ACCEPT, "*/*".into());
         self.insert_if_empty(HOST, addr.into());
         self.insert_if_empty(USER_AGENT, "rustnet/0.1".into());

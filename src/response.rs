@@ -8,8 +8,95 @@ use crate::{
     NetParseError, NetResult, Status, StatusCode, Target, Version,
 };
 use crate::colors::{CLR, PURP};
-use crate::header_name::{CONNECTION, CONTENT_TYPE};
+use crate::header_name::CONTENT_TYPE;
 use crate::util;
+
+/// An HTTP response builder object.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ResponseBuilder {
+    pub status_code: Option<u16>,
+    pub version: Option<Version>,
+    pub headers: Option<Headers>,
+    pub body: Option<Body>,
+}
+
+impl Default for ResponseBuilder {
+    fn default() -> Self {
+        Self {
+            status_code: None,
+            version: None,
+            headers: None,
+            body: None
+        }
+    }
+}
+
+impl ResponseBuilder {
+    /// Returns a new `ResponseBuilder` instance.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the status code.
+    pub fn status_code(&mut self, code: u16) -> &mut Self {
+        self.status_code = Some(code);
+        self
+    }
+
+    /// Sets the HTTP version.
+    pub fn version(&mut self, version: Version) -> &mut Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Inserts a response header.
+    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
+        if self.headers.is_none() {
+            self.headers = Some(Headers::new());
+        }
+
+        if let Some(headers) = self.headers.as_mut() {
+            headers.header(name, value);
+        }
+
+        self
+    }
+
+    /// Sets the response headers.
+    pub fn headers(&mut self, headers: Headers) -> &mut Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    /// Sets the response body.
+    pub fn body(&mut self, body: Body) -> &mut Self {
+        if body.is_empty() {
+            self.body = Some(Body::Empty);
+        } else {
+            self.body = Some(body);
+        }
+
+        self
+    }
+
+    /// Builds and returns a new `Response`.
+    pub fn build(&mut self) -> NetResult<Response> {
+        let mut status_line = match self.status_code.take() {
+            Some(code) => StatusLine::try_from(code)?,
+            None => StatusLine::default(),
+        };
+
+        if let Some(version) = self.version.take() {
+            status_line.version = version;
+        }
+
+        let headers = self.headers.take().unwrap_or_default();
+        let body = self.body.take().unwrap_or_default();
+
+        Ok(Response { status_line, headers, body })
+    }
+}
 
 /// Contains the components of an HTTP status line.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -264,12 +351,6 @@ impl Response {
     /// Inserts a header into the `Response`.
     pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
-    }
-
-    /// Returns true if the Connection header's value is "close".
-    #[must_use]
-    pub fn has_close_connection_header(&self) -> bool {
-        self.headers.get(&CONNECTION) == Some(&HeaderValue::from("close"))
     }
 
     /// Returns true if a body is permitted for this `Response`.

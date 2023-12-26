@@ -100,8 +100,11 @@ macro_rules! run_test {
                     .output()
                     .unwrap();
 
-                let mut test_res = match Response::try_from(&output.stdout[..]) {
-                    Ok(res) => res,
+                let test_res = match Response::try_from(&output.stdout[..]) {
+                    Ok(mut res) => {
+                        res.body = Body::Empty;
+                        res
+                    },
                     Err(e) => panic!("Response parsing failed!\n{e}"),
                 };
 
@@ -110,8 +113,6 @@ macro_rules! run_test {
                     "CLIENT" => get_expected_for_client(method, route.as_str()),
                     _ => unreachable!(),
                 };
-
-                test_res.body = Body::Empty;
 
                 assert_eq!(test_res, expected_res);
             }

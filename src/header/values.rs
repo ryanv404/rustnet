@@ -25,7 +25,12 @@ impl From<&str> for HeaderValue {
 
 impl From<String> for HeaderValue {
     fn from(s: String) -> Self {
-        Self(s.into_bytes())
+        if !s.starts_with(" ") && !s.ends_with(" ") {
+            // Avoid a new allocation if possible.
+            Self(s.into_bytes())
+        } else {
+            Self(Vec::from(s.trim()))
+        }
     }
 }
 
@@ -48,8 +53,8 @@ impl From<Vec<u8>> for HeaderValue {
     }
 }
 
-impl From<&SocketAddr> for HeaderValue {
-    fn from(sock: &SocketAddr) -> Self {
+impl From<SocketAddr> for HeaderValue {
+    fn from(sock: SocketAddr) -> Self {
         let sock_str = sock.to_string();
         Self(sock_str.into_bytes())
     }
