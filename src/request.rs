@@ -13,25 +13,13 @@ use crate::header_name::{ACCEPT, CONTENT_TYPE, USER_AGENT};
 use crate::util;
 
 /// An HTTP request builder object.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestBuilder {
     pub method: Option<Method>,
     pub path: Option<Path>,
     pub version: Option<Version>,
     pub headers: Option<Headers>,
     pub body: Option<Body>,
-}
-
-impl Default for RequestBuilder {
-    fn default() -> Self {
-        Self {
-            method: None,
-            path: None,
-            version: None,
-            headers: None,
-            body: None
-        }
-    }
 }
 
 impl RequestBuilder {
@@ -153,6 +141,7 @@ impl From<&str> for Path {
 
 impl Path {
     /// Returns the path as a string slice.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -345,7 +334,7 @@ impl Request {
     /// Returns the requested URI path as a string slice.
     #[must_use]
     pub fn path(&self) -> &str {
-        &self.request_line.path.as_str()
+        self.request_line.path.as_str()
     }
 
     /// Returns a reference to the HTTP protocol `Version`.

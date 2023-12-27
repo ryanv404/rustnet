@@ -125,7 +125,7 @@ impl<'out> Tui<'out> {
     fn parse_input(&mut self, input: &str) -> NetResult<()> {
         let mut req = RequestBuilder::new();
 
-        let uri = match input.split_once(" ") {
+        let uri = match input.split_once(' ') {
             None => input,
             Some((method, uri)) => {
                 let method = method.to_ascii_uppercase();
@@ -153,7 +153,7 @@ impl<'out> Tui<'out> {
                 self.last_addr = Some(addr);
                 self.client.conn = Some(conn);
             },
-            None if uri.starts_with("/") && self.last_addr.is_some() => {
+            None if uri.starts_with('/') && self.last_addr.is_some() => {
                 let Some(addr) = self.last_addr.as_ref()
                 else {
                     self.warn_invalid_input(uri)?;
@@ -429,13 +429,12 @@ The prior response's status code is displayed in the prompt.\n
     }
 
     fn connection_is_closed(&self) -> bool {
-        match self.client.res.as_ref() {
-            Some(res) => {
+        self.client.res.as_ref().map_or(
+            false,
+            |res| {
                 let value = res.headers.get(&CONNECTION);
                 value == Some(&HeaderValue::from("close"))
-            },
-            None => false,
-        }
+            })
     }
 
     fn send(&mut self) -> NetResult<()> {

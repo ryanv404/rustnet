@@ -212,12 +212,11 @@ impl Client {
     ///
     /// Returns an error `TcpStream::connect` is unable to connect to the the
     /// given `addr`.
-    #[must_use]
     pub fn new(method: Method, addr: &str, path: &str) -> NetResult<Self> {
-        Client::builder()
+        ClientBuilder::new()
             .method(method)
-            .addr(&addr)
-            .path(&path)
+            .addr(addr)
+            .path(path)
             .build()
     }
 
@@ -227,12 +226,11 @@ impl Client {
     /// 
     /// Returns an error `TcpStream::connect` is unable to connect to the the
     /// given `addr`.
-    #[must_use]
     pub fn send(method: Method, addr: &str, path: &str) -> NetResult<Self> {
-        Client::builder()
+        ClientBuilder::new()
             .method(method)
-            .addr(&addr)
-            .path(&path)
+            .addr(addr)
+            .path(path)
             .send()
     }
 
@@ -316,7 +314,7 @@ impl Client {
 
             if self.req
                 .as_ref()
-                .is_some_and(|req| req.route().is_head() == false)
+                .is_some_and(|req| !req.route().is_head())
             {
                 self.output.print_body(&res.body, &self.output.res_style, out)?;
             }

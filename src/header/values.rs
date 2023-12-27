@@ -25,7 +25,7 @@ impl From<&str> for HeaderValue {
 
 impl From<String> for HeaderValue {
     fn from(s: String) -> Self {
-        if !s.starts_with(" ") && !s.ends_with(" ") {
+        if !s.starts_with(' ') && !s.ends_with(' ') {
             // Avoid a new allocation if possible.
             Self(s.into_bytes())
         } else {

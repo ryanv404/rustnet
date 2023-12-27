@@ -12,23 +12,12 @@ use crate::header_name::CONTENT_TYPE;
 use crate::util;
 
 /// An HTTP response builder object.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResponseBuilder {
     pub status_code: Option<u16>,
     pub version: Option<Version>,
     pub headers: Option<Headers>,
     pub body: Option<Body>,
-}
-
-impl Default for ResponseBuilder {
-    fn default() -> Self {
-        Self {
-            status_code: None,
-            version: None,
-            headers: None,
-            body: None
-        }
-    }
 }
 
 impl ResponseBuilder {
@@ -81,6 +70,10 @@ impl ResponseBuilder {
     }
 
     /// Builds and returns a new `Response`.
+    ///
+    /// # Errors
+    /// 
+    /// Returns an error if an invalid status code was set.
     pub fn build(&mut self) -> NetResult<Response> {
         let mut status_line = match self.status_code.take() {
             Some(code) => StatusLine::try_from(code)?,
