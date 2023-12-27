@@ -31,17 +31,17 @@ impl Default for Route {
 impl Display for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::NotFound => write!(f, "NOT_FOUND"),
-            Self::Shutdown => write!(f, "SHUTDOWN"),
-            Self::Get(ref path) => write!(f, "GET {path}"),
-            Self::Head(ref path) => write!(f, "HEAD {path}"),
-            Self::Post(ref path) => write!(f, "POST {path}"),
-            Self::Put(ref path) => write!(f, "PUT {path}"),
-            Self::Patch(ref path) => write!(f, "PATCH {path}"),
-            Self::Delete(ref path) => write!(f, "DELETE {path}"),
-            Self::Trace(ref path) => write!(f, "TRACE {path}"),
-            Self::Options(ref path) => write!(f, "OPTIONS {path}"),
-            Self::Connect(ref path) => write!(f, "CONNECT {path}"),
+            Self::NotFound => write!(f, "NotFound"),
+            Self::Shutdown => write!(f, "Shutdown"),
+            Self::Get(ref path) => write!(f, "Get {path}"),
+            Self::Head(ref path) => write!(f, "Head {path}"),
+            Self::Post(ref path) => write!(f, "Post {path}"),
+            Self::Put(ref path) => write!(f, "Put {path}"),
+            Self::Patch(ref path) => write!(f, "Patch {path}"),
+            Self::Delete(ref path) => write!(f, "Delete {path}"),
+            Self::Trace(ref path) => write!(f, "Trace {path}"),
+            Self::Options(ref path) => write!(f, "Options {path}"),
+            Self::Connect(ref path) => write!(f, "Connect {path}"),
             Self::Custom((ref method, ref path)) => {
                 write!(f, "{method} {path}")
             },
@@ -52,17 +52,17 @@ impl Display for Route {
 impl Debug for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::NotFound => write!(f, "NOT_FOUND"),
-            Self::Shutdown => write!(f, "SHUTDOWN"),
-            Self::Get(ref path) => write!(f, "GET({path:?})"),
-            Self::Head(ref path) => write!(f, "HEAD({path:?})"),
-            Self::Post(ref path) => write!(f, "POST({path:?})"),
-            Self::Put(ref path) => write!(f, "PUT({path:?})"),
-            Self::Patch(ref path) => write!(f, "PATCH({path:?})"),
-            Self::Delete(ref path) => write!(f, "DELETE({path:?})"),
-            Self::Trace(ref path) => write!(f, "TRACE({path:?})"),
-            Self::Options(ref path) => write!(f, "OPTIONS({path:?})"),
-            Self::Connect(ref path) => write!(f, "CONNECT({path:?})"),
+            Self::NotFound => write!(f, "NotFound"),
+            Self::Shutdown => write!(f, "Shutdown"),
+            Self::Get(ref path) => write!(f, "Get({path:?})"),
+            Self::Head(ref path) => write!(f, "Head({path:?})"),
+            Self::Post(ref path) => write!(f, "Post({path:?})"),
+            Self::Put(ref path) => write!(f, "Put({path:?})"),
+            Self::Patch(ref path) => write!(f, "Patch({path:?})"),
+            Self::Delete(ref path) => write!(f, "Delete({path:?})"),
+            Self::Trace(ref path) => write!(f, "Trace({path:?})"),
+            Self::Options(ref path) => write!(f, "Options({path:?})"),
+            Self::Connect(ref path) => write!(f, "Connect({path:?})"),
             Self::Custom((ref method, ref path)) => {
                 write!(f, "{method}({path:?})")
             },
@@ -161,8 +161,7 @@ impl Display for Router {
             writeln!(f, "Router(")?;
 
             for (route, target) in &self.0 {
-                writeln!(f, "    {route:?} =>")?;
-                writeln!(f, "        {target:?},")?;
+                writeln!(f, "    {route:?} => {target:?},")?;
             }
 
             write!(f, ")")?;
