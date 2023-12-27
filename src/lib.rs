@@ -58,6 +58,14 @@ pub mod colors {
     pub const CLR: &str = "\x1b[0m";
 }
 
-pub const NUM_WORKERS: usize = 4;
-pub const READER_BUFSIZE: usize = 1024;
-pub const WRITER_BUFSIZE: usize = 1024;
+pub mod config {
+    pub const NUM_WORKERS: usize = 4;
+    pub const READER_BUFSIZE: usize = 1024;
+    pub const WRITER_BUFSIZE: usize = 1024;
+    pub const TEST_SERVER_ADDR: &str = "127.0.0.1:7878";
+    pub const DEFAULT_NAME: &str = concat!(
+        env!("CARGO_CRATE_NAME"),
+        "/",
+        env!("CARGO_PKG_VERSION")
+    );
+}

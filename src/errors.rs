@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
@@ -61,7 +62,7 @@ pub enum NetError {
     NoRequest,
     NoResponse,
     NotConnected,
-    Other(String),
+    Other(Cow<'static, str>),
     Parse(NetParseError),
     Read(IoErrorKind),
     UnexpectedEof,

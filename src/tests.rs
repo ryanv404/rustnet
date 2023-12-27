@@ -1,11 +1,6 @@
 use std::error::Error;
 use std::str::{self, FromStr};
 
-use crate::header::names::STANDARD_HEADERS;
-use crate::header_name::{
-    ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
-};
-use crate::util::{self, trim_bytes, trim_start_bytes, trim_end_bytes};
 use crate::{
     Body, Client, Connection, Header, HeaderName, HeaderNameInner,
     HeaderValue, Headers, Method, NetError, NetParseError, NetResult,
@@ -13,6 +8,12 @@ use crate::{
     ServerBuilder, ServerConfig, ServerHandle, Status, StatusCode,
     StatusLine, Target, ThreadPool, Version, Worker,
 };
+use crate::config::DEFAULT_NAME;
+use crate::header::names::STANDARD_HEADERS;
+use crate::header_name::{
+    ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
+};
+use crate::util::{self, trim_bytes, trim_start_bytes, trim_end_bytes};
 
 macro_rules! test_parsing_from_str {
     (
@@ -187,8 +188,8 @@ mod header {
         Header from_str:
         "Accept: */*\r\n" =>
             Header { name: ACCEPT, value: "*/*".into() };
-        "Host: rustnet/0.1\r\n" =>
-            Header { name: HOST, value: "rustnet/0.1".into() };
+        "Host: rustnet/0.1.0\r\n" =>
+            Header { name: HOST, value: DEFAULT_NAME.into() };
         "Content-Length: 123\r\n" =>
             Header { name: CONTENT_LENGTH, value: "123".into() };
         "Connection: keep-alive\r\n" =>

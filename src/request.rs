@@ -8,7 +8,8 @@ use crate::{
     NetParseError, NetResult, Route, Version,
 };
 use crate::colors::{CLR, YLW};
-use crate::header_name::CONTENT_TYPE;
+use crate::config::DEFAULT_NAME;
+use crate::header_name::{ACCEPT, CONTENT_TYPE, USER_AGENT};
 use crate::util;
 
 /// An HTTP request builder object.
@@ -99,7 +100,18 @@ impl RequestBuilder {
             version: self.version.take().unwrap_or_default()
         };
 
-        let headers = self.headers.take().unwrap_or_default();
+        let mut headers = self.headers.take().unwrap_or_default();
+
+        // Ensure Accept header is set.
+        if !headers.contains(&ACCEPT) {
+            headers.accept("*/*");
+        }
+
+        // Ensure User-Agent header is set.
+        if !headers.contains(&USER_AGENT) {
+            headers.user_agent(DEFAULT_NAME);
+        }
+
         let body = self.body.take().unwrap_or_default();
 
         Request { request_line, headers, body }

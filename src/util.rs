@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::{NetError, NetParseError, NetResult};
+use crate::colors::{CLR, RED};
 
 // Trims ASCII whitespace bytes from the start of a slice of bytes.
 #[must_use]
@@ -52,16 +53,29 @@ pub fn trim_bytes(bytes: &[u8]) -> &[u8] {
 /// 
 /// Returns an error if `cargo build` does not return an exit status of 0.
 pub fn build_server() -> NetResult<()> {
-    let mut build_handle = Command::new("cargo")
+    let mut build_handle = match Command::new("cargo")
         .args(["build", "--bin", "server"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()?;
+        .spawn()
+    {
+        Ok(handle) => handle,
+        Err(e) => {
+            eprintln!("{RED}Error while spawning cargo build.{CLR}");
+            return Err(e.into());
+        },
+    };
 
     match build_handle.wait() {
         Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(NetError::Other(format!("Status: {status}"))),
-        Err(e) => Err(e.into()),
+        Ok(status) => {
+            let msg = format!("Status: {status}");
+            Err(NetError::Other(msg.into()))
+        },
+        Err(e) => {
+            eprintln!("{RED}Error while waiting for build to finish.{CLR}");
+            Err(e.into())
+        },
     }
 }
 

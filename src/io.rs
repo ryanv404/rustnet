@@ -9,13 +9,12 @@ use std::str;
 
 use crate::{
     Body, Headers, NetError, NetParseError, NetResult, Request, RequestLine,
-    Response, StatusLine, READER_BUFSIZE, WRITER_BUFSIZE,
+    Response, StatusLine,
 };
 use crate::colors::{CLR, RED};
+use crate::config::{DEFAULT_NAME, READER_BUFSIZE, WRITER_BUFSIZE};
 use crate::header::MAX_HEADERS;
-use crate::header_name::{
-    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER, USER_AGENT,
-};
+use crate::header_name::{CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER};
 use crate::util;
 
 /// Represents the TCP connection between a client and a server.
@@ -234,8 +233,9 @@ impl Connection {
             return Ok(Body::Empty);
         }
 
-        let mut reader = self.take(content_len);
+        let reader_ref = Read::by_ref(self);
 
+        let mut reader = reader_ref.take(content_len);
         reader.read_to_end(buf)?;
 
         Ok(Body::from_content_type(buf, content_type))
@@ -372,18 +372,11 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
-        if !req.headers.contains(&ACCEPT) {
-            req.headers.accept("*/*");
-        }
-
+        // Ensure the Host header is set.
         if !req.headers.contains(&HOST) {
             let stream = self.writer.get_ref();
             let remote = stream.peer_addr()?;
             req.headers.host(remote);
-        }
-
-        if !req.headers.contains(&USER_AGENT) {
-            req.headers.user_agent("rustnet/0.1");
         }
 
         self.write_request_line(&req.request_line)?;
@@ -400,8 +393,9 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
+        // Ensure Server header is set.
         if !res.headers.contains(&SERVER) {
-            res.headers.server("rustnet/0.1");
+            res.headers.server(DEFAULT_NAME);
         }
 
         self.write_status_line(&res.status_line)?;
@@ -426,7 +420,7 @@ impl Connection {
 
         // Update the response headers.
         res.headers.connection("close");
-        res.headers.server("rustnet/0.1");
+        res.headers.server(DEFAULT_NAME);
         res.headers.cache_control("no-cache");
         res.headers.content_length(res.body.len());
         res.headers.content_type("text/plain; charset=utf-8");

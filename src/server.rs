@@ -10,8 +10,9 @@ pub mod cli;
 pub use cli::ServerCli;
 
 use crate::{
-    Connection, NetError, NetResult, Route, Router, ThreadPool, NUM_WORKERS,
+    Connection, NetError, NetResult, Route, Router, ThreadPool,
 };
+use crate::config::NUM_WORKERS;
 
 /// Configures the socket address and the router for a `Server`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

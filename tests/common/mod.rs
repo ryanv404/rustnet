@@ -6,14 +6,15 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
+use rustnet::{
+    Body, Connection, Header, Headers, Method, Request, RequestLine,
+    Response, Status, StatusCode, StatusLine, Version,
+};
+use rustnet::config::DEFAULT_NAME;
 use rustnet::header_name::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
     ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION, CONTENT_LENGTH,
     CONTENT_TYPE, HOST, LOCATION, SERVER,
-};
-use rustnet::{
-    Body, Connection, Header, Headers, Method, Request, RequestLine,
-    Response, Status, StatusCode, StatusLine, Version,
 };
 
 // Start a test server in the background.
@@ -21,10 +22,12 @@ macro_rules! start_test_server {
     () => {
         #[test]
         fn start_test_server() {
+            use rustnet::config::TEST_SERVER_ADDR;
+
             let args = [
                 "run", "--bin", "server", "--",
                 "--test", "--",
-                "127.0.0.1:7878"
+                TEST_SERVER_ADDR
             ];
 
             let _server = Command::new("cargo")
@@ -47,10 +50,12 @@ macro_rules! shutdown_test_server {
     () => {
         #[test]
         fn shutdown_test_server() {
+            use rustnet::config::TEST_SERVER_ADDR;
+
             let args = [
                 "run", "--bin", "client", "--",
                 "--shutdown", "--",
-                "127.0.0.1:7878"
+                TEST_SERVER_ADDR
             ];
 
             let _shutdown = Command::new("cargo")
@@ -73,6 +78,8 @@ macro_rules! run_test {
         $(
             #[test]
             fn $route() {
+                use rustnet::config::TEST_SERVER_ADDR;
+
                 let method = stringify!($method);
                 let test_kind = stringify!($kind);
 
@@ -85,7 +92,7 @@ macro_rules! run_test {
 
                 let addr = match test_kind {
                     "CLIENT" => "httpbin.org:80",
-                    "SERVER" => "127.0.0.1:7878",
+                    "SERVER" => TEST_SERVER_ADDR,
                     _ => unreachable!(),
                 };
 
@@ -148,7 +155,7 @@ pub fn server_is_live(is_shutting_down: bool) -> bool {
 pub fn favicon_route() -> Response {
     let mut res = Response::default();
     res.headers.content_length(1406);
-    res.headers.server("rustnet/0.1");
+    res.headers.server(DEFAULT_NAME);
     res.headers.content_type("image/x-icon");
     res.headers.cache_control("max-age=604800");
     res
@@ -157,7 +164,7 @@ pub fn favicon_route() -> Response {
 pub fn many_methods(content_len: usize, code: u16) -> Response {
     let mut res = Response::default();
     res.status_line.status = Status(StatusCode(code));
-    res.headers.server("rustnet/0.1");
+    res.headers.server(DEFAULT_NAME);
     res.headers.cache_control("no-cache");
     res.headers.content_length(content_len);
     res.headers.content_type("text/plain; charset=utf-8");
@@ -168,7 +175,7 @@ pub fn unknown_route() -> Response {
     let mut res = Response::default();
     res.status_line.status = Status(StatusCode(404));
     res.headers.content_length(482);
-    res.headers.server("rustnet/0.1");
+    res.headers.server(DEFAULT_NAME);
     res.headers.cache_control("no-cache");
     res.headers.content_type("text/html; charset=utf-8");
     res
@@ -178,7 +185,7 @@ pub fn known_route(code: u16, len: usize) -> Response {
     let mut res = Response::default();
     res.status_line.status = Status(StatusCode(code));
     res.headers.content_length(len);
-    res.headers.server("rustnet/0.1");
+    res.headers.server(DEFAULT_NAME);
     res.headers.cache_control("no-cache");
     res.headers.content_type("text/html; charset=utf-8");
     res
@@ -187,7 +194,7 @@ pub fn known_route(code: u16, len: usize) -> Response {
 pub fn get_expected_for_client(method: &str, route: &str) -> Response {
 //    let mut req_headers = Headers::new();
 //    req_headers.accept("*/*");
-//    req_headers.user_agent("rustnet/0.1");
+//    req_headers.user_agent(DEFAULT_NAME);
 //    req_headers.insert(HOST, "httpbin.org:80".into());
 //
 //    let method = Method::from_str(method_str).unwrap();

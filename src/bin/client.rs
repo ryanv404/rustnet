@@ -2,7 +2,7 @@ use std::env;
 use std::io::{BufWriter, stdout};
 
 use rustnet::{Client, ClientCli};
-use rustnet::header_name::{ACCEPT, HOST, USER_AGENT};
+use rustnet::header_name::HOST;
 
 fn main() {
     let cli = ClientCli::parse_args(&mut env::args());
@@ -40,11 +40,7 @@ fn main() {
             return;
         }
     } else if let Some(req) = client.req.as_mut() {
-        // Update request headers for the "request" output style.
-        if !req.headers.contains(&ACCEPT) {
-            req.headers.accept("*/*");
-        }
-
+        // Ensure Host headers is set.
         if !req.headers.contains(&HOST) {
             if let Some(conn) = client.conn.as_mut() {
                 let stream = conn.writer.get_ref();
@@ -53,10 +49,6 @@ fn main() {
                     req.headers.host(remote);
                 }
             }
-        }
-
-        if !req.headers.contains(&USER_AGENT) {
-            req.headers.user_agent("rustnet/0.1");
         }
     }
 

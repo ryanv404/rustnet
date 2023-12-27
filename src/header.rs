@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use crate::{Body, NetError, NetParseError, NetResult};
 use crate::colors::{BLU, CLR, CYAN};
+use crate::config::DEFAULT_NAME;
 use crate::util;
 
 pub mod names;
@@ -214,7 +215,7 @@ impl Headers {
     pub fn default_request_headers(&mut self, body: &Body, addr: SocketAddr) {
         self.insert_if_empty(ACCEPT, "*/*".into());
         self.insert_if_empty(HOST, addr.into());
-        self.insert_if_empty(USER_AGENT, "rustnet/0.1".into());
+        self.insert_if_empty(USER_AGENT, DEFAULT_NAME.into());
         self.insert_if_empty(CONTENT_LENGTH, body.len().into());
 
         if let Some(con_type) = body.as_content_type() {
