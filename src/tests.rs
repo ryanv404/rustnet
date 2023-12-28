@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::error::Error;
 use std::str::{self, FromStr};
 
@@ -421,6 +422,40 @@ mod trait_impls {
 
 mod client_cli {
     use super::*;
-    use crate::ClientCli;
+    use crate::{ClientBuilder, ClientCli, OutputStyle, Parts, Style};
+
+    #[test]
+    fn parse_args() {
+        let mut args = VecDeque::from([
+            "./client", "--output", "Rshb", "--method", "POST", "--header",
+            "content-type:text/html; charset=utf-8", "--body", "Test message.",
+            "--plain", "--no-dates", "httpbin.org/test"
+        ]);
+
+        let test_client = ClientCli::parse_args(&mut args).unwrap();
+
+        let output = OutputStyle {
+            no_dates: true,
+            req_style: Style::Plain(Parts::Line),
+            res_style: Style::Plain(Parts::All),
+        };
+
+        let expected_client = ClientBuilder::<&str>::new()
+            .method(Method::Post)
+            .path("/test")
+            .addr("httpbin.org:80")
+            .header("Content-Type", "text/html; charset=utf-8")
+            .header("Content-Length", "13")
+            .body(Body::Text(Vec::from("Test message.")))
+            .output(output)
+            .build()
+            .unwrap();
+
+        assert_eq!(test_client.do_send, expected_client.do_send);
+        assert_eq!(test_client.debug, expected_client.debug);
+        assert_eq!(test_client.req, expected_client.req);
+        assert_eq!(test_client.res, expected_client.res);
+        assert_eq!(test_client.output, expected_client.output);
+    }
 }
     

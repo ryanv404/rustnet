@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{BufWriter, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 
@@ -13,7 +13,7 @@ pub mod cli;
 pub mod output;
 
 pub use cli::ClientCli;
-pub use output::OutputStyle;
+pub use output::{OutputStyle, Parts, Style};
 
 /// An HTTP client builder object.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -205,11 +205,11 @@ pub struct Client {
 impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         if let Some(req) = self.req.as_ref() {
-            req.fmt(f)?;
+            Display::fmt(req, f)?;
         }
 
         if let Some(res) = self.res.as_ref() {
-            res.fmt(f)?;
+            Display::fmt(res, f)?;
         }
 
         Ok(())

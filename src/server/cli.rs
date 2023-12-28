@@ -14,7 +14,7 @@ pub struct ServerCli {
     pub debug: bool,
     pub do_log: bool,
     pub is_test: bool,
-    pub addr: String,
+    pub addr: Option<String>,
     pub log_file: Option<PathBuf>,
     pub router: Router,
 }
@@ -25,7 +25,7 @@ impl Default for ServerCli {
             debug: false,
             do_log: false,
             is_test: false,
-            addr: String::new(),
+            addr: None,
             log_file: None,
             router: Router::new()
         }
@@ -112,16 +112,16 @@ impl ServerCli {
 
     /// Parses command line arguments into a `ServerCli` object.
     #[must_use]
-    pub fn parse_args(args: &mut VecDeque<String>) -> Self {
+    pub fn parse_args(args: &mut VecDeque<&str>) -> Self {
         let mut cli = Self::new();
 
         let _ = args.pop_front();
 
-        while let Some(opt) = args.pop_front().as_deref() {
+        while let Some(opt) = args.pop_front() {
             if !opt.starts_with("--") {
                 // First non-option argument is the server address.
-                cli.addr = opt.to_string();
-                return cli;
+                cli.addr = Some(opt.to_string());
+                break;
             }
 
             match opt.len() {
@@ -129,7 +129,7 @@ impl ServerCli {
                 2 if opt == "--" => {
                     // First non-option argument is the server address.
                     match args.pop_front() {
-                        Some(addr) => cli.addr = addr,
+                        Some(addr) => cli.addr = Some(addr.to_string()),
                         None => cli.missing_arg("SERVER ADDRESS"),
                     }
 
@@ -146,7 +146,7 @@ impl ServerCli {
                         cli.router.mount_shutdown_route();
                     },
                     // Add a route.
-                    "--file" | "--text" => match args.pop_front().as_deref() {
+                    "--file" | "--text" => match args.pop_front() {
                         Some(arg) => cli.parse_route(opt, arg),
                         None => cli.missing_arg(opt),
                     },
@@ -156,12 +156,12 @@ impl ServerCli {
                 7 if opt == "--debug" => cli.debug = true,
                 // Enable debugging.
                 10 if opt == "--log-file" => {
-                    if let Some(arg) = args.pop_front().as_deref() {
+                    if let Some(arg) = args.pop_front() {
                         cli.log_file = Some(PathBuf::from(arg));
                     }
                 },
                 // Add a favicon route.
-                9 | 11 => match (opt, args.pop_front().as_deref()) {
+                9 | 11 => match (opt, args.pop_front()) {
                     ("--favicon" | "--not-found", Some(arg)) => {
                         cli.parse_route(opt, arg);
                     },
@@ -173,10 +173,6 @@ impl ServerCli {
                 // Unknown option.
                 _ => cli.unknown_opt(opt),
             }
-        }
-
-        if cli.addr.is_empty() {
-            cli.missing_arg("SERVER ADDRESS");
         }
 
         cli

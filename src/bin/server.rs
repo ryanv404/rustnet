@@ -1,12 +1,23 @@
 use std::collections::VecDeque;
 use std::env;
+use std::process;
 
-use rustnet::{NetResult, Router, Server, ServerCli};
+use rustnet::{NetResult, Router, Server, ServerCli, WriteCliError};
 
 fn main() -> NetResult<()> {
-    // Handle command-line options.
-    let mut args = env::args().collect::<VecDeque<String>>();
+    let args = env::args().collect::<VecDeque<String>>();
+
+    let mut args = args
+        .iter()
+        .map(|s| s.as_ref())
+        .collect::<VecDeque<&str>>();
+
     let mut cli = ServerCli::parse_args(&mut args);
+
+    let Some(addr) = cli.addr.take() else {
+        cli.missing_arg("SERVER ADDRESS");
+        process::exit(1);
+    };
 
     // Add some static HTML routes.
     let mut router = Router::new()
@@ -43,7 +54,7 @@ fn main() -> NetResult<()> {
     router.append(&mut cli.router);
 
     // Build the HTTP server.
-    let server = Server::http(&cli.addr)
+    let server = Server::http(&addr)
         .log(cli.do_log)
         .log_file(cli.log_file.take())
         .test_server(cli.is_test)

@@ -6,19 +6,24 @@ use rustnet::ClientCli;
 use rustnet::header_name::HOST;
 
 fn main() {
-    let mut args = env::args().collect::<VecDeque<String>>();
+    let args = env::args().collect::<VecDeque<String>>();
+
+    let mut args = args
+        .iter()
+        .map(|s| s.as_ref())
+        .collect::<VecDeque<&str>>();
+
     let mut client = match ClientCli::parse_args(&mut args) {
+        Ok(ref client) if client.debug => {
+            dbg!(client);
+            return;
+        },
         Ok(client) => client,
         Err(e) => {
             eprintln!("Error while building client.\n{e}");
             return;
         },
     };
-
-    if client.debug {
-        dbg!(&client);
-        return;
-    }
 
     if client.do_send {
         if let Err(ref e) = client.send_request() {

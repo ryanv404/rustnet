@@ -32,7 +32,7 @@ pub mod tui;
 pub mod util;
 
 pub use body::Body;
-pub use client::{Client, ClientBuilder, ClientCli, OutputStyle};
+pub use client::{Client, ClientBuilder, ClientCli, OutputStyle, Parts, Style};
 pub use errors::{NetError, NetParseError, NetResult};
 pub use header::{
     Header, HeaderName, HeaderNameInner, HeaderValue, Headers, header_name,
