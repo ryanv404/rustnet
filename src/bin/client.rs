@@ -1,35 +1,26 @@
+use std::collections::VecDeque;
 use std::env;
 use std::io::{BufWriter, stdout};
 
-use rustnet::{Client, ClientCli};
+use rustnet::ClientCli;
 use rustnet::header_name::HOST;
 
 fn main() {
-    let cli = ClientCli::parse_args(&mut env::args());
-
-    let mut builder = Client::builder();
-    builder
-        .addr(&cli.addr)
-        .path(&cli.path)
-        .method(cli.method.clone())
-        .headers(cli.headers.clone())
-        .body(cli.body.clone())
-        .output(cli.output);
-
-    if cli.debug {
-        dbg!(&builder);
-        return;
-    }
-
-    let mut client = match builder.build() {
+    let mut args = env::args().collect::<VecDeque<String>>();
+    let mut client = match ClientCli::parse_args(&mut args) {
         Ok(client) => client,
-        Err(ref e) => {
+        Err(e) => {
             eprintln!("Error while building client.\n{e}");
             return;
         },
     };
 
-    if cli.do_send {
+    if client.debug {
+        dbg!(&client);
+        return;
+    }
+
+    if client.do_send {
         if let Err(ref e) = client.send_request() {
             eprintln!("Error while sending request.\n{e}");
             return;

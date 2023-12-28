@@ -65,11 +65,20 @@ impl TryFrom<&[u8]> for Method {
     }
 }
 
-impl FromStr for Method {
-    type Err = NetError;
-
-    fn from_str(method: &str) -> NetResult<Self> {
-        Self::try_from(method.as_bytes())
+impl From<&str> for Method {
+    fn from(method: &str) -> Self {
+        match method {
+            "GET" => Self::Get,
+            "PUT" => Self::Put,
+            "POST" => Self::Post,
+            "HEAD" => Self::Head,
+            "PATCH" => Self::Patch,
+            "TRACE" => Self::Trace,
+            "DELETE" => Self::Delete,
+            "OPTIONS" => Self::Options,
+            "CONNECT" => Self::Connect,
+            custom => Self::Custom(custom.to_string()),
+        }
     }
 }
 
@@ -95,6 +104,12 @@ impl Method {
     #[must_use]
     pub fn as_str(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(self.as_bytes())
+    }
+
+    /// Returns true if this `Method` is a custom method.
+    #[must_use]
+    pub const fn is_custom(&self) -> bool {
+        matches!(self, Self::Custom(_))
     }
 }
 

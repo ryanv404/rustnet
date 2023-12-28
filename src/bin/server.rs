@@ -1,10 +1,12 @@
+use std::collections::VecDeque;
 use std::env;
 
 use rustnet::{NetResult, Router, Server, ServerCli};
 
 fn main() -> NetResult<()> {
     // Handle command-line options.
-    let mut cli = ServerCli::parse_args(&mut env::args());
+    let mut args = env::args().collect::<VecDeque<String>>();
+    let mut cli = ServerCli::parse_args(&mut args);
 
     // Add some static HTML routes.
     let mut router = Router::new()
@@ -42,18 +44,20 @@ fn main() -> NetResult<()> {
 
     // Build the HTTP server.
     let server = Server::http(&cli.addr)
-        .do_log(cli.do_log)
-        .is_test_server(cli.is_test_server)
-        .router(&router);
+        .log(cli.do_log)
+        .log_file(cli.log_file.take())
+        .test_server(cli.is_test)
+        .router(&router)
+        .build()?;
 
-    // Print and exit if "--debug" was selected.
+    // Print the `Server` and exit if "--debug" was selected.
     if cli.debug {
-        dbg!(&server);
+        println!("{:#?}", &server);
         return Ok(());
     }
 
     // Start the HTTP server.
-    let handle = server.start()?;
+    let handle = server.start();
 
     // Wait for the server to exit.
     handle.join()?;

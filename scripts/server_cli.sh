@@ -4,6 +4,7 @@
     --log \
     --debug \
     --test \
+    --log-file './log_file.txt' \
     --file 'get:/:static/index.html' \
     --file 'get:/about:static/about.html' \
     --file 'head:/head:static/index.html' \

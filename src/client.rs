@@ -21,6 +21,8 @@ pub struct ClientBuilder<A>
 where
     A: ToSocketAddrs,
 {
+    pub debug: bool,
+    pub do_send: bool,
     pub method: Option<Method>,
     pub addr: Option<A>,
     pub path: Option<Path>,
@@ -36,6 +38,8 @@ where
 {
     fn default() -> Self {
         Self {
+            debug: false,
+            do_send: true,
             method: None,
             addr: None,
             path: None,
@@ -55,6 +59,18 @@ where
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Enable debug printing.
+    pub fn debug(&mut self, do_debug: bool) -> &mut Self {
+        self.debug = do_debug;
+        self
+    }
+
+    /// Set whether to send the request..
+    pub fn do_send(&mut self, do_send: bool) -> &mut Self {
+        self.do_send = do_send;
+        self
     }
 
     /// Sets the HTTP method.
@@ -151,6 +167,8 @@ where
         };
 
         let client = Client {
+            debug: false,
+            do_send: true,
             req: Some(req),
             res: None,
             conn: Some(conn),
@@ -174,8 +192,10 @@ where
 }
 
 /// An HTTP client.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Client {
+    pub debug: bool,
+    pub do_send: bool,
     pub req: Option<Request>,
     pub res: Option<Response>,
     pub conn: Option<Connection>,
@@ -193,6 +213,19 @@ impl Display for Client {
         }
 
         Ok(())
+    }
+}
+
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            debug: false,
+            do_send: true,
+            req: None,
+            res: None,
+            conn: None,
+            output: OutputStyle::default()
+        }
     }
 }
 

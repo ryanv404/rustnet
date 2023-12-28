@@ -4,9 +4,9 @@ use std::str::{self, FromStr};
 use crate::{
     Body, Client, Connection, Header, HeaderName, HeaderNameInner,
     HeaderValue, Headers, Method, NetError, NetParseError, NetResult,
-    Request, RequestLine, Response, Route, RouteBuilder, Router, Server,
-    ServerBuilder, ServerConfig, ServerHandle, Status, StatusCode,
-    StatusLine, Target, ThreadPool, Version, Worker,
+    Request, RequestBuilder, RequestLine, Response, ResponseBuilder, Route,
+    RouteBuilder, Router, Server, ServerBuilder, ServerConfig, ServerHandle,
+    Status, StatusCode, StatusLine, Target, ThreadPool, Version, Worker,
 };
 use crate::config::DEFAULT_NAME;
 use crate::header::names::STANDARD_HEADERS;
@@ -43,10 +43,24 @@ macro_rules! test_parsing_from_int {
     };
 }
 
+macro_rules! test_parsing_from {
+    (
+        $target:ident $label:ident:
+            $( $input:literal => $expected:expr; )+
+            $( BAD_INPUT: $bad_input:literal; )*
+    ) => {
+        #[test]
+        fn $label() {
+            $( assert_eq!($target::from($input), $expected); )+
+            $( assert!($target::from_str($bad_input).is_err()); )*
+        }
+    };
+}
+
 #[cfg(test)]
 mod method {
     use super::*;
-    test_parsing_from_str! {
+    test_parsing_from! {
         Method from_str:
         "GET" => Method::Get;
         "HEAD" => Method::Head;
@@ -390,15 +404,23 @@ mod trait_impls {
     trait_impl_test! [send_types implement Send:
         Body, Client, Connection, Header, HeaderNameInner, HeaderName,
         HeaderValue, Headers, Method, NetError, NetResult<()>,
-        NetParseError, Request, RequestLine, Response, Route, RouteBuilder,
-        Router, Server, ServerBuilder<&str>, ServerConfig, ServerHandle<()>,
-        Status, StatusCode, StatusLine, Target, ThreadPool, Version, Worker];
+        NetParseError, Request, RequestBuilder, RequestLine, Response,
+        ResponseBuilder, Route, RouteBuilder, Router, Server,
+        ServerBuilder<&str>, ServerConfig, ServerHandle<()>, Status,
+        StatusCode, StatusLine, Target, ThreadPool, Version, Worker];
     trait_impl_test! [sync_types implement Sync:
         Body, Client, Connection, Header, HeaderNameInner, HeaderName,
         HeaderValue, Headers, Method, NetError, NetResult<()>,
-        NetParseError, Request, RequestLine, Response, Route, RouteBuilder,
-        Router, Server, ServerBuilder<&str>, ServerConfig, ServerHandle<()>,
-        Status, StatusCode, StatusLine, Target, ThreadPool, Version, Worker];
+        NetParseError, Request, RequestBuilder, RequestLine, Response,
+        ResponseBuilder, Route, RouteBuilder, Router, Server,
+        ServerBuilder<&str>, ServerConfig, ServerHandle<()>, Status,
+        StatusCode, StatusLine, Target, ThreadPool, Version, Worker];
     trait_impl_test! [error_types implement Error:
         NetError, NetParseError];
 }
+
+mod client_cli {
+    use super::*;
+    use crate::ClientCli;
+}
+    

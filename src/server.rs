@@ -1,8 +1,11 @@
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::net::{
     IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs,
 };
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
@@ -20,9 +23,10 @@ pub struct ServerBuilder<A>
 where
     A: ToSocketAddrs,
 {
+    pub do_log: bool,
+    pub is_test: bool,
     pub addr: Option<A>,
-    pub do_logging: bool,
-    pub is_test_server: bool,
+    pub log_file: Option<PathBuf>,
     pub router: Router,
 }
 
@@ -32,9 +36,10 @@ where
 {
     fn default() -> Self {
         Self {
+            do_log: false,
+            is_test: false,
             addr: None,
-            do_logging: false,
-            is_test_server: false,
+            log_file: None,
             router: Router::default()
         }
     }
@@ -64,17 +69,24 @@ where
         self
     }
 
-    /// Enable logging of new connections to stdout (default: disabled).
+    /// Enables test server features for this server.
     #[must_use]
-    pub const fn is_test_server(mut self, is_test: bool) -> Self {
-        self.is_test_server = is_test;
+    pub const fn test_server(mut self, is_test: bool) -> Self {
+        self.is_test = is_test;
         self
     }
 
     /// Enable logging of new connections to stdout (default: disabled).
     #[must_use]
-    pub const fn do_log(mut self, do_log: bool) -> Self {
-        self.do_logging = do_log;
+    pub const fn log(mut self, do_log: bool) -> Self {
+        self.do_log = do_log;
+        self
+    }
+
+    /// Sets a local file to which log messages will be written.
+    #[must_use]
+    pub fn log_file(mut self, path: Option<PathBuf>) -> Self {
+        self.log_file = path;
         self
     }
 
@@ -82,7 +94,9 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if creating the `Listener` fails.
+    /// Returns an error if `TcpListen::bind` fails to bind the provided
+    /// address. If logging to a local file is enabled, an error will be
+    /// returned if the provided file path is invalid.
     pub fn build(self) -> NetResult<Server> {
         let listener = self
             .addr
@@ -90,17 +104,31 @@ where
             .ok_or(NetError::NotConnected)
             .and_then(Listener::bind)?;
 
-        let config = ServerConfig {
-            do_logging: self.do_logging,
-            is_test_server: self.is_test_server,
-            keep_listening: AtomicBool::new(false),
-            router: self.router
+
+        let mut config = ServerConfig {
+            do_log: self.do_log,
+            is_test: self.is_test,
+            keep_listening: AtomicBool::new(true),
+            log_file: None,
+            router: self.router.clone()
         };
 
-        Ok(Server {
+        if let Some(path) = self.log_file.as_ref() {
+            let log_file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?;
+
+            config.do_log = true;
+            config.log_file = Some(Arc::new(Mutex::new(log_file)));
+        }
+
+        let server = Server {
             listener: Arc::new(listener),
-            config: Arc::new(config),
-        })
+            config: Arc::new(config)
+        };
+
+        Ok(server)
     }
 
     /// Builds and starts the server.
@@ -116,33 +144,66 @@ where
 /// Contains the configuration options for a `Server`.
 #[derive(Debug)]
 pub struct ServerConfig {
-    pub do_logging: bool,
-    pub is_test_server: bool,
+    pub do_log: bool,
+    pub is_test: bool,
     pub keep_listening: AtomicBool,
+    pub log_file: Option<Arc<Mutex<File>>>,
     pub router: Router,
 }
 
 impl ServerConfig {
     /// Logs a server start up message.
     pub fn log_start_up(&self, addr: &SocketAddr) {
-        if self.do_logging {
+        if self.do_log {
             let ip = addr.ip();
             let port = addr.port();
+
+            if let Some(file) = self.log_file.as_ref() {
+                let mut handle = file.lock().unwrap();
+                let _ = writeln!(
+                    &mut handle,
+                    "[SERVER] Listening on {ip}:{port}"
+                );
+                let _ = handle.flush();
+                return;
+            }
+
             println!("[SERVER] Listening on {ip}:{port}");
         }
     }
 
     /// Logs a server shutdown message.
     pub fn log_shutdown(&self, conn: &Connection) {
-        if self.do_logging {
+        if self.do_log {
             let ip = conn.remote_ip();
+
+            if let Some(file) = self.log_file.as_ref() {
+                let mut handle = file.lock().unwrap();
+                let _ = writeln!(
+                    &mut handle,
+                    "[SERVER] SHUTDOWN received from {ip}"
+                );
+                let _ = handle.flush();
+                return;
+            }
+
             println!("[SERVER] SHUTDOWN received from {ip}");
         }
     }
 
     /// Logs a server error.
     pub fn log_error(&self, err: &NetError) {
-        if self.do_logging {
+        if self.do_log {
+            if let Some(file) = self.log_file.as_ref() {
+                let mut handle = file.lock().unwrap();
+                let _ = writeln!(
+                    &mut handle,
+                    "[SERVER] Error: {err}"
+                );
+                let _ = handle.flush();
+                return;
+            }
+
             println!("[SERVER] Error: {err}");
         }
     }
@@ -154,8 +215,19 @@ impl ServerConfig {
         route: &Route,
         conn: &Connection
     ) {
-        if self.do_logging {
+        if self.do_log {
             let ip = conn.remote_ip();
+
+            if let Some(file) = self.log_file.as_ref() {
+                let mut handle = file.lock().unwrap();
+                let _ = writeln!(
+                    &mut handle,
+                    "[{ip}|{status}] {route}"
+                );
+                let _ = handle.flush();
+                return;
+            }
+
             println!("[{ip}|{status}] {route}");
         }
     }
@@ -231,8 +303,6 @@ impl Server {
         // Spawn listener thread.
         let handle = spawn(move || {
             config.log_start_up(&listener.local_addr);
-
-            config.keep_listening.store(true, Ordering::Relaxed);
 
             // Create a thread pool to handle incoming requests.
             let pool = ThreadPool::new(NUM_WORKERS, &config);

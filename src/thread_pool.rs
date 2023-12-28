@@ -22,9 +22,7 @@ impl Worker {
         config: Arc<ServerConfig>,
     ) -> Self {
         let handle = thread::spawn(move || {
-            let rx = receiver.lock().unwrap();
-
-            while let Ok(mut conn) = rx.recv() {
+            while let Ok(mut conn) = receiver.lock().unwrap().recv() {
                 let route = match conn.recv_request() {
                     Ok(req) => req.route(),
                     Err(ref err) => {
@@ -47,7 +45,7 @@ impl Worker {
                 }
 
                 // Check for server shutdown signal
-                if config.is_test_server && route.is_shutdown() {
+                if config.is_test && route.is_shutdown() {
                     config.shutdown_server(&conn);
                     break;
                 }
