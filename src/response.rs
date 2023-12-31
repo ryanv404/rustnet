@@ -4,10 +4,10 @@ use std::iter;
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetParseError, NetResult,
-    Status, Target, Version, DEFAULT_NAME,
+    Body, HeaderName, HeaderValue, Headers, NetParseError, NetResult, Status,
+    Target, Version, DEFAULT_NAME,
 };
-use crate::header::names::{CONTENT_LENGTH, CONTENT_TYPE, SERVER};
+use crate::header::names::CONTENT_TYPE;
 use crate::style::colors::{BR_PURP, CLR};
 use crate::util;
 
@@ -94,39 +94,37 @@ impl ResponseBuilder {
     /// Returns an error if an invalid status code was set or if an error
     /// occurred while converting from a route `Target` to a response `Body`.
     pub fn build(&mut self) -> NetResult<Response> {
-        let mut res = Response {
-            status_line: StatusLine {
-                version: self.version.take().unwrap_or_default(),
-                status: self.status.take().unwrap_or_else(
-                    || Ok(Status::default()))?,
-            },
-            headers: self.headers.take().unwrap_or_default(),
-            body: self.body.take().unwrap_or(Ok(Body::Empty))?
+        let version = self.version.take().unwrap_or_default();
+        let headers = self.headers.take().unwrap_or_default();
+
+        let status_line = match self.status.take() {
+            Some(Err(e)) => Err(e)?,
+            Some(Ok(status)) => StatusLine { version, status },
+            None => StatusLine { version, status: Status::default() },
         };
 
-        // Ensure the Server header is set
-        if !res.headers.contains(&SERVER) {
-            res.headers.server(DEFAULT_NAME);
-        }
+        let mut res = match self.body.take() {
+            Some(Err(e)) => Err(e)?,
+            Some(Ok(body)) => Response { status_line, headers, body },
+            None => Response { status_line, headers, body: Body::default() },
+        };
 
-        // Ensure the Cache-Control header is set.
-        if res.body.is_favicon() {
-            res.headers.cache_control("max-age=604800");
-        } else {
-            res.headers.cache_control("no-cache");
-        }
+        // Ensure standard response headers are set.
+        res.headers.server(DEFAULT_NAME);
+        res.headers.cache_control("no-cache");
 
         if !res.body.is_empty() {
-            // Ensure the Content-Length header is set
-            if !res.headers.contains(&CONTENT_LENGTH) {
-                res.headers.content_length(res.body.len());
+            // Cache favicon for 1 week.
+            if res.body.is_favicon() {
+                res.headers.cache_control("max-age=604800");
             }
 
-            // Ensure the Content-Type header is set
-            if !res.headers.contains(&CONTENT_TYPE) {
-                if let Some(cont_type) = res.body.as_content_type() {
-                    res.headers.content_type(cont_type);
-                }
+            // Ensure the Content-Length is set
+            res.headers.content_length(res.body.len());
+
+            // Ensure the Content-Type is set
+            if let Some(content_type) = res.body.as_content_type() {
+                res.headers.content_type(content_type);
             }
         }
 
@@ -389,20 +387,6 @@ impl Response {
     /// Inserts a header into the `Response`.
     pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
         self.headers.insert(name, value);
-    }
-
-    /// Returns true if a body is permitted for this `Response`.
-    #[must_use]
-    pub fn body_is_permitted(&self, method: &Method) -> bool {
-        match self.status_code() {
-            // 1xx (Informational), 204 (No Content), and 304 (Not Modified).
-            100..=199 | 204 | 304 => false,
-            // CONNECT responses with a 2xx (Success) status.
-            200..=299 if *method == Method::Connect => false,
-            // HEAD responses.
-            _ if *method == Method::Head => false,
-            _ => true,
-        }
     }
 
     /// Returns a reference to the message `Body`.

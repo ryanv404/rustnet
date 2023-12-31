@@ -162,7 +162,7 @@ impl ClientCli {
             // Set the URI path.
             "-P" | "--path" => match args.pop_front() {
                 Some(path) => {
-                    self.path = UriPath(path.trim().to_ascii_lowercase());
+                    self.path = path.into();
                 },
                 None => self.missing_arg(opt),
             },
@@ -185,7 +185,10 @@ impl ClientCli {
             },
             // Set the request body.
             "-B" | "--body" => match args.pop_front() {
-                Some(body) => self.body = Body::Text(Vec::from(body.trim())),
+                Some(body) => {
+                    let body = Vec::from(body.trim());
+                    self.body = Body::Text(body.into());
+                },
                 None => self.missing_arg(opt),
             },
             // Set the output style based on a format string.
@@ -201,7 +204,7 @@ impl ClientCli {
     pub fn handle_uri(&mut self, arg: &str) {
         match util::parse_uri(arg).ok() {
             Some((addr, path)) if self.path.is_default() => {
-                self.path = UriPath(path.trim().to_ascii_lowercase());
+                self.path = path.into();
                 self.addr = Some(addr.trim().to_ascii_lowercase());
             },
             // Do not clobber a previously set path.

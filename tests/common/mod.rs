@@ -1,6 +1,6 @@
 #![allow(unused_macros)]
 
-use rustnet::{Request, Response};
+use rustnet::Response;
 
 // Start a test server in the background.
 macro_rules! start_test_server {
@@ -76,16 +76,15 @@ macro_rules! run_test {
                 let method = stringify!($method);
 
                 let route = match concat!("/", stringify!($route)) {
+                    "/unknown" => String::from("/unknown"),
                     "/many_methods" => String::from("/many_methods"),
                     "/known" => format!("/{}", method.to_ascii_lowercase()),
-                    "/unknown" => String::from("/unknown"),
                     route => route.replace("_", "/"),
                 };
 
                 let (addr, expected_res) = match stringify!($kind) {
                     "CLIENT" => {
-                        let (_req, res) = get_client_expected(method, &route);
-                        ("httpbin.org:80", res)
+                        ("httpbin.org:80", get_client_expected(&route))
                     },
                     "SERVER" => {
                         let res = get_server_expected(method, &route);
@@ -120,118 +119,20 @@ macro_rules! run_test {
     };
 }
 
-pub fn get_known_route_res(route: &str) -> Response {
-    use rustnet::{Status, DEFAULT_NAME};
-
-    let mut res = Response::new();
-    res.headers.server(DEFAULT_NAME);
-    res.headers.cache_control("no-cache");
-    res.headers.content_type("text/html; charset=utf-8");
-
-    match route {
-        "/about" => {
-            res.headers.content_length(455);
-            res.status_line.status = Status(200u16);
-        },
-        "/post" => {
-            res.headers.content_length(575);
-            res.status_line.status = Status(201u16);
-        },
-        "/get"
-            | "/head"
-            | "/put"
-            | "/patch"
-            | "/delete"
-            | "/trace"
-            | "/options"
-            | "/connect" =>
-        {
-            res.headers.content_length(575);
-            res.status_line.status = Status(200u16);
-        },
-        _ => unreachable!(),
-    }
-
-    res
-}
-
-pub fn get_unknown_route_res() -> Response {
-    use rustnet::{Status, DEFAULT_NAME};
-
-    let mut res = Response::new();
-    res.headers.server(DEFAULT_NAME);
-    res.headers.content_length(482);
-    res.headers.cache_control("no-cache");
-    res.status_line.status = Status(404u16);
-    res.headers.content_type("text/html; charset=utf-8");
-    res
-}
-
-pub fn get_favicon_route_res() -> Response {
-    use rustnet::{DEFAULT_NAME};
-
-    let mut res = Response::new();
-    res.headers.server(DEFAULT_NAME);
-    res.headers.content_length(1406);
-    res.headers.content_type("image/x-icon");
-    res.headers.cache_control("max-age=604800");
-    res
-}
-
-pub fn get_many_methods_route_res(method: &str) -> Response {
-    use rustnet::{Status, DEFAULT_NAME};
-
-    let mut res = Response::new();
-    res.headers.server(DEFAULT_NAME);
-    res.headers.cache_control("no-cache");
-    res.headers.content_type("text/plain; charset=utf-8");
-
-    match method {
-        "HEAD" => {
-            res.headers.content_length(23);
-            res.status_line.status = Status(200u16);
-        },
-        "POST" => {
-            res.headers.content_length(23);
-            res.status_line.status = Status(201u16);
-        },
-        "DELETE" => {
-            res.headers.content_length(25);
-            res.status_line.status = Status(200u16);
-        },
-        "GET" | "PUT" => {
-            res.headers.content_length(22);
-            res.status_line.status = Status(200u16);
-        },
-        "PATCH" | "TRACE" => {
-            res.headers.content_length(24);
-            res.status_line.status = Status(200u16);
-        },
-        "OPTIONS" | "CONNECT" => {
-            res.headers.content_length(26);
-            res.status_line.status = Status(200u16);
-        },
-        _ => unreachable!(),
-    }
-
-    res
-}
-
-pub fn get_client_expected(method: &str, route: &str) -> (Request, Response) {
-    use std::str::FromStr;
-    use rustnet::{Method, Status, DEFAULT_NAME};
+pub fn get_client_expected(route: &str) -> Response {
+    use rustnet::Status;
     use rustnet::header::names::{
         ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
         ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONTENT_LENGTH, CONTENT_TYPE,
-        HOST, LOCATION,
+        LOCATION,
     };
 
-    let mut req = Request::new();
-    req.headers.accept("*/*");
-    req.request_line.path = route.into();
-    req.headers.user_agent(DEFAULT_NAME);
-    req.headers.insert(HOST, "httpbin.org:80".into());
-    req.request_line.method = Method::from_str(method).unwrap();
+//    let mut req = Request::new();
+//    req.headers.accept("*/*");
+//    req.request_line.path = route.into();
+//    req.headers.user_agent(DEFAULT_NAME);
+//    req.headers.insert(HOST, "httpbin.org:80".into());
+//    req.request_line.method = Method::from_str(method).unwrap();
 
     let mut res = Response::new();
     res.headers.content_length(0);
@@ -284,15 +185,63 @@ pub fn get_client_expected(method: &str, route: &str) -> (Request, Response) {
         _ => {},
     }
 
-    (req, res)
+    res
 }
 
 pub fn get_server_expected(method: &str, route: &str) -> Response {
+    use rustnet::{Status, DEFAULT_NAME};
+
+    let mut res = Response::new();
+    res.headers.server(DEFAULT_NAME);
+    res.headers.cache_control("no-cache");
+    res.headers.content_type("text/plain; charset=utf-8");
+
     match route {
-        "/unknown" => get_unknown_route_res(),
-        "/favicon.ico" => get_favicon_route_res(),
-        "/many_methods" => get_many_methods_route_res(method),
-        _ if route.starts_with('/') => get_known_route_res(route),
+        "/unknown" => {
+            res.headers.content_length(482);
+            res.status_line.status = Status(404u16);
+            res.headers.content_type("text/html; charset=utf-8");
+        },
+        "/favicon.ico" => {
+            res.headers.content_length(1406);
+            res.headers.content_type("image/x-icon");
+            res.headers.cache_control("max-age=604800");
+        },
+        "/about" => {
+            res.headers.content_length(455);
+            res.headers.content_type("text/html; charset=utf-8");
+        },
+        "/post" => {
+            res.headers.content_length(575);
+            res.status_line.status = Status(201u16);
+            res.headers.content_type("text/html; charset=utf-8");
+        },
+        "/get"
+            | "/head"
+            | "/put"
+            | "/patch"
+            | "/delete"
+            | "/trace"
+            | "/options"
+            | "/connect" =>
+        {
+            res.headers.content_length(575);
+            res.headers.content_type("text/html; charset=utf-8");
+        },
+        "/many_methods" => match method {
+            "HEAD" => res.headers.content_length(23),
+            "POST" => {
+                res.headers.content_length(23);
+                res.status_line.status = Status(201u16);
+            },
+            "DELETE" => res.headers.content_length(25),
+            "GET" | "PUT" => res.headers.content_length(22),
+            "PATCH" | "TRACE" => res.headers.content_length(24),
+            "OPTIONS" | "CONNECT" => res.headers.content_length(26),
+            _ => unreachable!(),
+        },
         _ => unreachable!(),
     }
+
+    res
 }

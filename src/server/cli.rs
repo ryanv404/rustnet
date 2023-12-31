@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::str::FromStr;
 
-use crate::{Method, Route, Router, Target, WriteCliError, TEST_SERVER_ADDR};
+use crate::{Method, Route, Router, WriteCliError, TEST_SERVER_ADDR};
 use crate::style::colors::{BR_GRN, CLR};
 
 /// Contains the parsed server command line arguments.
@@ -51,16 +51,16 @@ impl ServerCli {
             "-I" | "--favicon" => match tokens.next() {
                 Some(path) => {
                     let route = Route::Get("/favicon.ico".into());
-                    let target = Target::File(path.into());
-                    self.router.mount(route, target);
+                    let target = Path::new(path).to_path_buf();
+                    self.router.mount(route, target.into());
                 },
                 None => self.invalid_arg(opt, arg),
             },
             "-0" | "--not-found" => match tokens.next() {
                 Some(path) => {
                     let route = Route::NotFound;
-                    let target = Target::File(path.into());
-                    self.router.mount(route, target);
+                    let target = Path::new(path).to_path_buf();
+                    self.router.mount(route, target.into());
                 },
                 None => self.invalid_arg(opt, arg),
             },
@@ -79,14 +79,19 @@ impl ServerCli {
                     return self.invalid_arg(opt, arg);
                 };
 
-                let target = match opt {
-                    "-T" | "--text" => Target::Text(target.to_string()),
-                    "-F" | "--file" => Target::File(target.into()),
-                    _ => unreachable!(),
-                };
+                let route = Route::new(&method, path.to_ascii_lowercase());
 
-                let route = Route::new(&method, &path.to_ascii_lowercase());
-                self.router.mount(route, target);
+                match opt {
+                    "-T" | "--text" => {
+                        let target = String::from(target);
+                        self.router.mount(route, target.into());
+                    },
+                    "-F" | "--file" => {
+                        let target = Path::new(target).to_path_buf();
+                        self.router.mount(route, target.into());
+                    },
+                    _ => unreachable!(),
+                }
             },
             _ => unreachable!(),
         }
@@ -138,7 +143,37 @@ impl ServerCli {
                     None => cli.missing_arg("SERVER ADDRESS"),
                 },
                 // Handle options.
-                _ if opt.starts_with('-') => cli.handle_opt(opt, args),
+                _ if opt.starts_with('-') => match opt {
+                    // Enable logging of new connections.
+                    "-l" | "--log" => cli.do_log = true,
+                    // Enable debug printing.
+                    "-d" | "--debug" => cli.do_debug = true,
+                    // Print help message.
+                    "-h" | "--help" => cli.print_help(),
+                    // Make the server a test server.
+                    "-t" | "--test" => {
+                        cli.is_test = true;
+                        cli.router.mount_shutdown_route();
+                    },
+                    // Set a local log file.
+                    "-f" | "--log-file" => match args.pop_front() {
+                        Some(arg) => {
+                            cli.do_log = true;
+                            cli.log_file = Some(PathBuf::from(arg));
+                        },
+                        None => cli.missing_arg(opt),
+                    },
+                    // Add a route.
+                    "-F" | "--file"
+                        | "-I" | "--favicon"
+                        | "-0" | "--not-found"
+                        | "-T" | "--text" => match args.pop_front() {
+                        Some(arg) => cli.parse_route(opt, arg),
+                        None => cli.missing_arg(opt),
+                    },
+                    // Unknown option.
+                    _ => cli.unknown_opt(opt),
+                },
                 // First non-option argument is the server address.
                 _ => {
                     cli.addr = Some(opt.to_string());
@@ -148,39 +183,5 @@ impl ServerCli {
         }
 
         cli
-    }
-
-    pub fn handle_opt(&mut self, opt: &str, args: &mut VecDeque<&str>) {
-        match opt {
-            // Enable logging of new connections.
-            "-l" | "--log" => self.do_log = true,
-            // Enable debug printing.
-            "-d" | "--debug" => self.do_debug = true,
-            // Print help message.
-            "-h" | "--help" => self.print_help(),
-            // Make the server a test server.
-            "-t" | "--test" => {
-                self.is_test = true;
-                self.router.mount_shutdown_route();
-            },
-            // Set a local log file.
-            "-f" | "--log-file" => match args.pop_front() {
-                Some(arg) => {
-                    self.do_log = true;
-                    self.log_file = Some(PathBuf::from(arg));
-                },
-                None => self.missing_arg(opt),
-            },
-            // Add a route.
-            "-F" | "--file"
-                | "-I" | "--favicon"
-                | "-0" | "--not-found"
-                | "-T" | "--text" => match args.pop_front() {
-                Some(arg) => self.parse_route(opt, arg),
-                None => self.missing_arg(opt),
-            },
-            // Unknown option.
-            _ => self.unknown_opt(opt),
-        }
     }
 }

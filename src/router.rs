@@ -1,9 +1,9 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::{Body, Method, NetResult, Response, UriPath};
-use crate::util::get_extension;
+use crate::{Body, Method, NetResult, Response, Target, UriPath};
 
 /// Represents a server endpoint defined by an HTTP method and a URI path.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -66,7 +66,7 @@ impl Debug for Route {
 impl Route {
     /// Returns a new `Route` based on the provided method and URI path.
     #[must_use]
-    pub fn new(method: &Method, path: &str) -> Self {
+    pub fn new(method: &Method, path: String) -> Self {
         let path = path.into();
 
         match method {
@@ -272,7 +272,7 @@ impl Router {
     /// Returns the `Target`, if configured, for requests to routes that do
     /// not exist.
     #[must_use]
-    pub fn get_not_found_target(&self) -> Target {
+    pub fn not_found_target(&self) -> Target {
         self.0.get(&Route::NotFound).cloned().unwrap_or(Target::Empty)
     }
 
@@ -280,26 +280,30 @@ impl Router {
     ///
     /// # Errors
     ///
-    /// Returns an error if `Response::from_target` is unable to construct a
-    /// `Response` from the provided `Target` and status code.
+    /// Returns an error if `ResponseBuilder::build` is unable to construct the
+    /// `Response`.
     pub fn resolve(&self, route: &Route) -> NetResult<Response> {
-        let (status_code, target) = match self.get_target(route) {
+        let mut res = match self.get_target(route) {
             // Route not found.
-            Target::NotFound => (404, self.get_not_found_target()),
+            Target::NotFound => {
+                let target = self.not_found_target();
+                Response::builder().status_code(404).target(target).build()?
+            },
             // POST route found.
-            target if route.is_post() => (201, target),
+            target if route.is_post() => {
+                Response::builder().status_code(201).target(target).build()?
+            },
             // Non-POST route found.
-            target => (200, target),
+            target => {
+                Response::builder().status_code(200).target(target).build()?
+            },
         };
 
-        let mut res = Response::builder()
-            .status_code(status_code)
-            .target(target)
-            .build()?;
-
-        // Remove the response body for HEAD requests.
-        if route.is_head() {
-            res.body = Body::Empty;
+        // Remove the body if appropriate.
+        if let Some(method) = route.method() {
+            if Body::should_be_empty(res.status_code(), method) {
+                res.body = Body::Empty;
+            }
         }
 
         Ok(res)
@@ -309,7 +313,7 @@ impl Router {
     #[must_use]
     pub fn get<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Get(path.into());
@@ -322,7 +326,7 @@ impl Router {
     #[must_use]
     pub fn head<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Head(path.into());
@@ -335,7 +339,7 @@ impl Router {
     #[must_use]
     pub fn post<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Post(path.into());
@@ -348,7 +352,7 @@ impl Router {
     #[must_use]
     pub fn put<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Put(path.into());
@@ -361,7 +365,7 @@ impl Router {
     #[must_use]
     pub fn patch<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Patch(path.into());
@@ -374,7 +378,7 @@ impl Router {
     #[must_use]
     pub fn delete<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Delete(path.into());
@@ -387,7 +391,7 @@ impl Router {
     #[must_use]
     pub fn trace<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Trace(path.into());
@@ -400,7 +404,7 @@ impl Router {
     #[must_use]
     pub fn options<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Options(path.into());
@@ -413,7 +417,7 @@ impl Router {
     #[must_use]
     pub fn connect<F, P>(mut self, path: P, file: F) -> Self
     where
-        F: Into<PathBuf>,
+        F: Into<Cow<'static, Path>>,
         P: Into<UriPath>,
     {
         let route = Route::Connect(path.into());
@@ -424,7 +428,7 @@ impl Router {
 
     /// Configures a route that serves a favicon.
     #[must_use]
-    pub fn favicon<F: Into<PathBuf>>(mut self, file: F) -> Self {
+    pub fn favicon<F: Into<Cow<'static, Path>>>(mut self, file: F) -> Self {
         let route = Route::Get("/favicon.ico".into());
         let target = Target::File(file.into());
         self.0.insert(route, target);
@@ -434,7 +438,7 @@ impl Router {
     /// Configures a route that serves a file for routes that are not
     /// found.
     #[must_use]
-    pub fn not_found<F: Into<PathBuf>>(mut self, file: F) -> Self {
+    pub fn not_found<F: Into<Cow<'static, Path>>>(mut self, file: F) -> Self {
         let route = Route::NotFound;
         let target = Target::File(file.into());
         self.0.insert(route, target);
@@ -466,73 +470,73 @@ impl RouteBuilder {
 
     /// Configures a GET route that serves the given `target`.
     #[must_use]
-    pub fn get(mut self, target: Target) -> Self {
+    pub fn get<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Get(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a HEAD route that serves the given `target`.
     #[must_use]
-    pub fn head(mut self, target: Target) -> Self {
+    pub fn head<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Head(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a POST route that serves the given `target`.
     #[must_use]
-    pub fn post(mut self, target: Target) -> Self {
+    pub fn post<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Post(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a PUT route that serves the given `target`.
     #[must_use]
-    pub fn put(mut self, target: Target) -> Self {
+    pub fn put<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Put(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a PATCH route that serves the given `target`.
     #[must_use]
-    pub fn patch(mut self, target: Target) -> Self {
+    pub fn patch<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Patch(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a DELETE route that serves the given `target`.
     #[must_use]
-    pub fn delete(mut self, target: Target) -> Self {
+    pub fn delete<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Delete(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a TRACE route that serves the given `target`.
     #[must_use]
-    pub fn trace(mut self, target: Target) -> Self {
+    pub fn trace<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Trace(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures an OPTIONS route that serves the given `target`.
     #[must_use]
-    pub fn options(mut self, target: Target) -> Self {
+    pub fn options<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Options(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
     /// Configures a CONNECT route that serves the given `target`.
     #[must_use]
-    pub fn connect(mut self, target: Target) -> Self {
+    pub fn connect<T: Into<Target>>(mut self, target: T) -> Self {
         let route = Route::Connect(self.path.clone());
-        self.router.mount(route, target);
+        self.router.mount(route, target.into());
         self
     }
 
@@ -540,178 +544,5 @@ impl RouteBuilder {
     #[must_use]
     pub fn apply(self) -> Router {
         self.router
-    }
-}
-
-/// Target resources served by routes in a `Router`.
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Target {
-    Empty,
-    NotFound,
-    Shutdown,
-    Text(String),
-    Html(String),
-    Json(String),
-    Xml(String),
-    Bytes(Vec<u8>),
-    File(PathBuf),
-    Favicon(PathBuf),
-}
-
-impl Default for Target {
-    fn default() -> Self {
-        Self::Empty
-    }
-}
-
-impl Display for Target {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            Self::Empty => write!(f, "Empty"),
-            Self::NotFound => write!(f, "Not Found"),
-            Self::Shutdown => write!(f, "Shutdown"),
-            Self::Bytes(_) => write!(f, "Bytes(...)"),
-            Self::Text(ref s)
-                | Self::Html(ref s)
-                | Self::Json(ref s)
-                | Self::Xml(ref s) => write!(f, "{s}"),
-            Self::File(ref path) | Self::Favicon(ref path) => {
-                write!(f, "{}", path.display())
-            },
-        }
-    }
-}
-
-impl Debug for Target {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            Self::Empty => write!(f, "Empty"),
-            Self::NotFound => write!(f, "NotFound"),
-            Self::Shutdown => write!(f, "Shutdown"),
-            Self::Text(ref s) => write!(f, "Text({s:?})"),
-            Self::Html(ref s) => write!(f, "Html({s:?})"),
-            Self::Json(ref s) => write!(f, "Json({s:?})"),
-            Self::Xml(ref s) => write!(f, "Xml({s:?})"),
-            Self::Bytes(_) => write!(f, "Bytes(...)"),
-            Self::File(ref path) => {
-                write!(f, "File({:?})", path.display())
-            },
-            Self::Favicon(ref path) => {
-                write!(f, "Favicon({:?})", path.display())
-            },
-        }
-    }
-}
-
-impl From<&str> for Target {
-    fn from(text: &str) -> Self {
-        Self::Text(text.to_string())
-    }
-}
-
-impl From<&[u8]> for Target {
-    fn from(bytes: &[u8]) -> Self {
-        Self::Bytes(bytes.to_vec())
-    }
-}
-
-impl Target {
-    /// Returns a new `Target::Empty` instance.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns true if the target type is `Target::Empty`.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-
-    /// Returns true if the target type is `Target::NotFound`.
-    #[must_use]
-    pub const fn is_not_found(&self) -> bool {
-        matches!(self, Self::NotFound)
-    }
-
-    /// Returns true if the target type is `Target::Shutdown`.
-    #[must_use]
-    pub const fn is_shutdown(&self) -> bool {
-        matches!(self, Self::Shutdown)
-    }
-
-    /// Returns true if the target type is `Target::Text`.
-    #[must_use]
-    pub const fn is_text(&self) -> bool {
-        matches!(self, Self::Text(_))
-    }
-
-    /// Returns true if the target type is `Target::Json`.
-    #[must_use]
-    pub const fn is_json(&self) -> bool {
-        matches!(self, Self::Json(_))
-    }
-
-    /// Returns true if the target type is `Target::Html`.
-    #[must_use]
-    pub const fn is_html(&self) -> bool {
-        matches!(self, Self::Html(_))
-    }
-
-    /// Returns true if the target type is `Target::Xml`.
-    #[must_use]
-    pub const fn is_xml(&self) -> bool {
-        matches!(self, Self::Xml(_))
-    }
-
-    /// Returns true if the target type is `Target::File`.
-    #[must_use]
-    pub const fn is_file(&self) -> bool {
-        matches!(self, Self::File(_))
-    }
-
-    /// Returns true if the target type is `Target::Bytes`.
-    #[must_use]
-    pub const fn is_bytes(&self) -> bool {
-        matches!(self, Self::Bytes(_))
-    }
-
-    /// Returns true if the target type is `Target::Favicon`.
-    #[must_use]
-    pub const fn is_favicon(&self) -> bool {
-        matches!(self, Self::Favicon(_))
-    }
-
-    /// Returns the `Target` as a Content-Type header value, if possible.
-    #[must_use]
-    pub fn as_content_type(&self) -> Option<&str> {
-        match self {
-            Self::Empty | Self::NotFound => None,
-            Self::Text(_) | Self::Shutdown => Some("text/plain; charset=utf-8"),
-            Self::Html(_) => Some("text/html; charset=utf-8"),
-            Self::Json(_) => Some("application/json"),
-            Self::Xml(_) => Some("application/xml"),
-            Self::Bytes(_) => Some("application/octet-stream"),
-            Self::File(ref path) | Self::Favicon(ref path) => {
-                Self::content_type_from_ext(path)
-            },
-        }
-    }
-
-    /// Returns a Content-Type header value from a file extension, if present.
-    #[must_use]
-    pub fn content_type_from_ext(path: &Path) -> Option<&str> {
-        get_extension(path).and_then(|ext| match ext {
-            "html" | "htm" => Some("text/html; charset=utf-8"),
-            "txt" => Some("text/plain; charset=utf-8"),
-            "json" => Some("application/json"),
-            "xml" => Some("application/xml"),
-            "pdf" => Some("application/pdf"),
-            "ico" => Some("image/x-icon"),
-            "jpg" | "jpeg" => Some("image/jpeg"),
-            "png" => Some("image/png"),
-            "gif" => Some("image/gif"),
-            _ => None,
-        })
     }
 }

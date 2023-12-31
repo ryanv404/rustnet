@@ -426,16 +426,16 @@ impl Connection {
     ///
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
-    pub fn send_500_error(&mut self, err_msg: &str) -> NetResult<()> {
-        let body = Body::Text(err_msg.as_bytes().to_vec());
+    pub fn send_500_error(&mut self, err_msg: String) -> NetResult<()> {
+        let body = Body::Text(err_msg.into_bytes().into());
 
         let res = Response::builder()
             .status_code(500)
             .header("Connection", "close")
             .header("Server", DEFAULT_NAME)
             .header("Cache-Control", "no-cache")
+            .header("Content-Length", &body.len().to_string())
             .header("Content-Type", "text/plain; charset=utf-8")
-            .header("Content-Length", &format!("{}", body.len()))
             .body(body)
             .build()?;
 

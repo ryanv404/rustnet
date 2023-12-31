@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
 
 use crate::{
@@ -413,21 +413,27 @@ mod style {
     }
 
     test_format_str_parsing! {
+        "": Color(None), Color(None);
         "R": Color(Line), Color(None);
         "H": Color(Hdrs), Color(None);
         "B": Color(Body), Color(None);
         "s": Color(None), Color(Line);
         "h": Color(None), Color(Hdrs);
         "b": Color(None), Color(Body);
+        "*": Color(All), Color(All);
+        "Rs*": Color(All), Color(All);
+        "RHBshb": Color(All), Color(All);
         "Rs": Color(Line), Color(Line);
+        "Hh": Color(Hdrs), Color(Hdrs);
+        "Bb": Color(Body), Color(Body);
+        "RHs": Color(LineHdrs), Color(Line);
+        "RBs": Color(LineBody), Color(Line);
+        "HBs": Color(HdrsBody), Color(Line);
+        "Rsh": Color(Line), Color(LineHdrs);
+        "Rsb": Color(Line), Color(LineBody);
+        "Rhb": Color(Line), Color(HdrsBody);
         "RHB": Color(All), Color(None);
         "shb": Color(None), Color(All);
-        "RHsh": Color(LineHdrs), Color(LineHdrs);
-        "HBsb": Color(HdrsBody), Color(LineBody);
-        "RBsb": Color(LineBody), Color(LineBody);
-        "RHBshb": Color(All), Color(All);
-        "*": Color(All), Color(All);
-        "": Color(None), Color(None);
         "xyz3s": Color(None), Color(Line);
     }
 }
@@ -468,12 +474,11 @@ mod client_cli {
                 (ACCEPT, "*/*".into()),
                 (CONTENT_LENGTH, "13".into()),
                 (CACHE_CONTROL, "no-cache".into()),
-                (util::to_titlecase(b"Pineapple").into(),
-                    "yum123".into()),
                 (CONTENT_TYPE, "text/html; charset=utf-8".into()),
+                (util::to_titlecase(b"Pineapple").into(), "yum123".into())
             ])),
             body: Body::Text(
-                Vec::from("This is a test meSSage :) in the request bOdy.")
+                b"This is a test meSSage :) in the request bOdy."[..].into()
             ),
             ..ClientCli::default()
         };
@@ -506,7 +511,7 @@ mod server_cli {
             "./server", "--test", "-d",
             "--log-file", "./log_file.txt",
             "-I", "./favicon.ico",
-            "-0", "./static/error_404.html",
+            "-0", "./error_404.html",
             "-T", "pUt:/put:test message1.",
             "-T", "pAtch:/patCh:test message2.",
             "-T", "DeleTe:/dEletE:test message3.",
@@ -526,22 +531,22 @@ mod server_cli {
             log_file: Some(PathBuf::from("./log_file.txt")),
             router: Router(BTreeMap::from([
                 (Route::Shutdown, Target::Shutdown),
-                (Route::NotFound,
-                    Target::File("./static/error_404.html".into())),
-                (Route::Get("/get".into()),
-                    Target::File("./static/get.html".into())),
-                (Route::Put("/put".into()),
-                    Target::Text("test message1.".to_string())),
-                (Route::Post("/post".into()),
-                    Target::File("./static/post.html".into())),
-                (Route::Head("/head".into()),
-                    Target::File("./static/head.html".into())),
                 (Route::Get("/favicon.ico".into()),
-                    Target::File("./favicon.ico".into())),
+                    Path::new("./favicon.ico").into()),
+                (Route::NotFound,
+                    Path::new("./error_404.html").into()),
+                (Route::Get("/get".into()),
+                    Path::new("./static/get.html").into()),
+                (Route::Post("/post".into()),
+                    Path::new("./static/post.html").into()),
+                (Route::Head("/head".into()),
+                    Path::new("./static/head.html").into()),
+                (Route::Put("/put".into()),
+                    Target::Text(b"test message1."[..].into())),
                 (Route::Patch("/patch".into()),
-                    Target::Text("test message2.".to_string())),
+                    Target::Text(b"test message2."[..].into())),
                 (Route::Delete("/delete".into()),
-                    Target::Text("test message3.".to_string())),
+                    Target::Text(b"test message3."[..].into())),
             ]))
         };
 

@@ -234,17 +234,11 @@ impl Server {
     }
 
     /// Sends a 500 status response to the client if there is an error.
-    pub fn send_500_error(
-        &self,
-        err: &NetError,
-        conn: &mut Connection
-    ) {
-        let msg = format!("[SERVER] Error: {err}");
-        self.log(&msg);
+    pub fn send_500_error(&self, err: String, conn: &mut Connection) {
+        self.log(&format!("[SERVER] Error: {}", &err));
 
-        if let Err(ref err2) = conn.send_500_error(&err.to_string()) {
-            let msg = format!("[SERVER] Error: {err2}");
-            self.log(&msg);
+        if let Err(ref err2) = conn.send_500_error(err) {
+            self.log(&format!("[SERVER] Error: {err2}"));
         }
     }
 
@@ -252,8 +246,7 @@ impl Server {
     pub fn shutdown_server(&self, conn: &Connection) {
         let ip = conn.remote_addr.ip();
         let port = conn.remote_addr.port();
-        let msg = format!("[SERVER] SHUTDOWN received from {ip}:{port}");
-        self.log(&msg);
+        self.log(&format!("[SERVER] SHUTDOWN received from {ip}:{port}"));
 
         self.keep_listening.store(false, Ordering::Relaxed);
 
@@ -264,8 +257,7 @@ impl Server {
         if let Err(ref err) = TcpStream::connect_timeout(&addr, timeout)
             .and_then(|stream| stream.shutdown(Shutdown::Both))
         {
-            let msg = format!("[SERVER] Error: {err}");
-            self.log(&msg);
+            self.log(&format!("[SERVER] Error: {err}"));
         }
 
         // Give the worker threads some time to shutdown.
@@ -286,8 +278,7 @@ impl Server {
 
             let ip = listener.local_addr.ip();
             let port = listener.local_addr.port();
-            let msg = format!("[SERVER] Listening on {ip}:{port}");
-            server.log(&msg);
+            server.log(&format!("[SERVER] Listening on {ip}:{port}"));
 
             // Create a thread pool to handle incoming requests.
             let pool = ThreadPool::new(NUM_WORKERS, &server);
@@ -303,8 +294,7 @@ impl Server {
                         pool.handle_connection(conn);
                     },
                     Err(ref err) => {
-                        let msg = format!("[SERVER] Error: {err}");
-                        server.log(&msg);
+                        server.log(&format!("[SERVER] Error: {err}"));
                     },
                 }
             }

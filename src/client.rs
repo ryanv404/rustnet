@@ -673,7 +673,7 @@ impl Client {
         if line.trim().is_empty() {
             Ok(Body::Empty)
         } else {
-            Ok(Body::Text(Vec::from(line.trim())))
+            Ok(Body::Text(Vec::from(line.trim()).into()))
         }
     }
 

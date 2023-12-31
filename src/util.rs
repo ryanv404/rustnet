@@ -187,12 +187,6 @@ pub fn build_server() -> NetResult<()> {
     }
 }
 
-/// Returns the file extension, if present, of a `Path` value.
-#[must_use]
-pub fn get_extension(path: &Path) -> Option<&str> {
-    path.extension().and_then(|ext| ext.to_str())
-}
-
 ///// Get the current date and time if the `date` program exists.
 //#[must_use]
 //pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
@@ -247,4 +241,27 @@ pub fn check_server(addr: &str) -> bool {
     }
 
     false
+}
+
+/// Returns the file extension, if present, of a `Path` value.
+#[must_use]
+pub fn get_extension(path: &Path) -> Option<&str> {
+    path.extension().and_then(|ext| ext.to_str())
+}
+
+/// Returns the Content-Type header value from a file extension, if possible.
+#[must_use]
+pub fn content_type_from_ext(path: &Path) -> Option<&'static str> {
+    match get_extension(path) {
+        Some("gif") => Some("image/gif"),
+        Some("html" | "htm") => Some("text/html; charset=utf-8"),
+        Some("ico") => Some("image/x-icon"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("json") => Some("application/json"),
+        Some("pdf") => Some("application/pdf"),
+        Some("png") => Some("image/png"),
+        Some("txt") => Some("text/plain; charset=utf-8"),
+        Some("xml") => Some("application/xml"),
+        _ => None,
+    }
 }

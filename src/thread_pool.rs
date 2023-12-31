@@ -27,7 +27,7 @@ impl Worker {
                 let route = match conn.recv_request() {
                     Ok(req) => req.route(),
                     Err(ref err) => {
-                        server.send_500_error(err, &mut conn);
+                        server.send_500_error(err.to_string(), &mut conn);
                         continue;
                     },
                 };
@@ -35,13 +35,13 @@ impl Worker {
                 let mut res = match server.router.resolve(&route) {
                     Ok(res) => res,
                     Err(ref err) => {
-                        server.send_500_error(err, &mut conn);
+                        server.send_500_error(err.to_string(), &mut conn);
                         continue;
                     },
                 };
 
                 if let Err(ref err) = conn.send_response(&mut res) {
-                    server.send_500_error(err, &mut conn);
+                    server.send_500_error(err.to_string(), &mut conn);
                     continue;
                 }
 
@@ -54,8 +54,7 @@ impl Worker {
                 if server.do_log {
                     let ip = conn.remote_addr.ip();
                     let status = res.status_code();
-                    let msg = format!("[{ip}|{status}] {route}");
-                    server.log(&msg);
+                    server.log(&format!("[{ip}|{status}] {route}"));
                 }
             }
         });

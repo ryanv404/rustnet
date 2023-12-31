@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::iter;
 use std::str::{self, FromStr};
@@ -120,11 +120,11 @@ impl RequestBuilder {
 
 /// The path component of an HTTP URI.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct UriPath(pub String);
+pub struct UriPath(pub Cow<'static, str>);
 
 impl Default for UriPath {
     fn default() -> Self {
-        Self(String::from("/"))
+        Self(Cow::Borrowed("/"))
     }
 }
 
@@ -136,13 +136,13 @@ impl Display for UriPath {
 
 impl From<&str> for UriPath {
     fn from(path: &str) -> Self {
-        Self(path.trim().to_ascii_lowercase())
+        Self(Cow::Owned(path.trim().to_ascii_lowercase()))
     }
 }
 
 impl From<String> for UriPath {
     fn from(path: String) -> Self {
-        path.as_str().into()
+        Self(Cow::Owned(path.trim().to_ascii_lowercase()))
     }
 }
 
@@ -157,22 +157,22 @@ impl TryFrom<&[u8]> for UriPath {
 }
 
 impl UriPath {
-    /// Returns the path as a string slice.
+    /// Returns the URI path as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        self.0.borrow()
     }
 
-    /// Returns the path as a bytes slice.
+    /// Returns the URI path as a bytes slice.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_bytes()
+        self.as_str().as_bytes()
     }
 
     /// Returns true if this `UriPath` contains the default path ("/").
     #[must_use]
     pub fn is_default(&self) -> bool {
-        *self == Self(String::from("/"))
+        self.as_str() == "/"
     }
 }
 
@@ -417,7 +417,7 @@ impl Request {
     /// Returns a `Route` which represents the request `Method` and URI path.
     #[must_use]
     pub fn route(&self) -> Route {
-        Route::new(self.method(), self.path())
+        Route::new(self.method(), self.path().to_string())
     }
 
     /// Returns a reference to the `RequestLine`.
