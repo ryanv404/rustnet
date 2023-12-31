@@ -97,17 +97,19 @@ impl ResponseBuilder {
         let version = self.version.take().unwrap_or_default();
         let headers = self.headers.take().unwrap_or_default();
 
-        let status_line = match self.status.take() {
+        let status = match self.status.take() {
             Some(Err(e)) => Err(e)?,
-            Some(Ok(status)) => StatusLine { version, status },
-            None => StatusLine { version, status: Status::default() },
+            Some(Ok(status)) => status,
+            None => Status::default(),
         };
 
-        let mut res = match self.body.take() {
+        let body = match self.body.take() {
             Some(Err(e)) => Err(e)?,
-            Some(Ok(body)) => Response { status_line, headers, body },
-            None => Response { status_line, headers, body: Body::default() },
+            Some(Ok(body)) => body,
+            None => Body::default(),
         };
+
+        let mut res = Response { version, status, headers, body };
 
         // Ensure standard response headers are set.
         res.headers.server(DEFAULT_NAME);
@@ -132,91 +134,18 @@ impl ResponseBuilder {
     }
 }
 
-/// Contains the components of an HTTP status line.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StatusLine {
+/// Contains the components of an HTTP response.
+#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Response {
     pub version: Version,
     pub status: Status,
-}
-
-impl Display for StatusLine {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{} {}", self.version, self.status)
-    }
-}
-
-impl From<Status> for StatusLine {
-    fn from(status: Status) -> Self {
-        Self {
-            version: Version::default(),
-            status
-        }
-    }
-}
-
-impl FromStr for StatusLine {
-    type Err = NetParseError;
-
-    fn from_str(line: &str) -> Result<Self, Self::Err> {
-        let Some(start_idx) = line.find("HTTP") else {
-            return Err(NetParseError::StatusLine);
-        };
-
-        line[start_idx..]
-            .split_once(' ')
-            .ok_or(NetParseError::StatusLine)
-            .and_then(|(version, status)| {
-                let version = Version::from_str(version.trim())?;
-                let status = Status::from_str(status.trim())?;
-
-                Ok(Self { version, status })
-            })
-    }
-}
-
-impl TryFrom<&[u8]> for StatusLine {
-    type Error = NetParseError;
-
-    fn try_from(line: &[u8]) -> Result<Self, Self::Error> {
-        str::from_utf8(line)
-            .map_err(|_| NetParseError::StatusLine)
-            .and_then(Self::from_str)
-    }
-}
-
-impl TryFrom<u16> for StatusLine {
-    type Error = NetParseError;
-
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
-        Status::try_from(code).map(Into::into)
-    }
-}
-
-impl StatusLine {
-    /// Returns a default `StatusLine` instance.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns the `StatusLine` as a `String` with color formatting.
-    #[must_use]
-    pub fn to_color_string(&self) -> String {
-        format!("{BR_PURP}{self}{CLR}")
-    }
-}
-
-/// Contains the components of an HTTP response.
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Response {
-    pub status_line: StatusLine,
     pub headers: Headers,
     pub body: Body,
 }
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "{}", &self.status_line)?;
+        writeln!(f, "{} {}", self.version, self.status)?;
 
         for (name, value) in &self.headers.0 {
             writeln!(f, "{name}: {value}")?;
@@ -233,12 +162,8 @@ impl Display for Response {
 impl Debug for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         writeln!(f, "Response {{")?;
-        writeln!(f, "    status_line: StatusLine {{")?;
-        write!(f, "        ")?;
-        writeln!(f, "version: {:?},", &self.status_line.version)?;
-        write!(f, "        ")?;
-        writeln!(f, "status: {:?}", &self.status_line.status)?;
-        writeln!(f, "    }},")?;
+        writeln!(f, "    version: {:?},", &self.version)?;
+        writeln!(f, "    status: {:?},", &self.status)?;
         writeln!(f, "    headers: Headers(")?;
         for (name, value) in &self.headers.0 {
             write!(f, "        ")?;
@@ -273,15 +198,12 @@ impl TryFrom<&[u8]> for Response {
 
         let mut lines = trimmed.split(|b| *b == b'\n');
 
-        // Parse the StatusLine.
-        let status_line = lines
-            .next()
-            .ok_or(NetParseError::StatusLine)
-            .and_then(|line| {
-                str::from_utf8(line)
-                    .map_err(|_| NetParseError::StatusLine)
-                    .and_then(StatusLine::from_str)
-            })?;
+        // Parse the status line.
+        let Some(line) = lines.next() else {
+            return Err(NetParseError::StatusLine);
+        };
+
+        let (version, status) = Response::parse_status_line(line)?;
 
         let mut headers = Headers::new();
 
@@ -305,7 +227,7 @@ impl TryFrom<&[u8]> for Response {
 
         // Collect the remaining bytes while restoring the newlines that were
         // removed from each line due to the call to `split` above.
-        let body_bytes = lines
+        let body_vec = lines
             .flat_map(|line| line
                 .iter()
                 .copied()
@@ -313,18 +235,15 @@ impl TryFrom<&[u8]> for Response {
             )
             .collect::<Vec<u8>>();
 
-        // Determine `Body` type using the Content-Type header if present.
+        // Parse the `Body` using the Content-Type header.
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map_or(Cow::Borrowed(""), |value| value.as_str());
+            .map(|value| value.as_str())
+            .unwrap_or(Cow::Borrowed(""));
 
-        let body = if content_type.is_empty() {
-            Body::Empty
-        } else {
-            Body::from_content_type(&body_bytes, &content_type)
-        };
+        let body = Body::from_content_type(&body_vec, &content_type);
 
-        Ok(Self { status_line, headers, body })
+        Ok(Self { version, status, headers, body })
     }
 }
 
@@ -341,34 +260,63 @@ impl Response {
         Self::default()
     }
 
-    /// Returns a reference to the `StatusLine`.
+    /// Parses a bytes slice into a `Version` and a `Status`.
     #[must_use]
-    pub const fn status_line(&self) -> &StatusLine {
-        &self.status_line
+    pub fn parse_status_line(
+        line: &[u8]
+    ) -> Result<(Version, Status), NetParseError> {
+        let status_line = str::from_utf8(line)
+            .map_err(|_| NetParseError::StatusLine)?;
+
+        let start_idx = status_line
+            .find("HTTP")
+            .ok_or(NetParseError::StatusLine)?;
+
+        status_line[start_idx..]
+            .split_once(' ')
+            .ok_or(NetParseError::StatusLine)
+            .and_then(|(version, status)| {
+                let version = Version::from_str(version.trim_end())?;
+                let status = Status::from_str(status.trim())?;
+
+                Ok((version, status))
+            })
     }
 
     /// Returns a reference to the HTTP protocol `Version`.
     #[must_use]
     pub const fn version(&self) -> &Version {
-        &self.status_line.version
+        &self.version
     }
 
     /// Returns a reference to the `Status` for this `Response`.
     #[must_use]
     pub const fn status(&self) -> &Status {
-        &self.status_line.status
+        &self.status
     }
 
     /// Returns the `Status` code.
     #[must_use]
     pub const fn status_code(&self) -> u16 {
-        self.status_line.status.code()
+        self.status.code()
     }
 
     /// Returns the reason phrase for the response `Status`.
     #[must_use]
     pub fn status_msg(&self) -> Cow<'_, str> {
-        self.status_line.status.msg()
+        self.status.msg()
+    }
+
+    /// Returns the status line as a `String` with plain formatting.
+    #[must_use]
+    pub fn status_line_to_plain_string(&self) -> String {
+        format!("{} {}", self.version, self.status)
+    }
+
+    /// Returns the status line as a `String` with color formatting.
+    #[must_use]
+    pub fn status_line_to_color_string(&self) -> String {
+        format!("{BR_PURP}{} {}{CLR}", self.version, self.status)
     }
 
     /// Returns a reference to the headers for this `Response`.

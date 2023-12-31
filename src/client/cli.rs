@@ -162,7 +162,7 @@ impl ClientCli {
             // Set the URI path.
             "-P" | "--path" => match args.pop_front() {
                 Some(path) => {
-                    self.path = path.into();
+                    self.path = path.to_string().into();
                 },
                 None => self.missing_arg(opt),
             },

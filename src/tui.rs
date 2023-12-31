@@ -177,7 +177,7 @@ impl Tui {
                     return Err(NetParseError::Path.into());
                 };
 
-                let req = builder.path(uri.into()).build();
+                let req = builder.path(uri.to_string().into()).build();
                 self.client.req = Some(req);
                 self.client.conn = Some(Connection::try_from(addr.as_str())?);
                 Ok(())

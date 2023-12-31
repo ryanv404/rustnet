@@ -220,8 +220,13 @@ impl Body {
         }
     }
 
+    /// Parses a `Body` from a bytes slice and a Content-Type header value.
     #[must_use]
     pub fn from_content_type(buf: &[u8], content_type: &str) -> Self {
+        if buf.is_empty() || content_type.is_empty() {
+            return Body::Empty;
+        }
+
         match content_type.trim_start() {
             s if s.starts_with("text/html") => {
                 let body = String::from_utf8_lossy(buf);

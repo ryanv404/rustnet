@@ -128,11 +128,11 @@ pub fn get_client_expected(route: &str) -> Response {
     };
 
 //    let mut req = Request::new();
+//    req.method = Method::from_str(method).unwrap();
 //    req.headers.accept("*/*");
 //    req.request_line.path = route.into();
 //    req.headers.user_agent(DEFAULT_NAME);
 //    req.headers.insert(HOST, "httpbin.org:80".into());
-//    req.request_line.method = Method::from_str(method).unwrap();
 
     let mut res = Response::new();
     res.headers.content_length(0);
@@ -146,21 +146,21 @@ pub fn get_client_expected(route: &str) -> Response {
         "/status/101" => {
             res.headers.connection("upgrade");
             res.headers.remove(&CONTENT_LENGTH);
-            res.status_line.status = Status(101u16);
+            res.status = Status(101u16);
         },
         "/status/201" => {
-            res.status_line.status = Status(201u16);
+            res.status = Status(201u16);
         },
         "/status/301" => {
             res.headers.remove(&CONTENT_TYPE);
-            res.status_line.status = Status(301u16);
+            res.status = Status(301u16);
             res.headers.insert(LOCATION, "/redirect/1".into());
         },
         "/status/404" => {
-            res.status_line.status = Status(404u16);
+            res.status = Status(404u16);
         },
         "/status/502" => {
-            res.status_line.status = Status(502u16);
+            res.status = Status(502u16);
         },
         "/xml" => {
             res.headers.content_length(522);
@@ -199,7 +199,7 @@ pub fn get_server_expected(method: &str, route: &str) -> Response {
     match route {
         "/unknown" => {
             res.headers.content_length(482);
-            res.status_line.status = Status(404u16);
+            res.status = Status(404u16);
             res.headers.content_type("text/html; charset=utf-8");
         },
         "/favicon.ico" => {
@@ -213,7 +213,7 @@ pub fn get_server_expected(method: &str, route: &str) -> Response {
         },
         "/post" => {
             res.headers.content_length(575);
-            res.status_line.status = Status(201u16);
+            res.status = Status(201u16);
             res.headers.content_type("text/html; charset=utf-8");
         },
         "/get"
@@ -232,7 +232,7 @@ pub fn get_server_expected(method: &str, route: &str) -> Response {
             "HEAD" => res.headers.content_length(23),
             "POST" => {
                 res.headers.content_length(23);
-                res.status_line.status = Status(201u16);
+                res.status = Status(201u16);
             },
             "DELETE" => res.headers.content_length(25),
             "GET" | "PUT" => res.headers.content_length(22),

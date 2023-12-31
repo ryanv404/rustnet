@@ -111,22 +111,22 @@ impl StyleKind {
         !self.is_none()
     }
 
-    /// Returns true if this `StyleKind` prints the `RequestLine` or the
-    /// `StatusLine`.
+    /// Returns true if this `StyleKind` prints the request line or
+    /// status line.
     #[must_use]
     pub const fn is_first_line(&self) -> bool {
         self.into_parts().is_first_line()
     }
 
-    /// Returns true if this `StyleKind` prints a plain `RequestLine` or
-    /// `StatusLine`.
+    /// Returns true if this `StyleKind` prints a plain request line or
+    /// status line.
     #[must_use]
     pub const fn is_plain_first_line(&self) -> bool {
         self.is_plain() && self.is_first_line()
     }
 
-    /// Returns true if this `StyleKind` prints a color `RequestLine` or
-    /// `StatusLine`.
+    /// Returns true if this `StyleKind` prints a color request line or
+    /// status line.
     #[must_use]
     pub const fn is_color_first_line(&self) -> bool {
         self.is_color() && self.is_first_line()

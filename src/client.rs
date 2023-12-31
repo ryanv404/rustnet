@@ -257,14 +257,9 @@ impl Debug for Client {
 
         if let Some(req) = self.req.as_ref() {
             writeln!(f, "    req: Some(Request {{")?;
-            writeln!(f, "        request_line: RequestLine {{")?;
-            write!(f, "            ")?;
-            writeln!(f, "method: {:?},", &req.request_line.method)?;
-            write!(f, "            ")?;
-            writeln!(f, "path: {:?},", &req.request_line.path)?;
-            write!(f, "            ")?;
-            writeln!(f, "version: {:?},", &req.request_line.version)?;
-            writeln!(f, "        }},")?;
+            writeln!(f, "        method: {:?},", &req.method)?;
+            writeln!(f, "        path: {:?},", &req.path)?;
+            writeln!(f, "        version: {:?},", &req.version)?;
             writeln!(f, "        headers: Headers(")?;
             for (name, value) in &req.headers.0 {
                 write!(f, "            ")?;
@@ -285,12 +280,8 @@ impl Debug for Client {
 
         if let Some(res) = self.res.as_ref() {
             writeln!(f, "    req: Some(Response {{")?;
-            writeln!(f, "        status_line: StatusLine {{")?;
-            write!(f, "            ")?;
-            writeln!(f, "version: {:?},", &res.status_line.version)?;
-            write!(f, "            ")?;
-            writeln!(f, "status: {:?},", &res.status_line.status)?;
-            writeln!(f, "        }},")?;
+            writeln!(f, "        version: {:?},", &res.version)?;
+            writeln!(f, "        status: {:?},", &res.status)?;
             writeln!(f, "        headers: Headers(")?;
             for (name, value) in &res.headers.0 {
                 write!(f, "            ")?;
@@ -476,18 +467,18 @@ impl Client {
     /// Prints the `RequestLine` if appropriate for the `Style`.
     pub fn print_request_line(&self, req: &Request) {
         if self.style.req.is_plain_first_line() {
-            println!("{}", &req.request_line.to_string().trim_end());
+            println!("{}", &req.request_line_to_plain_string().trim_end());
         } else if self.style.req.is_color_first_line() {
-            println!("{}", &req.request_line.to_color_string().trim_end());
+            println!("{}", &req.request_line_to_color_string().trim_end());
         }
     }
 
-    /// Prints the `StatusLine` if appropriate for the `Style`.
+    /// Prints the status line if appropriate for the `Style`.
     pub fn print_status_line(&self, res: &Response) {
         if self.style.res.is_plain_first_line() {
-            println!("{}", &res.status_line.to_string().trim_end());
+            println!("{}", &res.status_line_to_plain_string().trim_end());
         } else if self.style.res.is_color_first_line() {
-            println!("{}", &res.status_line.to_color_string().trim_end());
+            println!("{}", &res.status_line_to_color_string().trim_end());
         }
     }
 
@@ -615,7 +606,7 @@ impl Client {
             io::stdin().lock().read_line(line)?;
 
             if line.starts_with('/') {
-                return Ok(line.trim().into());
+                return Ok(line.trim().to_string().into());
             }
 
             writeln!(

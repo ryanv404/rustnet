@@ -79,7 +79,7 @@ impl ServerCli {
                     return self.invalid_arg(opt, arg);
                 };
 
-                let route = Route::new(&method, path.to_ascii_lowercase());
+                let route = Route::new(method, path.to_ascii_lowercase());
 
                 match opt {
                     "-T" | "--text" => {

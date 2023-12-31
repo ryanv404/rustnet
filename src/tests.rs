@@ -6,9 +6,9 @@ use std::str::{self, FromStr};
 use crate::{
     Body, Client, ClientCli, Connection, Header, HeaderName, HeaderNameInner,
     HeaderValue, Headers, Method, NetError, NetParseError, NetResult,
-    Request, RequestBuilder, RequestLine, Response, ResponseBuilder, Route,
+    Request, RequestBuilder, Response, ResponseBuilder, Route,
     RouteBuilder, Router, Server, ServerBuilder, ServerCli, ServerHandle,
-    Status, StatusLine, Style, StyleKind, StyleParts, Target,
+    Status, Style, StyleKind, StyleParts, Target,
     ThreadPool, Version, Worker, DEFAULT_NAME,
 };
 use crate::header::names::{
@@ -107,60 +107,6 @@ mod version {
         "HTTP/3" => Version::ThreeDotZero;
         BAD_INPUT: "HTTP/1.2";
         BAD_INPUT: "HTTP/1.10";
-    }
-}
-
-#[cfg(test)]
-mod request_line {
-    use super::*;
-
-    test_parsing_from_str! {
-        RequestLine from_str:
-        "GET /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Get, "/test");
-        "HEAD /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Head, "/test");
-        "POST /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Post, "/test");
-        "PUT /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Put, "/test");
-        "PATCH /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Patch, "/test");
-        "DELETE /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Delete, "/test");
-        "TRACE /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Trace, "/test");
-        "OPTIONS /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Options, "/test");
-        "CONNECT /test HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Connect, "/test");
-        "SHUTDOWN / HTTP/1.1\r\n" =>
-            RequestLine::new(Method::Shutdown, "/");
-        BAD_INPUT: "FOO bar baz";
-        BAD_INPUT: "GET /test";
-        BAD_INPUT: "GET";
-    }
-}
-
-#[cfg(test)]
-mod status_line {
-    use super::*;
-
-    test_parsing_from_str! {
-        StatusLine from_str:
-        "HTTP/1.1 100 Continue\r\n" =>
-            StatusLine::try_from(100u16).unwrap();
-        "HTTP/1.1 200 OK\r\n" =>
-            StatusLine::try_from(200u16).unwrap();
-        "HTTP/1.1 301 Moved Permanently\r\n" =>
-            StatusLine::try_from(301u16).unwrap();
-        "HTTP/1.1 403 Forbidden\r\n" =>
-            StatusLine::try_from(403u16).unwrap();
-        "HTTP/1.1 505 HTTP Version Not Supported\r\n" =>
-            StatusLine::try_from(505u16).unwrap();
-        BAD_INPUT: "HTTP/1.1";
-        BAD_INPUT: "200 OK";
-        BAD_INPUT: "FOO bar baz";
     }
 }
 
@@ -292,7 +238,7 @@ mod request {
         let test_req = Request::try_from(&input[..]).unwrap();
 
         let mut expected_req = Request::new();
-        expected_req.request_line.path = "/test".into();
+        expected_req.path = "/test".into();
         expected_req.headers.insert(ACCEPT, "*/*".into());
         expected_req.headers.insert(HOST, "example.com".into());
         expected_req.headers.insert(CONTENT_LENGTH, "0".into());
@@ -378,17 +324,16 @@ mod trait_impls {
     trait_impl_test! [send_types implement Send:
         Body, Client, Connection, Header, HeaderNameInner, HeaderName,
         HeaderValue, Headers, Method, NetError, NetResult<()>,
-        NetParseError, Request, RequestBuilder, RequestLine, Response,
+        NetParseError, Request, RequestBuilder, Response,
         ResponseBuilder, Route, RouteBuilder, Router, Server, ServerBuilder,
-        ServerHandle<()>, Status, StatusLine, Style, Target,
-        ThreadPool, Version, Worker];
+        ServerHandle<()>, Status, Style, Target, ThreadPool, Version, Worker];
     trait_impl_test! [sync_types implement Sync:
         Body, Client, Connection, Header, HeaderNameInner, HeaderName,
         HeaderValue, Headers, Method, NetError, NetResult<()>,
-        NetParseError, Request, RequestBuilder, RequestLine, Response,
+        NetParseError, Request, RequestBuilder, Response,
         ResponseBuilder, Route, RouteBuilder, Router, Server,
-        ServerBuilder, ServerHandle<()>, Status, StatusLine,
-        Style, Target, ThreadPool, Version, Worker];
+        ServerBuilder, ServerHandle<()>, Status, Style, Target, ThreadPool,
+        Version, Worker];
     trait_impl_test! [error_types implement Error:
         NetError, NetParseError];
 }

@@ -81,11 +81,9 @@ impl RequestBuilder {
     /// Builds and returns a new `Request`.
     pub fn build(&mut self) -> Request {
         let mut req = Request {
-            request_line: RequestLine {
-                method: self.method.take().unwrap_or_default(),
-                path: self.path.take().unwrap_or_default(),
-                version: self.version.take().unwrap_or_default()
-            },
+            method: self.method.take().unwrap_or_default(),
+            path: self.path.take().unwrap_or_default(),
+            version: self.version.take().unwrap_or_default(),
             headers: self.headers.take().unwrap_or_default(),
             body: self.body.take().unwrap_or_default()
         };
@@ -134,22 +132,22 @@ impl Display for UriPath {
     }
 }
 
-impl From<&str> for UriPath {
-    fn from(path: &str) -> Self {
-        Self(Cow::Owned(path.trim().to_ascii_lowercase()))
+impl From<&'static str> for UriPath {
+    fn from(path: &'static str) -> Self {
+        Self(Cow::Borrowed(path))
     }
 }
 
 impl From<String> for UriPath {
     fn from(path: String) -> Self {
-        Self(Cow::Owned(path.trim().to_ascii_lowercase()))
+        Self(Cow::Owned(path))
     }
 }
 
-impl TryFrom<&[u8]> for UriPath {
+impl TryFrom<&'static [u8]> for UriPath {
     type Error = NetParseError;
 
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(bytes: &'static [u8]) -> Result<Self, Self::Error> {
         str::from_utf8(bytes)
             .map_err(|_| NetParseError::Path)
             .map(Into::into)
@@ -169,107 +167,26 @@ impl UriPath {
         self.as_str().as_bytes()
     }
 
-    /// Returns true if this `UriPath` contains the default path ("/").
+    /// Returns true if this `UriPath` iss the default path ("/").
     #[must_use]
     pub fn is_default(&self) -> bool {
         self.as_str() == "/"
     }
 }
 
-/// Contains the components of an HTTP request line.
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RequestLine {
+/// Contains the components of an HTTP request.
+#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Request {
     pub method: Method,
     pub path: UriPath,
     pub version: Version,
-}
-
-impl Display for RequestLine {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{} {} {}", &self.method, &self.path, &self.version)
-    }
-}
-
-impl FromStr for RequestLine {
-    type Err = NetParseError;
-
-    fn from_str(line: &str) -> Result<Self, Self::Err> {
-        line.split_once(' ')
-            .ok_or(NetParseError::StatusLine)
-            .and_then(|(method, rest)| {
-                let method = Method::from_str(method.trim())?;
-
-                let (path, version) = rest.split_once(' ')
-                    .ok_or(NetParseError::StatusLine)
-                    .and_then(|(path, version)| {
-                        let path = path.trim().into();
-                        let version = Version::from_str(version.trim())?;
-                        Ok((path, version))
-                    })?;
-
-                Ok(Self { method, path, version })
-            })
-    }
-}
-
-impl TryFrom<&[u8]> for RequestLine {
-    type Error = NetParseError;
-
-    fn try_from(line: &[u8]) -> Result<Self, Self::Error> {
-        str::from_utf8(line)
-            .map_err(|_| NetParseError::RequestLine)
-            .and_then(Self::from_str)
-    }
-}
-
-impl RequestLine {
-    /// Returns a new `RequestLine` instance from the provided HTTP method
-    /// and URI path.
-    #[must_use]
-    pub fn new(method: Method, path: &str) -> Self {
-        Self {
-            method,
-            path: path.into(),
-            version: Version::OneDotOne,
-        }
-    }
-
-    /// Returns a reference to the HTTP `Method`.
-    #[must_use]
-    pub const fn method(&self) -> &Method {
-        &self.method
-    }
-
-    /// Returns the requested URI path as a string slice.
-    #[must_use]
-    pub fn path(&self) -> &str {
-        self.path.as_str()
-    }
-
-    /// Returns a reference to the HTTP protocol `Version`.
-    #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.version
-    }
-
-    /// Returns the `RequestLine` as a `String` with color formatting.
-    #[must_use]
-    pub fn to_color_string(&self) -> String {
-        format!("{BR_YLW}{self}{CLR}")
-    }
-}
-
-/// Contains the components of an HTTP request.
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Request {
-    pub request_line: RequestLine,
     pub headers: Headers,
     pub body: Body,
 }
 
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "{}", &self.request_line)?;
+        writeln!(f, "{} {} {}", &self.method, &self.path, &self.version)?;
 
         for (name, value) in &self.headers.0 {
             writeln!(f, "{name}: {value}")?;
@@ -286,14 +203,9 @@ impl Display for Request {
 impl Debug for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         writeln!(f, "Request {{")?;
-        writeln!(f, "    request_line: RequestLine {{")?;
-        write!(f, "        ")?;
-        writeln!(f, "method: {:?},", &self.request_line.method)?;
-        write!(f, "        ")?;
-        writeln!(f, "path: {:?},", &self.request_line.path)?;
-        write!(f, "        ")?;
-        writeln!(f, "version: {:?}", &self.request_line.version)?;
-        writeln!(f, "    }},")?;
+        writeln!(f, "    method: {:?},", &self.method)?;
+        writeln!(f, "    path: {:?},", &self.path)?;
+        writeln!(f, "    version: {:?}", &self.version)?;
         writeln!(f, "    headers: Headers(")?;
         for (name, value) in &self.headers.0 {
             write!(f, "        ")?;
@@ -328,15 +240,12 @@ impl TryFrom<&[u8]> for Request {
 
         let mut lines = trimmed.split(|b| *b == b'\n');
 
-        // Parse the RequestLine.
-        let request_line = lines
+        // Parse the request line.
+        let line = lines
             .next()
-            .ok_or(NetParseError::RequestLine)
-            .and_then(|line| {
-                str::from_utf8(line)
-                    .map_err(|_| NetParseError::RequestLine)
-                    .and_then(RequestLine::from_str)
-            })?;
+            .ok_or(NetParseError::RequestLine)?;
+
+        let (method, path, version) = Request::parse_request_line(line)?;
 
         let mut headers = Headers::new();
 
@@ -360,7 +269,7 @@ impl TryFrom<&[u8]> for Request {
 
         // Collect the remaining bytes while restoring the newlines that were
         // removed from each line due to the call to `split` above.
-        let body_bytes = lines
+        let body_vec = lines
             .flat_map(|line| line
                 .iter()
                 .copied()
@@ -368,18 +277,15 @@ impl TryFrom<&[u8]> for Request {
             )
             .collect::<Vec<u8>>();
 
-        // Determine `Body` type using the Content-Type header if present.
+        // Parse the `Body` using the Content-Type header.
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map_or(Cow::Borrowed(""), |value| value.as_str());
+            .map(|value| value.as_str())
+            .unwrap_or(Cow::Borrowed(""));
 
-        let body = if content_type.is_empty() {
-            Body::Empty
-        } else {
-            Body::from_content_type(&body_bytes, &content_type)
-        };
+        let body = Body::from_content_type(&body_vec, &content_type);
 
-        Ok(Self { request_line, headers, body })
+        Ok(Self { method, path, version, headers, body })
     }
 }
 
@@ -396,22 +302,47 @@ impl Request {
         Self::default()
     }
 
-    /// Returns a reference to the HTTP `Method`.
+    /// Parses a bytes slice into a `Method`, `UriPath`, and `Version.
+    pub fn parse_request_line(
+        line: &[u8]
+    ) -> Result<(Method, UriPath, Version), NetParseError> {
+        let line_str = str::from_utf8(line)
+            .map_err(|_| NetParseError::RequestLine)?;
+
+        let (method, remaining) = line_str
+            .trim_start()
+            .split_once(' ')
+            .ok_or(NetParseError::RequestLine)?;
+
+        remaining
+            .trim_start()
+            .split_once(' ')
+            .ok_or(NetParseError::RequestLine)
+            .and_then(|(path, version)| {
+                let method = Method::from_str(method.trim_end())?;
+                let path = path.trim_end().to_string().into();
+                let version = Version::from_str(version.trim())?;
+
+                Ok((method, path, version))
+            })
+    }
+
+    /// Returns the HTTP `Method`.
     #[must_use]
-    pub const fn method(&self) -> &Method {
-        &self.request_line.method
+    pub const fn method(&self) -> Method {
+        self.method
     }
 
     /// Returns the requested URI path as a string slice.
     #[must_use]
     pub fn path(&self) -> &str {
-        self.request_line.path.as_str()
+        self.path.as_str()
     }
 
-    /// Returns a reference to the HTTP protocol `Version`.
+    /// Returns the HTTP protocol `Version`.
     #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.request_line.version
+    pub const fn version(&self) -> Version {
+        self.version
     }
 
     /// Returns a `Route` which represents the request `Method` and URI path.
@@ -420,10 +351,21 @@ impl Request {
         Route::new(self.method(), self.path().to_string())
     }
 
-    /// Returns a reference to the `RequestLine`.
+    /// Returns the request line as a `String` with plain formatting.
     #[must_use]
-    pub const fn request_line(&self) -> &RequestLine {
-        &self.request_line
+    pub fn request_line_to_plain_string(&self) -> String {
+        format!("{} {} {}", &self.method, &self.path, &self.version)
+    }
+
+    /// Returns the request line as a `String` with color formatting.
+    #[must_use]
+    pub fn request_line_to_color_string(&self) -> String {
+        format!(
+            "{BR_YLW}{} {} {}{CLR}",
+            &self.method,
+            &self.path,
+            &self.version
+        )
     }
 
     /// Returns a reference to the request headers.

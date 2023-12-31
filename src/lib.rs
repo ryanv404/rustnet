@@ -40,8 +40,8 @@ pub use header::{
 };
 pub use io::{Connection, WriteCliError};
 pub use http::{Method, Status, Version};
-pub use request::{Request, RequestBuilder, RequestLine, UriPath};
-pub use response::{Response, ResponseBuilder, StatusLine};
+pub use request::{Request, RequestBuilder, UriPath};
+pub use response::{Response, ResponseBuilder};
 pub use router::{Route, RouteBuilder, Router};
 pub use server::{
     Server, ServerBuilder, ServerCli, ServerHandle,

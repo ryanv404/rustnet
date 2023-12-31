@@ -66,7 +66,7 @@ impl Debug for Route {
 impl Route {
     /// Returns a new `Route` based on the provided method and URI path.
     #[must_use]
-    pub fn new(method: &Method, path: String) -> Self {
+    pub fn new(method: Method, path: String) -> Self {
         let path = path.into();
 
         match method {
@@ -103,18 +103,22 @@ impl Route {
 
     /// Returns URI path component for this `Route`.
     #[must_use]
-    pub fn path(&self) -> Option<&str> {
+    pub fn path(&self) -> Option<UriPath> {
         match self {
             Self::NotFound | Self::Shutdown => None,
             Self::Get(UriPath(ref path))
-            | Self::Head(UriPath(ref path))
-            | Self::Post(UriPath(ref path))
-            | Self::Put(UriPath(ref path))
-            | Self::Patch(UriPath(ref path))
-            | Self::Delete(UriPath(ref path))
-            | Self::Trace(UriPath(ref path))
-            | Self::Options(UriPath(ref path))
-            | Self::Connect(UriPath(ref path)) => Some(path),
+                | Self::Head(UriPath(ref path))
+                | Self::Post(UriPath(ref path))
+                | Self::Put(UriPath(ref path))
+                | Self::Patch(UriPath(ref path))
+                | Self::Delete(UriPath(ref path))
+                | Self::Trace(UriPath(ref path))
+                | Self::Options(UriPath(ref path))
+                | Self::Connect(UriPath(ref path)) =>
+            {
+                let path = path.clone().into_owned();
+                Some(path.into())
+            },
         }
     }
 
@@ -252,8 +256,8 @@ impl Router {
     /// Returns the `Target` for the given `Route` or `Target::NotFound` if
     /// the route does not exist in the `Router`.
     #[must_use]
-    pub fn get_target(&self, route: &Route) -> Target {
-        match self.0.get(route) {
+    pub fn get_target(&self, route: Route) -> Target {
+        match self.0.get(&route) {
             Some(target) => target.clone(),
             // Allow HEAD requests for all configured GET routes.
             None if route.is_head() => {
@@ -283,7 +287,7 @@ impl Router {
     /// Returns an error if `ResponseBuilder::build` is unable to construct the
     /// `Response`.
     pub fn resolve(&self, route: &Route) -> NetResult<Response> {
-        let mut res = match self.get_target(route) {
+        let mut res = match self.get_target(route.clone()) {
             // Route not found.
             Target::NotFound => {
                 let target = self.not_found_target();
@@ -464,7 +468,7 @@ impl RouteBuilder {
     /// Returns a new `RouteBuilder` instance.
     #[must_use]
     pub fn new(router: Router, path: &str) -> Self {
-        let path = path.into();
+        let path = path.to_string().into();
         Self { router, path }
     }
 
