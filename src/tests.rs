@@ -291,17 +291,15 @@ mod request {
 
         let test_req = Request::try_from(&input[..]).unwrap();
 
-        let mut expected_req = Request::default();
+        let mut expected_req = Request::new();
         expected_req.request_line.path = "/test".into();
-        expected_req.headers = Headers(BTreeMap::from([
-            (ACCEPT, "*/*".into()),
-            (HOST, "example.com".into()),
-            (CONTENT_LENGTH, "0".into()),
-            (USER_AGENT, "xh/0.19.3".into()),
-            (CONNECTION, "keep-alive".into()),
-            ("Pineapple".into(), "pizza".into()),
-            (ACCEPT_ENCODING, "gzip, deflate, br".into())
-        ]));
+        expected_req.headers.insert(ACCEPT, "*/*".into());
+        expected_req.headers.insert(HOST, "example.com".into());
+        expected_req.headers.insert(CONTENT_LENGTH, "0".into());
+        expected_req.headers.insert(USER_AGENT, "xh/0.19.3".into());
+        expected_req.headers.insert(CONNECTION, "keep-alive".into());
+        expected_req.headers.insert("Pineapple".into(), "pizza".into());
+        expected_req.headers.insert(ACCEPT_ENCODING, "gzip, deflate, br".into());
 
         assert_eq!(test_req, expected_req);
     }
@@ -322,13 +320,11 @@ mod response {
 
         let test_res = Response::try_from(&input[..]).unwrap();
 
-        let mut expected_res = Response::default();
-        expected_res.headers = Headers(BTreeMap::from([
-            (SERVER, "example.com".into()),
-            (CONTENT_LENGTH, "0".into()),
-            (CONNECTION, "keep-alive".into()),
-            ("Pineapple".into(), "pizza".into())
-        ]));
+        let mut expected_res = Response::new();
+        expected_res.headers.insert(SERVER, "example.com".into());
+        expected_res.headers.insert(CONTENT_LENGTH, "0".into());
+        expected_res.headers.insert(CONNECTION, "keep-alive".into());
+        expected_res.headers.insert("Pineapple".into(), "pizza".into());
 
         assert_eq!(test_res, expected_res);
     }

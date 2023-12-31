@@ -97,7 +97,8 @@ impl ResponseBuilder {
         let mut res = Response {
             status_line: StatusLine {
                 version: self.version.take().unwrap_or_default(),
-                status: self.status.take().unwrap_or(Ok(Status::default()))?,
+                status: self.status.take().unwrap_or_else(
+                    || Ok(Status::default()))?,
             },
             headers: self.headers.take().unwrap_or_default(),
             body: self.body.take().unwrap_or(Ok(Body::Empty))?

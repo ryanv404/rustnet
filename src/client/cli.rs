@@ -13,6 +13,7 @@ use crate::style::colors::{BR_GRN, BR_RED, CLR};
 use crate::util;
 
 /// Contains the parsed client command line arguments.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientCli {
     pub do_send: bool,

@@ -30,17 +30,17 @@ impl Default for Route {
 impl Display for Route {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::NotFound => write!(f, "NotFound"),
-            Self::Shutdown => write!(f, "Shutdown"),
-            Self::Get(UriPath(ref path)) => write!(f, "Get {path}"),
-            Self::Head(UriPath(ref path)) => write!(f, "Head {path}"),
-            Self::Post(UriPath(ref path)) => write!(f, "Post {path}"),
-            Self::Put(UriPath(ref path)) => write!(f, "Put {path}"),
-            Self::Patch(UriPath(ref path)) => write!(f, "Patch {path}"),
-            Self::Delete(UriPath(ref path)) => write!(f, "Delete {path}"),
-            Self::Trace(UriPath(ref path)) => write!(f, "Trace {path}"),
-            Self::Options(UriPath(ref path)) => write!(f, "Options {path}"),
-            Self::Connect(UriPath(ref path)) => write!(f, "Connect {path}"),
+            Self::NotFound => write!(f, "NOT FOUND"),
+            Self::Shutdown => write!(f, "SHUTDOWN"),
+            Self::Get(UriPath(ref path)) => write!(f, "GET {path}"),
+            Self::Head(UriPath(ref path)) => write!(f, "HEAD {path}"),
+            Self::Post(UriPath(ref path)) => write!(f, "POST {path}"),
+            Self::Put(UriPath(ref path)) => write!(f, "PUT {path}"),
+            Self::Patch(UriPath(ref path)) => write!(f, "PATCH {path}"),
+            Self::Delete(UriPath(ref path)) => write!(f, "DELETE {path}"),
+            Self::Trace(UriPath(ref path)) => write!(f, "TRACE {path}"),
+            Self::Options(UriPath(ref path)) => write!(f, "OPTIONS {path}"),
+            Self::Connect(UriPath(ref path)) => write!(f, "CONNECT {path}"),
         }
     }
 }

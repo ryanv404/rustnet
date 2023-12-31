@@ -220,15 +220,15 @@ impl Server {
                 .append(true)
                 .open(path.as_ref())
             {
-                Ok(ref mut fh) => writeln!(fh, "[SERVER] {msg}"),
+                Ok(ref mut fh) => writeln!(fh, "{msg}"),
                 Err(ref err) => {
-                    eprintln!("[SERVER] {msg}\nLogging error: {err}");
+                    eprintln!("{msg}\nLogging error: {err}");
                     return;
                 },
             };
 
             if let Err(ref err) = write_res {
-                eprintln!("[SERVER] {msg}\nLogging error: {err}");
+                eprintln!("{msg}\nLogging error: {err}");
             }
         }
     }

@@ -174,7 +174,7 @@ impl TryFrom<i32> for Status {
 impl Status {
     /// Returns the `Status` as a bytes slice.
     #[must_use]
-    pub fn as_bytes(&self) -> &'static [u8] {
+    pub const fn as_bytes(&self) -> &'static [u8] {
         match self.0 {
             // 1xx informational status codes.
             100..=199 => self.get_1xx_status_msg(),
@@ -193,7 +193,8 @@ impl Status {
     }
 
     /// Returns the status reason phrase for the given 1xx status code.
-    pub fn get_1xx_status_msg(&self) -> &'static [u8] {
+    #[must_use]
+    pub const fn get_1xx_status_msg(&self) -> &'static [u8] {
         match self.0 {
             // 1xx informational status codes.
             100 => b"100 Continue",
@@ -205,7 +206,8 @@ impl Status {
     }
 
     /// Returns the status reason phrase for the given 2xx status code.
-    pub fn get_2xx_status_msg(&self) -> &'static [u8] {
+    #[must_use]
+    pub const fn get_2xx_status_msg(&self) -> &'static [u8] {
         match self.0 {
             // 2xx success status codes.
             200 => b"200 OK",
@@ -224,7 +226,8 @@ impl Status {
     }
 
     /// Returns the status reason phrase for the given 3xx status code.
-    pub fn get_3xx_status_msg(&self) -> &'static [u8] {
+    #[must_use]
+    pub const fn get_3xx_status_msg(&self) -> &'static [u8] {
         match self.0 {
             // 3xx redirect status codes.
             300 => b"300 Multiple Choices",
@@ -241,7 +244,8 @@ impl Status {
     }
 
     /// Returns the status reason phrase for the given 4xx status code.
-    pub fn get_4xx_status_msg(&self) -> &'static [u8] {
+    #[must_use]
+    pub const fn get_4xx_status_msg(&self) -> &'static [u8] {
         match self.0 {
             // 4xx client error status codes.
             400 => b"400 Bad Request", // No or multiple Host headers, invalid request line.
@@ -294,7 +298,8 @@ impl Status {
     }
 
     /// Returns the status reason phrase for the given 5xx status code.
-    pub fn get_5xx_status_msg(&self) -> &'static [u8] {
+    #[must_use]
+    pub const fn get_5xx_status_msg(&self) -> &'static [u8] {
         match self.0 {
             // 5xx server error status codes.
             500 => b"500 Internal Server Error",
