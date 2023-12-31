@@ -482,8 +482,16 @@ mod client_cli {
 
         assert_eq!(test_cli, expected_cli);
 
-        let test_client = Client::try_from(test_cli).unwrap();
-        let expected_client = Client::try_from(expected_cli).unwrap();
+        let mut test_client = Client::try_from(test_cli).unwrap();
+        let mut expected_client = Client::try_from(expected_cli).unwrap();
+
+        if let Some(req) = test_client.req.as_mut() {
+            req.headers.header("Host", "httpbin.org");
+        }
+
+        if let Some(req) = expected_client.req.as_mut() {
+            req.headers.header("Host", "httpbin.org");
+        }
 
         assert_eq!(test_client, expected_client);
     }
