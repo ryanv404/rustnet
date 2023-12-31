@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-use crate::{Connection, ServerConfig};
+
+use crate::{Connection, Server};
 
 /// Contains the ID and handle for a single worker thread.
 #[derive(Debug)]
@@ -18,39 +19,44 @@ impl Worker {
     /// Panics if there is a problem receiving a `Connection`.
     pub fn new(
         id: usize,
-        receiver: Arc<Mutex<Receiver<Connection>>>,
-        config: Arc<ServerConfig>,
+        server: Arc<Server>,
+        receiver: Arc<Mutex<Receiver<Connection>>>
     ) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(mut conn) = receiver.lock().unwrap().recv() {
                 let route = match conn.recv_request() {
                     Ok(req) => req.route(),
                     Err(ref err) => {
-                        config.send_500_error(err, &mut conn);
+                        server.send_500_error(err, &mut conn);
                         continue;
                     },
                 };
 
-                let mut resp = match config.router.resolve(&route) {
-                    Ok(resp) => resp,
+                let mut res = match server.router.resolve(&route) {
+                    Ok(res) => res,
                     Err(ref err) => {
-                        config.send_500_error(err, &mut conn);
+                        server.send_500_error(err, &mut conn);
                         continue;
                     },
                 };
 
-                if let Err(ref err) = conn.send_response(&mut resp) {
-                    config.send_500_error(err, &mut conn);
+                if let Err(ref err) = conn.send_response(&mut res) {
+                    server.send_500_error(err, &mut conn);
                     continue;
                 }
 
                 // Check for server shutdown signal
-                if config.is_test && route.is_shutdown() {
-                    config.shutdown_server(&conn);
+                if server.is_test_server && route.is_shutdown() {
+                    server.shutdown_server(&conn);
                     break;
                 }
 
-                config.log_route(resp.status_code(), &route, &conn);
+                if server.do_log {
+                    let ip = conn.remote_addr.ip();
+                    let status = res.status_code();
+                    let msg = format!("[{ip}|{status}] {route}");
+                    server.log(&msg);
+                }
             }
         });
 
@@ -75,7 +81,7 @@ impl ThreadPool {
     ///
     /// Panics if the `size` argument is less than one.
     #[must_use]
-    pub fn new(num_workers: usize, config: &Arc<ServerConfig>) -> Self {
+    pub fn new(num_workers: usize, server: &Arc<Server>) -> Self {
         assert!(num_workers > 0);
 
         let (tx, rx) = channel();
@@ -85,9 +91,10 @@ impl ThreadPool {
         let mut workers = Vec::with_capacity(num_workers);
 
         for id in 0..num_workers {
+            let server_clone = server.clone();
             let worker_rx = Arc::clone(&receiver);
-            let config_clone = Arc::clone(config);
-            let worker = Worker::new(id, worker_rx, config_clone);
+            let worker = Worker::new(id, server_clone, worker_rx);
+
             workers.push(worker);
         }
 

@@ -2,7 +2,8 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
-use crate::{NetError, NetParseError, NetResult};
+use crate::NetParseError;
+use crate::util;
 
 /// Header field name.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -12,27 +13,25 @@ pub struct HeaderName {
 
 impl Display for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", &self.to_titlecase())
+        write!(f, "{}", util::to_titlecase(self.as_bytes()))
     }
 }
 
 impl Debug for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{self}")
+        write!(f, "{:?}", self.to_string())
     }
 }
 
 impl From<&str> for HeaderName {
-    fn from(header_name: &str) -> Self {
-        HeaderNameInner::from(header_name).into()
+    fn from(name: &str) -> Self {
+        HeaderNameInner::from(name.to_string()).into()
     }
 }
 
-impl TryFrom<&[u8]> for HeaderName {
-    type Error = NetError;
-
-    fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        HeaderNameInner::try_from(bytes).map(Into::into)
+impl From<String> for HeaderName {
+    fn from(name: String) -> Self {
+        HeaderNameInner::from(name).into()
     }
 }
 
@@ -43,8 +42,17 @@ impl From<HeaderNameInner> for HeaderName {
 }
 
 impl From<StandardHeaderName> for HeaderName {
-    fn from(std_header: StandardHeaderName) -> Self {
-        Self { inner: std_header.into() }
+    fn from(name: StandardHeaderName) -> Self {
+        Self { inner: HeaderNameInner::Standard(name) }
+    }
+}
+
+impl TryFrom<&[u8]> for HeaderName {
+    type Error = NetParseError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let inner = HeaderNameInner::try_from(bytes)?;
+        Ok(Self { inner })
     }
 }
 
@@ -68,37 +76,6 @@ impl HeaderName {
     pub fn as_bytes(&self) -> &[u8] {
         self.inner.as_bytes()
     }
-
-    /// Returns the header name as a title case string.
-    #[must_use]
-    pub fn to_titlecase(&self) -> String {
-        let bytes = self.inner.as_bytes();
-
-        if bytes.is_empty() {
-            return String::new();
-        }
-
-        let mut title = String::with_capacity(bytes.len());
-
-        bytes.split(|&b| b == b'-')
-            .filter(|&part| !part.is_empty())
-            .for_each(|part| {
-                if let Some((first, rest)) = part.split_first() {
-                    // Prepend every part but the first with a hyphen.
-                    if !title.is_empty() {
-                        title.push('-');
-                    }
-
-                    title.push(first.to_ascii_uppercase() as char);
-
-                    if !rest.is_empty() {
-                        title.push_str(&String::from_utf8_lossy(rest));
-                    }
-                }
-            });
-
-        title
-    }
 }
 
 /// Header name representation.
@@ -108,28 +85,33 @@ pub enum HeaderNameInner {
     Custom(String),
 }
 
-impl TryFrom<&[u8]> for HeaderNameInner {
-    type Error = NetError;
-
-    fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        str::from_utf8(bytes)
-            .map_err(|_| NetError::Parse(NetParseError::Header))
-            .map(Into::into)
+impl From<&str> for HeaderNameInner {
+    fn from(name: &str) -> Self {
+        StandardHeaderName::try_from(name.as_bytes())
+            .map_or_else(|_| Self::Custom(name.to_string()), Self::Standard)
     }
 }
 
-impl From<&str> for HeaderNameInner {
-    fn from(header_name: &str) -> Self {
-        StandardHeaderName::from_str(header_name)
-            .map_or_else(
-                |_| Self::Custom(header_name.to_string()),
-                Into::into)
+impl From<String> for HeaderNameInner {
+    fn from(name: String) -> Self {
+        StandardHeaderName::try_from(name.clone())
+            .map_or_else(|_| Self::Custom(name), Self::Standard)
     }
 }
 
 impl From<StandardHeaderName> for HeaderNameInner {
-    fn from(std_header: StandardHeaderName) -> Self {
-        Self::Standard(std_header)
+    fn from(name: StandardHeaderName) -> Self {
+        Self::Standard(name)
+    }
+}
+
+impl TryFrom<&[u8]> for HeaderNameInner {
+    type Error = NetParseError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        str::from_utf8(bytes)
+            .map_err(|_| NetParseError::Header)
+            .map(Into::into)
     }
 }
 
@@ -153,7 +135,7 @@ macro_rules! impl_standard_header_names {
         }
 
         // Constants representing all of the standard header field names.
-        pub mod header_name {
+        pub mod header_names {
             use super::{HeaderName, HeaderNameInner, StandardHeaderName};
             $(
                 pub const $constant: HeaderName = HeaderName {
@@ -168,25 +150,37 @@ macro_rules! impl_standard_header_names {
             }
         }
 
-        impl TryFrom<&[u8]> for StandardHeaderName {
-            type Error = NetError;
+        impl FromStr for StandardHeaderName {
+            type Err = NetParseError;
 
-            fn try_from(name_bytes: &[u8]) -> NetResult<Self> {
-                match name_bytes {
-                    $(
-                        b if b.eq_ignore_ascii_case($bytes) =>
-                            Ok(Self::$variant),
-                    )+
+            fn from_str(header: &str) -> Result<Self, Self::Err> {
+                Self::try_from(header.as_bytes())
+            }
+        }
+
+        impl TryFrom<&[u8]> for StandardHeaderName {
+            type Error = NetParseError;
+
+            fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
+                let lowercase = name.to_ascii_lowercase();
+
+                match lowercase.as_slice() {
+                    $( b if b.eq_ignore_ascii_case($bytes) => Ok(Self::$variant), )+
                     _ => Err(NetParseError::Header)?,
                 }
             }
         }
 
-        impl FromStr for StandardHeaderName {
-            type Err = NetError;
+        impl TryFrom<String> for StandardHeaderName {
+            type Error = NetParseError;
 
-            fn from_str(header: &str) -> NetResult<Self> {
-                Self::try_from(header.as_bytes())
+            fn try_from(name: String) -> Result<Self, Self::Error> {
+                let lowercase = name.to_ascii_lowercase();
+
+                match lowercase.as_bytes() {
+                    $( b if b.eq_ignore_ascii_case($bytes) => Ok(Self::$variant), )+
+                    _ => Err(NetParseError::Header)?,
+                }
             }
         }
 
@@ -350,3 +344,5 @@ impl_standard_header_names! {
     b"x-ua-compatible" => X_UA_COMPATIBLE, XUaCompatible;
     b"x-xss-protection" => X_XSS_PROTECTION, XXssProtection;
 }
+
+pub use self::header_names::*;

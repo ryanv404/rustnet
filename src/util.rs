@@ -1,12 +1,16 @@
+use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::str::FromStr;
+use std::thread;
+use std::time::Duration;
 
 use crate::{NetError, NetParseError, NetResult};
-use crate::colors::{CLR, RED};
+use crate::style::colors::{BR_RED, CLR};
 
 // Trims ASCII whitespace bytes from the start of a slice of bytes.
 #[must_use]
-pub fn trim_start_bytes(bytes: &[u8]) -> &[u8] {
+pub fn trim_start(bytes: &[u8]) -> &[u8] {
     if bytes.is_empty() {
         return bytes;
     }
@@ -24,7 +28,7 @@ pub fn trim_start_bytes(bytes: &[u8]) -> &[u8] {
 
 // Trims ASCII whitespace bytes from the end of a slice of bytes.
 #[must_use]
-pub fn trim_end_bytes(bytes: &[u8]) -> &[u8] {
+pub fn trim_end(bytes: &[u8]) -> &[u8] {
     if bytes.is_empty() {
         return bytes;
     }
@@ -42,47 +46,9 @@ pub fn trim_end_bytes(bytes: &[u8]) -> &[u8] {
 
 // Trims ASCII whitespace bytes from both ends of a slice of bytes.
 #[must_use]
-pub fn trim_bytes(bytes: &[u8]) -> &[u8] {
-    let trimmed = trim_start_bytes(bytes);
-    trim_end_bytes(trimmed)
-}
-
-/// Builds the server binary using `cargo`.
-/// 
-/// # Errors
-/// 
-/// Returns an error if `cargo build` does not return an exit status of 0.
-pub fn build_server() -> NetResult<()> {
-    let mut build_handle = match Command::new("cargo")
-        .args(["build", "--bin", "server"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(handle) => handle,
-        Err(e) => {
-            eprintln!("{RED}Error while spawning cargo build.{CLR}");
-            return Err(e.into());
-        },
-    };
-
-    match build_handle.wait() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => {
-            let msg = format!("Status: {status}");
-            Err(NetError::Other(msg.into()))
-        },
-        Err(e) => {
-            eprintln!("{RED}Error while waiting for build to finish.{CLR}");
-            Err(e.into())
-        },
-    }
-}
-
-/// Returns the file extension, if present, of a `Path` value.
-#[must_use]
-pub fn get_extension(path: &Path) -> Option<&str> {
-    path.extension().and_then(|ext| ext.to_str())
+pub fn trim(bytes: &[u8]) -> &[u8] {
+    let trimmed = trim_start(bytes);
+    trim_end(trimmed)
 }
 
 /// Parses a string slice into a host address and a URI path.
@@ -160,6 +126,73 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
     }
 }
 
+/// Converts a slice of bytes to a titlecase `String`.
+#[must_use]
+pub fn to_titlecase(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+
+    let mut title = String::with_capacity(bytes.len());
+
+    bytes.split(|&b| b == b'-')
+        .filter(|&part| !part.is_empty())
+        .for_each(|part| {
+            if let Some((first, rest)) = part.split_first() {
+                // Prepend every part but the first with a hyphen.
+                if !title.is_empty() {
+                    title.push('-');
+                }
+
+                title.push(first.to_ascii_uppercase() as char);
+
+                if !rest.is_empty() {
+                    title.push_str(&String::from_utf8_lossy(rest));
+                }
+            }
+        });
+
+    title
+}
+
+/// Builds the server binary using `cargo`.
+/// 
+/// # Errors
+/// 
+/// Returns an error if `cargo build` does not return an exit status of 0.
+pub fn build_server() -> NetResult<()> {
+    let mut build_handle = match Command::new("cargo")
+        .args(["build", "--bin", "server"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(handle) => handle,
+        Err(e) => {
+            eprintln!("{BR_RED}Error while spawning cargo build.{CLR}");
+            return Err(e.into());
+        },
+    };
+
+    match build_handle.wait() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => {
+            let msg = format!("Status: {status}");
+            Err(NetError::Other(msg.into()))
+        },
+        Err(e) => {
+            eprintln!("{BR_RED}Error while waiting for build to finish.{CLR}");
+            Err(e.into())
+        },
+    }
+}
+
+/// Returns the file extension, if present, of a `Path` value.
+#[must_use]
+pub fn get_extension(path: &Path) -> Option<&str> {
+    path.extension().and_then(|ext| ext.to_str())
+}
+
 ///// Get the current date and time if the `date` program exists.
 //#[must_use]
 //pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
@@ -193,3 +226,25 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
 //
 //    false
 //}
+
+/// Returns true if a TCP connection can be established with the provided
+/// server address.
+#[must_use]
+pub fn check_server(addr: &str) -> bool {
+    let Ok(socket) = SocketAddr::from_str(addr) else {
+        return false;
+    };
+
+    let timeout = Duration::from_millis(200);
+
+    // Attempt to connect a maximum of five times.
+    for _ in 0..5 {
+        if TcpStream::connect_timeout(&socket, timeout).is_ok() {
+            return true;
+        }
+
+        thread::sleep(timeout);
+    }
+
+    false
+}

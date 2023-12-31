@@ -21,8 +21,8 @@ fn main() -> NetResult<()> {
 
     // Add some static HTML routes.
     let mut router = Router::new()
-        .get("/get", "static/index.html")
         .get("/about", "static/about.html")
+        .get("/get", "static/index.html")
         .head("/head", "static/index.html")
         .post("/post", "static/index.html")
         .put("/put", "static/index.html")
@@ -37,8 +37,7 @@ fn main() -> NetResult<()> {
 
     // Add a single path that serves different resources depending on
     // the HTTP method that is used.
-    router = router
-        .route("/many_methods")
+    router = router.route("/many_methods")
         .get("Hi from the GET route!".into())
         .head("Hi from the HEAD route!".into())
         .post("Hi from the POST route!".into())
@@ -54,24 +53,33 @@ fn main() -> NetResult<()> {
     router.append(&mut cli.router);
 
     // Build the HTTP server.
-    let server = Server::http(&addr)
-        .log(cli.do_log)
-        .log_file(cli.log_file.take())
-        .test_server(cli.is_test)
-        .router(&router)
-        .build()?;
+    let server = match cli.log_file.take() {
+        Some(ref path) => {
+            Server::http(&addr)
+                .router(router)
+                .do_log(cli.do_log)
+                .do_debug(cli.do_debug)
+                .is_test_server(cli.is_test)
+                .log_file(path)
+                .build()?
+        },
+        None => {
+            Server::http(&addr)
+                .router(router)
+                .do_log(cli.do_log)
+                .do_debug(cli.do_debug)
+                .is_test_server(cli.is_test)
+                .build()?
+        },
+    };
 
-    // Print the `Server` and exit if "--debug" was selected.
-    if cli.debug {
+    if server.do_debug {
+        // Debug print the `Server` and exit.
         println!("{:#?}", &server);
-        return Ok(());
+    } else {
+        // Start the HTTP server and wait for it to exit.
+        server.start()?.join()?;
     }
-
-    // Start the HTTP server.
-    let handle = server.start();
-
-    // Wait for the server to exit.
-    handle.join()?;
 
     Ok(())
 }

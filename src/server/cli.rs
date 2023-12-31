@@ -1,33 +1,31 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process;
+use std::str::FromStr;
 
-use crate::{
-    Method, Route, Router, Target, WriteCliError,
-};
-use crate::colors::{CLR, GRN};
-use crate::config::TEST_SERVER_ADDR;
+use crate::{Method, Route, Router, Target, WriteCliError, TEST_SERVER_ADDR};
+use crate::style::colors::{BR_GRN, CLR};
 
 /// Contains the parsed server command line arguments.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerCli {
-    pub debug: bool,
     pub do_log: bool,
+    pub do_debug: bool,
     pub is_test: bool,
+    pub router: Router,
     pub addr: Option<String>,
     pub log_file: Option<PathBuf>,
-    pub router: Router,
 }
 
 impl Default for ServerCli {
     fn default() -> Self {
         Self {
-            debug: false,
             do_log: false,
+            do_debug: false,
             is_test: false,
+            router: Router::new(),
             addr: None,
-            log_file: None,
-            router: Router::new()
+            log_file: None
         }
     }
 }
@@ -42,43 +40,55 @@ impl ServerCli {
     }
 
     /// Parses and inserts a route into the server's router.
-    fn parse_route(&mut self, opt: &str, arg: &str) {
+    pub fn parse_route(&mut self, opt: &str, arg: &str) {
         if arg.is_empty() {
             self.missing_arg(opt);
         }
 
         let mut tokens = arg.splitn(3, ':');
 
-        let tokens = (
-            tokens.next(), tokens.next(), tokens.next()
-        );
-
         match opt {
-            "--favicon" => match tokens.0 {
-                Some(path) => self.router.insert_favicon(path),
-                None => self.invalid_arg(opt, arg),
-            },
-            "--not-found" => match tokens.0 {
-                Some(path) => self.router.insert_not_found(path),
-                None => self.invalid_arg(opt, arg),
-            },
-            "--text" | "--file" => match tokens {
-                (Some(method), Some(path), Some(target)) => {
-                    let method = method.to_ascii_uppercase();
-                    let method = Method::from(method.as_str());
-
-                    let target = match opt {
-                        "--text" => Target::Text(target.to_string()),
-                        "--file" => Target::File(PathBuf::from(target)),
-                        _ => unreachable!(),
-                    };
-
-                    let route = Route::new(&method, path);
+            "-I" | "--favicon" => match tokens.next() {
+                Some(path) => {
+                    let route = Route::Get("/favicon.ico".into());
+                    let target = Target::File(path.into());
                     self.router.mount(route, target);
                 },
-                (_, _, _) => self.invalid_arg(opt, arg),
+                None => self.invalid_arg(opt, arg),
             },
-            _ => self.unknown_opt(opt),
+            "-0" | "--not-found" => match tokens.next() {
+                Some(path) => {
+                    let route = Route::NotFound;
+                    let target = Target::File(path.into());
+                    self.router.mount(route, target);
+                },
+                None => self.invalid_arg(opt, arg),
+            },
+            "-T" | "--text" | "-F" | "--file" => {
+                let (Some(method), Some(path), Some(target)) = (
+                    tokens.next(),
+                    tokens.next(),
+                    tokens.next()
+                ) else {
+                    self.invalid_arg(opt, arg);
+                    return;
+                };
+
+                let method = method.to_ascii_uppercase();
+                let Ok(method) = Method::from_str(method.as_str()) else {
+                    return self.invalid_arg(opt, arg);
+                };
+
+                let target = match opt {
+                    "-T" | "--text" => Target::Text(target.to_string()),
+                    "-F" | "--file" => Target::File(target.into()),
+                    _ => unreachable!(),
+                };
+
+                let route = Route::new(&method, &path.to_ascii_lowercase());
+                self.router.mount(route, target);
+            },
+            _ => unreachable!(),
         }
     }
 
@@ -86,25 +96,25 @@ impl ServerCli {
     pub fn print_help(&self) {
         eprintln!(
             "\
-{GRN}USAGE:{CLR}
+{BR_GRN}USAGE:{CLR}
     http_server [OPTIONS] [--] <SERVER ADDRESS>\n
-{GRN}SERVER ADDRESS:{CLR}
+{BR_GRN}SERVER ADDRESS:{CLR}
     IP:PORT    The server's local IP address and port.\n
-{GRN}OPTIONS:{CLR}
-    --debug          Prints debug information.
-    --help           Prints this help message.
-    --log            Enables logging of connections to stdout.
-    --log-file FILE  Enables logging of connections to FILE.
-    --test           Creates a test server at {TEST_SERVER_ADDR}.\n
-{GRN}ROUTES:{CLR}
-    --text METHOD:URI_PATH:TEXT
-            Adds a route that serves text.
-    --file METHOD:URI_PATH:FILE_PATH
-            Adds a route that serves a file.
-    --favicon FILE_PATH
-            Adds a route that serves a favicon.
-    --not-found FILE_PATH
-            Adds a route that handles 404 Not Found responses.\n"
+{BR_GRN}OPTIONS:{CLR}
+    -d, --debug          Prints debug information.
+    -h, --help           Prints this help message.
+    -l, --log            Enables logging of connections to stdout.
+    -f, --log-file FILE  Enables logging of connections to FILE.
+    -t, --test           Creates a test server at {TEST_SERVER_ADDR}.\n
+{BR_GRN}ROUTES:{CLR}
+    -T, --text METHOD:URI_PATH:TEXT
+        Adds a route that serves text.
+    -F, --file METHOD:URI_PATH:FILE_PATH
+        Adds a route that serves a file.
+    -I, --favicon FILE_PATH
+        Adds a route that serves a favicon.
+    -0, --not-found FILE_PATH
+        Adds a route that handles 404 Not Found responses.\n"
         );
 
         process::exit(0);
@@ -118,63 +128,59 @@ impl ServerCli {
         let _ = args.pop_front();
 
         while let Some(opt) = args.pop_front() {
-            if !opt.starts_with("--") {
+            match opt {
+                // First argument after "--" is the server address.
+                "--" => match args.pop_front() {
+                    Some(arg) => {
+                        cli.addr = Some(arg.to_string());
+                        break;
+                    },
+                    None => cli.missing_arg("SERVER ADDRESS"),
+                },
+                // Handle options.
+                _ if opt.starts_with('-') => cli.handle_opt(opt, args),
                 // First non-option argument is the server address.
-                cli.addr = Some(opt.to_string());
-                break;
-            }
-
-            match opt.len() {
-                // End of options flag.
-                2 if opt == "--" => {
-                    // First non-option argument is the server address.
-                    match args.pop_front() {
-                        Some(addr) => cli.addr = Some(addr.to_string()),
-                        None => cli.missing_arg("SERVER ADDRESS"),
-                    }
-
+                _ => {
+                    cli.addr = Some(opt.to_string());
                     break;
                 },
-                // Enable logging of new connections.
-                5 if opt == "--log" => cli.do_log = true,
-                6 => match opt {
-                    // Print help message.
-                    "--help" => cli.print_help(),
-                    // Make the server a test server.
-                    "--test" => {
-                        cli.is_test = true;
-                        cli.router.mount_shutdown_route();
-                    },
-                    // Add a route.
-                    "--file" | "--text" => match args.pop_front() {
-                        Some(arg) => cli.parse_route(opt, arg),
-                        None => cli.missing_arg(opt),
-                    },
-                    _ => cli.unknown_opt(opt),
-                },
-                // Enable debugging.
-                7 if opt == "--debug" => cli.debug = true,
-                // Enable debugging.
-                10 if opt == "--log-file" => {
-                    if let Some(arg) = args.pop_front() {
-                        cli.log_file = Some(PathBuf::from(arg));
-                    }
-                },
-                // Add a favicon route.
-                9 | 11 => match (opt, args.pop_front()) {
-                    ("--favicon" | "--not-found", Some(arg)) => {
-                        cli.parse_route(opt, arg);
-                    },
-                    ("--favicon" | "--not-found", None) => {
-                        cli.missing_arg(opt);
-                    },
-                    (_, _) => cli.unknown_opt(opt),
-                },
-                // Unknown option.
-                _ => cli.unknown_opt(opt),
             }
         }
 
         cli
+    }
+
+    pub fn handle_opt(&mut self, opt: &str, args: &mut VecDeque<&str>) {
+        match opt {
+            // Enable logging of new connections.
+            "-l" | "--log" => self.do_log = true,
+            // Enable debug printing.
+            "-d" | "--debug" => self.do_debug = true,
+            // Print help message.
+            "-h" | "--help" => self.print_help(),
+            // Make the server a test server.
+            "-t" | "--test" => {
+                self.is_test = true;
+                self.router.mount_shutdown_route();
+            },
+            // Set a local log file.
+            "-f" | "--log-file" => match args.pop_front() {
+                Some(arg) => {
+                    self.do_log = true;
+                    self.log_file = Some(PathBuf::from(arg));
+                },
+                None => self.missing_arg(opt),
+            },
+            // Add a route.
+            "-F" | "--file"
+                | "-I" | "--favicon"
+                | "-0" | "--not-found"
+                | "-T" | "--text" => match args.pop_front() {
+                Some(arg) => self.parse_route(opt, arg),
+                None => self.missing_arg(opt),
+            },
+            // Unknown option.
+            _ => self.unknown_opt(opt),
+        }
     }
 }

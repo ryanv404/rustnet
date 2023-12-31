@@ -1,28 +1,15 @@
-#![allow(unused)]
+#![allow(unused_macros)]
 
-use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::str::FromStr;
-use std::thread;
-use std::time::Duration;
-
-use rustnet::{
-    Body, Connection, Header, Headers, Method, Request, RequestLine,
-    Response, Status, StatusCode, StatusLine, Version,
-};
-use rustnet::config::DEFAULT_NAME;
-use rustnet::header_name::{
-    ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
-    ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION, CONTENT_LENGTH,
-    CONTENT_TYPE, HOST, LOCATION, SERVER,
-};
+use rustnet::{Request, Response};
 
 // Start a test server in the background.
 macro_rules! start_test_server {
     () => {
         #[test]
         fn start_test_server() {
-            use rustnet::config::TEST_SERVER_ADDR;
+            use std::process::{Command, Stdio};
+            use rustnet::TEST_SERVER_ADDR;
+            use rustnet::util;
 
             let args = [
                 "run", "--bin", "server", "--",
@@ -30,15 +17,14 @@ macro_rules! start_test_server {
                 TEST_SERVER_ADDR
             ];
 
-            let _server = Command::new("cargo")
+            let _ = Command::new("cargo")
                 .args(&args[..])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap();
 
-            // Test fails if server is not live.
-            if !server_is_live(false) {
+            if !util::check_server(TEST_SERVER_ADDR) {
                 assert!(false);
             }
         }
@@ -50,7 +36,11 @@ macro_rules! shutdown_test_server {
     () => {
         #[test]
         fn shutdown_test_server() {
-            use rustnet::config::TEST_SERVER_ADDR;
+            use std::process::{Command, Stdio};
+            use std::thread;
+            use std::time::Duration;
+            use rustnet::TEST_SERVER_ADDR;
+            use rustnet::util;
 
             let args = [
                 "run", "--bin", "client", "--",
@@ -58,15 +48,16 @@ macro_rules! shutdown_test_server {
                 TEST_SERVER_ADDR
             ];
 
-            let _shutdown = Command::new("cargo")
+            let _ = Command::new("cargo")
                 .args(&args[..])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
                 .unwrap();
 
-            // Test fails if server is still live.
-            if server_is_live(true) {
+            thread::sleep(Duration::from_millis(400));
+
+            if util::check_server(TEST_SERVER_ADDR) {
                 assert!(false);
             }
         }
@@ -78,28 +69,38 @@ macro_rules! run_test {
         $(
             #[test]
             fn $route() {
-                use rustnet::config::TEST_SERVER_ADDR;
+                use std::process::Command;
+                use rustnet::{Body, Response, TEST_SERVER_ADDR};
+                use common::{get_client_expected, get_server_expected};
 
                 let method = stringify!($method);
-                let test_kind = stringify!($kind);
 
-                let route = concat!("/", stringify!($route));
-                let route = if route == "/many_methods" {
-                    String::from(route)
-                } else {
-                    route.replace("_", "/")
+                let route = match concat!("/", stringify!($route)) {
+                    "/many_methods" => String::from("/many_methods"),
+                    "/known" => format!("/{}", method.to_ascii_lowercase()),
+                    "/unknown" => String::from("/unknown"),
+                    route => route.replace("_", "/"),
                 };
 
-                let addr = match test_kind {
-                    "CLIENT" => "httpbin.org:80",
-                    "SERVER" => TEST_SERVER_ADDR,
+                let (addr, expected_res) = match stringify!($kind) {
+                    "CLIENT" => {
+                        let (_req, res) = get_client_expected(method, &route);
+                        ("httpbin.org:80", res)
+                    },
+                    "SERVER" => {
+                        let res = get_server_expected(method, &route);
+                        (TEST_SERVER_ADDR, res)
+                    },
                     _ => unreachable!(),
                 };
 
                 let args = [
                     "run", "--bin", "client", "--",
-                    "--method", method, "--path", route.as_str(), "--output", "sh",
-                    "--plain", "--no-dates", "--", addr
+                    "--method", method,
+                    "--path", route.as_str(),
+                    "--output", "sh",
+                    "--plain", "--no-dates", "--",
+                    addr
                 ];
 
                 let output = Command::new("cargo")
@@ -107,132 +108,158 @@ macro_rules! run_test {
                     .output()
                     .unwrap();
 
-                let test_res = match Response::try_from(&output.stdout[..]) {
-                    Ok(mut res) => {
-                        res.body = Body::Empty;
-                        res
+                match Response::try_from(&output.stdout[..]) {
+                    Ok(mut test_res) => {
+                        test_res.body = Body::Empty;
+                        assert_eq!(test_res, expected_res);
                     },
                     Err(e) => panic!("Response parsing failed!\n{e}"),
-                };
-
-                let expected_res = match test_kind {
-                    "SERVER" => get_expected_for_server(method, route.as_str()),
-                    "CLIENT" => get_expected_for_client(method, route.as_str()),
-                    _ => unreachable!(),
-                };
-
-                assert_eq!(test_res, expected_res);
+                }
             }
         )+
     };
 }
 
-pub fn server_is_live(is_shutting_down: bool) -> bool {
-    let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-    let socket = SocketAddr::new(ip, 7878);
-    let timeout = Duration::from_millis(200);
+pub fn get_known_route_res(route: &str) -> Response {
+    use rustnet::{Status, DEFAULT_NAME};
 
-    for _ in 0..5 {
-        if TcpStream::connect_timeout(&socket, timeout).is_ok() {
-            if !is_shutting_down {
-                // Returns success state for a server starting up.
-                return true;
-            }
-        } else if is_shutting_down {
-            // Returns success state for a server shutting down.
-            return false;
-        }
+    let mut res = Response::new();
+    res.headers.server(DEFAULT_NAME);
+    res.headers.cache_control("no-cache");
+    res.headers.content_type("text/html; charset=utf-8");
 
-        thread::sleep(timeout);
+    match route {
+        "/about" => {
+            res.headers.content_length(455);
+            res.status_line.status = Status(200u16);
+        },
+        "/post" => {
+            res.headers.content_length(575);
+            res.status_line.status = Status(201u16);
+        },
+        "/get"
+            | "/head"
+            | "/put"
+            | "/patch"
+            | "/delete"
+            | "/trace"
+            | "/options"
+            | "/connect" =>
+        {
+            res.headers.content_length(575);
+            res.status_line.status = Status(200u16);
+        },
+        _ => unreachable!(),
     }
 
-    // Returns the fail state:
-    // - True (server is live) if server is shutting down.
-    // - False (server is not live) if server is starting up.
-    is_shutting_down
+    res
 }
 
-pub fn favicon_route() -> Response {
-    let mut res = Response::default();
-    res.headers.content_length(1406);
+pub fn get_unknown_route_res() -> Response {
+    use rustnet::{Status, DEFAULT_NAME};
+
+    let mut res = Response::new();
     res.headers.server(DEFAULT_NAME);
+    res.headers.content_length(482);
+    res.headers.cache_control("no-cache");
+    res.status_line.status = Status(404u16);
+    res.headers.content_type("text/html; charset=utf-8");
+    res
+}
+
+pub fn get_favicon_route_res() -> Response {
+    use rustnet::{DEFAULT_NAME};
+
+    let mut res = Response::new();
+    res.headers.server(DEFAULT_NAME);
+    res.headers.content_length(1406);
     res.headers.content_type("image/x-icon");
     res.headers.cache_control("max-age=604800");
     res
 }
 
-pub fn many_methods(content_len: usize, code: u16) -> Response {
-    let mut res = Response::default();
-    res.status_line.status = Status(StatusCode(code));
+pub fn get_many_methods_route_res(method: &str) -> Response {
+    use rustnet::{Status, DEFAULT_NAME};
+
+    let mut res = Response::new();
     res.headers.server(DEFAULT_NAME);
     res.headers.cache_control("no-cache");
-    res.headers.content_length(content_len);
     res.headers.content_type("text/plain; charset=utf-8");
+
+    match method {
+        "HEAD" => {
+            res.headers.content_length(23);
+            res.status_line.status = Status(200u16);
+        },
+        "POST" => {
+            res.headers.content_length(23);
+            res.status_line.status = Status(201u16);
+        },
+        "DELETE" => {
+            res.headers.content_length(25);
+            res.status_line.status = Status(200u16);
+        },
+        "GET" | "PUT" => {
+            res.headers.content_length(22);
+            res.status_line.status = Status(200u16);
+        },
+        "PATCH" | "TRACE" => {
+            res.headers.content_length(24);
+            res.status_line.status = Status(200u16);
+        },
+        "OPTIONS" | "CONNECT" => {
+            res.headers.content_length(26);
+            res.status_line.status = Status(200u16);
+        },
+        _ => unreachable!(),
+    }
+
     res
 }
 
-pub fn unknown_route() -> Response {
-    let mut res = Response::default();
-    res.status_line.status = Status(StatusCode(404));
-    res.headers.content_length(482);
-    res.headers.server(DEFAULT_NAME);
-    res.headers.cache_control("no-cache");
-    res.headers.content_type("text/html; charset=utf-8");
-    res
-}
+pub fn get_client_expected(method: &str, route: &str) -> (Request, Response) {
+    use std::str::FromStr;
+    use rustnet::{Method, Status, DEFAULT_NAME};
+    use rustnet::header::names::{
+        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
+        ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONTENT_LENGTH, CONTENT_TYPE,
+        HOST, LOCATION,
+    };
 
-pub fn known_route(code: u16, len: usize) -> Response {
-    let mut res = Response::default();
-    res.status_line.status = Status(StatusCode(code));
-    res.headers.content_length(len);
-    res.headers.server(DEFAULT_NAME);
-    res.headers.cache_control("no-cache");
-    res.headers.content_type("text/html; charset=utf-8");
-    res
-}
+    let mut req = Request::new();
+    req.headers.accept("*/*");
+    req.request_line.path = route.into();
+    req.headers.user_agent(DEFAULT_NAME);
+    req.headers.insert(HOST, "httpbin.org:80".into());
+    req.request_line.method = Method::from_str(method).unwrap();
 
-pub fn get_expected_for_client(method: &str, route: &str) -> Response {
-//    let mut req_headers = Headers::new();
-//    req_headers.accept("*/*");
-//    req_headers.user_agent(DEFAULT_NAME);
-//    req_headers.insert(HOST, "httpbin.org:80".into());
-//
-//    let method = Method::from_str(method_str).unwrap();
-//
-//    Request {
-//        request_line: RequestLine {
-//            method,
-//            path: path_str.to_string(),
-//            version: Version::OneDotOne
-//        },
-//        headers: req_headers,
-//        body: Body::Empty
-//    }
-
-    let mut res = Response::default();
+    let mut res = Response::new();
+    res.headers.content_length(0);
     res.headers.insert(ACAO, "*".into());
+    res.headers.connection("keep-alive");
+    res.headers.server("gunicorn/19.9.0");
     res.headers.insert(ACAC, "true".into());
-    res.headers.insert(CONTENT_LENGTH, "0".into());
-    res.headers.insert(CONNECTION, "keep-alive".into());
-    res.headers.insert(SERVER, "gunicorn/19.9.0".into());
-    res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
+    res.headers.content_type("text/html; charset=utf-8");
 
     match route {
         "/status/101" => {
+            res.headers.connection("upgrade");
             res.headers.remove(&CONTENT_LENGTH);
-            res.status_line = StatusLine::from(StatusCode(101));
-            res.headers.insert(CONNECTION, "upgrade".into());
+            res.status_line.status = Status(101u16);
+        },
+        "/status/201" => {
+            res.status_line.status = Status(201u16);
         },
         "/status/301" => {
             res.headers.remove(&CONTENT_TYPE);
+            res.status_line.status = Status(301u16);
             res.headers.insert(LOCATION, "/redirect/1".into());
-            res.status_line = StatusLine::from(StatusCode(301));
         },
         "/status/404" => {
-            res.status_line = StatusLine::from(StatusCode(404));
+            res.status_line.status = Status(404u16);
         },
         "/status/502" => {
-            res.status_line = StatusLine::from(StatusCode(502));
+            res.status_line.status = Status(502u16);
         },
         "/xml" => {
             res.headers.content_length(522);
@@ -257,24 +284,15 @@ pub fn get_expected_for_client(method: &str, route: &str) -> Response {
         _ => {},
     }
 
-    res
+    (req, res)
 }
 
-pub fn get_expected_for_server(method: &str, route: &str) -> Response {
-    match (method, route) {
-        (_, "/foo") => unknown_route(),
-        (_, "/favicon.ico") => favicon_route(),
-        ("HEAD", "/many_methods") => many_methods(23, 200),
-        ("POST", "/many_methods") => many_methods(23, 201),
-        ("DELETE", "/many_methods") => many_methods(25, 200),
-        ("GET" | "PUT", "/many_methods") => many_methods(22, 200),
-        ("PATCH" | "TRACE", "/many_methods") => many_methods(24, 200),
-        ("OPTIONS" | "CONNECT", "/many_methods") => many_methods(26, 200),
-        (_, "/about") => known_route(200, 455),
-        (_, "/post") =>  known_route(201, 575),
-        (_, "/get"
-            | "/put" | "/options" | "/connect" | "/delete" | "/head"
-            | "/patch" | "/trace") => known_route(200, 575),
-        (_, _) => panic!("Unexpected method or route: {method:?}, {route:?}"),
+pub fn get_server_expected(method: &str, route: &str) -> Response {
+    match route {
+        "/unknown" => get_unknown_route_res(),
+        "/favicon.ico" => get_favicon_route_res(),
+        "/many_methods" => get_many_methods_route_res(method),
+        _ if route.starts_with('/') => get_known_route_res(route),
+        _ => unreachable!(),
     }
 }

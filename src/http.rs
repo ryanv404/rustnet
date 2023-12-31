@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
-use crate::{NetError, NetParseError, NetResult};
+use crate::NetParseError;
 
 /// HTTP methods.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Method {
     /// Transfers a current representation of the target resource.
     Get,
@@ -27,8 +27,8 @@ pub enum Method {
     Options,
     /// Establishes a tunnel to the server identified by the target resource.
     Connect,
-    /// Custom method.
-    Custom(String),
+    /// Custom method to shut down a test server.
+    Shutdown,
 }
 
 impl Default for Method {
@@ -43,49 +43,41 @@ impl Display for Method {
     }
 }
 
-impl TryFrom<&[u8]> for Method {
-    type Error = NetError;
+impl FromStr for Method {
+    type Err = NetParseError;
 
-    fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        match bytes {
+    fn from_str(method: &str) -> Result<Self, Self::Err> {
+        match method {
             // HTTP methods are case-sensitive.
-            b"GET" => Ok(Self::Get),
-            b"PUT" => Ok(Self::Put),
-            b"POST" => Ok(Self::Post),
-            b"HEAD" => Ok(Self::Head),
-            b"PATCH" => Ok(Self::Patch),
-            b"TRACE" => Ok(Self::Trace),
-            b"DELETE" => Ok(Self::Delete),
-            b"OPTIONS" => Ok(Self::Options),
-            b"CONNECT" => Ok(Self::Connect),
-            custom => String::from_utf8(custom.to_vec())
-                .map_err(|_| NetParseError::Method.into())
-                .map(Self::Custom),
+            "GET" => Ok(Self::Get),
+            "PUT" => Ok(Self::Put),
+            "POST" => Ok(Self::Post),
+            "HEAD" => Ok(Self::Head),
+            "PATCH" => Ok(Self::Patch),
+            "TRACE" => Ok(Self::Trace),
+            "DELETE" => Ok(Self::Delete),
+            "OPTIONS" => Ok(Self::Options),
+            "CONNECT" => Ok(Self::Connect),
+            "SHUTDOWN" => Ok(Self::Shutdown),
+            _ => Err(NetParseError::Method),
         }
     }
 }
 
-impl From<&str> for Method {
-    fn from(method: &str) -> Self {
-        match method {
-            "GET" => Self::Get,
-            "PUT" => Self::Put,
-            "POST" => Self::Post,
-            "HEAD" => Self::Head,
-            "PATCH" => Self::Patch,
-            "TRACE" => Self::Trace,
-            "DELETE" => Self::Delete,
-            "OPTIONS" => Self::Options,
-            "CONNECT" => Self::Connect,
-            custom => Self::Custom(custom.to_string()),
-        }
+impl TryFrom<&[u8]> for Method {
+    type Error = NetParseError;
+
+    fn try_from(method: &[u8]) -> Result<Self, Self::Error> {
+        str::from_utf8(method)
+            .map_err(|_| NetParseError::Method)
+            .and_then(Self::from_str)
     }
 }
 
 impl Method {
     /// Returns the HTTP `Method` as a bytes slice.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Get => b"GET",
             Self::Put => b"PUT",
@@ -96,102 +88,20 @@ impl Method {
             Self::Delete => b"DELETE",
             Self::Options => b"OPTIONS",
             Self::Connect => b"CONNECT",
-            Self::Custom(custom) => custom.as_bytes(),
+            Self::Shutdown => b"SHUTDOWN",
         }
     }
 
-    /// Returns the HTTP `Method` as a string slice.
+    /// Returns the HTTP `Method` as a copy-on-write string slice.
     #[must_use]
     pub fn as_str(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(self.as_bytes())
     }
-
-    /// Returns true if this `Method` is a custom method.
-    #[must_use]
-    pub const fn is_custom(&self) -> bool {
-        matches!(self, Self::Custom(_))
-    }
-}
-
-/// HTTP status code.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StatusCode(pub u16);
-
-impl Default for StatusCode {
-    fn default() -> Self {
-        Self(200u16)
-    }
-}
-
-impl Display for StatusCode {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl TryFrom<&[u8]> for StatusCode {
-    type Error = NetError;
-
-    fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        str::from_utf8(bytes)
-            .map_err(|_| NetParseError::StatusCode.into())
-            .and_then(Self::from_str)
-    }
-}
-
-impl FromStr for StatusCode {
-    type Err = NetError;
-
-    fn from_str(code: &str) -> NetResult<Self> {
-        u16::from_str(code)
-            .map_err(|_| NetParseError::StatusCode.into())
-            .and_then(Self::try_from)
-    }
-}
-
-impl TryFrom<u16> for StatusCode {
-    type Error = NetError;
-
-    fn try_from(code: u16) -> NetResult<Self> {
-        if matches!(code, 100..=999) {
-            Ok(Self(code))
-        } else {
-            Err(NetParseError::StatusCode)?
-        }
-    }
-}
-
-impl TryFrom<u32> for StatusCode {
-    type Error = NetError;
-
-    fn try_from(code: u32) -> NetResult<Self> {
-        u16::try_from(code)
-            .map_err(|_| NetParseError::StatusCode.into())
-            .and_then(Self::try_from)
-    }
-}
-
-impl TryFrom<i32> for StatusCode {
-    type Error = NetError;
-
-    fn try_from(code: i32) -> NetResult<Self> {
-        u16::try_from(code)
-            .map_err(|_| NetParseError::StatusCode.into())
-            .and_then(Self::try_from)
-    }
-}
-
-impl StatusCode {
-    /// Returns the status code.
-    #[must_use]
-    pub const fn code(&self) -> u16 {
-        self.0
-    }
 }
 
 /// HTTP response status.
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Status(pub StatusCode);
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Status(pub u16);
 
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -199,73 +109,105 @@ impl Display for Status {
     }
 }
 
-impl From<StatusCode> for Status {
-    fn from(status_code: StatusCode) -> Self {
-        Self(status_code)
-    }
-}
-
-impl TryFrom<&[u8]> for Status {
-    type Error = NetError;
-
-    fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        bytes.splitn(2, |b| *b == b' ')
-            .next()
-            .ok_or_else(|| NetParseError::StatusCode.into())
-            .and_then(|code| {
-                StatusCode::try_from(code).map(Into::into)
-            })
+impl Default for Status {
+    fn default() -> Self {
+        Self(200u16)
     }
 }
 
 impl FromStr for Status {
-    type Err = NetError;
+    type Err = NetParseError;
 
-    fn from_str(status: &str) -> NetResult<Self> {
-        Self::try_from(status.as_bytes())
+    fn from_str(status: &str) -> Result<Self, Self::Err> {
+        let Some((code, _)) = status.split_once(' ') else {
+            return Err(NetParseError::Status);
+        };
+
+        u16::from_str(code)
+            .map_err(|_| NetParseError::Status)
+            .and_then(Self::try_from)
+    }
+}
+
+impl TryFrom<&[u8]> for Status {
+    type Error = NetParseError;
+
+    fn try_from(status: &[u8]) -> Result<Self, Self::Error> {
+        str::from_utf8(status)
+            .map_err(|_| NetParseError::Status)
+            .and_then(Self::from_str)
     }
 }
 
 impl TryFrom<u16> for Status {
-    type Error = NetError;
+    type Error = NetParseError;
 
-    fn try_from(code: u16) -> NetResult<Self> {
-        StatusCode::try_from(code).map(Into::into)
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        if matches!(code, 100..=999) {
+            Ok(Self(code))
+        } else {
+            Err(NetParseError::Status)
+        }
     }
 }
 
 impl TryFrom<u32> for Status {
-    type Error = NetError;
+    type Error = NetParseError;
 
-    fn try_from(code: u32) -> NetResult<Self> {
-        StatusCode::try_from(code).map(Into::into)
+    fn try_from(code: u32) -> Result<Self, Self::Error> {
+        u16::try_from(code)
+            .map_err(|_| NetParseError::Status)
+            .and_then(Self::try_from)
     }
 }
 
 impl TryFrom<i32> for Status {
-    type Error = NetError;
+    type Error = NetParseError;
 
-    fn try_from(code: i32) -> NetResult<Self> {
-        StatusCode::try_from(code).map(Into::into)
+    fn try_from(code: i32) -> Result<Self, Self::Error> {
+        u16::try_from(code)
+            .map_err(|_| NetParseError::Status)
+            .and_then(Self::try_from)
     }
 }
 
 impl Status {
     /// Returns the `Status` as a bytes slice.
     #[must_use]
-    #[rustfmt::skip]
-    #[allow(clippy::too_many_lines)]
-    #[allow(clippy::match_same_arms)]
-    #[allow(clippy::match_overlapping_arm)]
-    pub const fn as_bytes(&self) -> &'static [u8] {
-        match self.0.code() {
-            // 1xx informational status.
+    pub fn as_bytes(&self) -> &'static [u8] {
+        match self.0 {
+            // 1xx informational status codes.
+            100..=199 => self.get_1xx_status_msg(),
+            // 2xx success status codes.
+            200..=299 => self.get_2xx_status_msg(),
+            // 3xx redirect status codes.
+            300..=399 => self.get_3xx_status_msg(),
+            // 4xx client error status codes.
+            400..=499 => self.get_4xx_status_msg(),
+            // 5xx server error status codes.
+            500..=599 => self.get_5xx_status_msg(),
+            999 => b"999 Request Denied",
+            // Unrecognized status codes.
+            _ => b"",
+        }
+    }
+
+    /// Returns the status reason phrase for the given 1xx status code.
+    pub fn get_1xx_status_msg(&self) -> &'static [u8] {
+        match self.0 {
+            // 1xx informational status codes.
             100 => b"100 Continue",
             101 => b"101 Switching Protocols",
             102 => b"102 Processing",
             103 => b"103 Early Hints",
+            _ => b"",
+        }
+    }
 
-            // 2xx successful status.
+    /// Returns the status reason phrase for the given 2xx status code.
+    pub fn get_2xx_status_msg(&self) -> &'static [u8] {
+        match self.0 {
+            // 2xx success status codes.
             200 => b"200 OK",
             201 => b"201 Created",
             202 => b"202 Accepted",
@@ -277,8 +219,14 @@ impl Status {
             208 => b"208 Already Reported",
             218 => b"218 This Is Fine",
             226 => b"226 IM Used",
+            _ => b"",
+        }
+    }
 
-            // 3xx redirect status.
+    /// Returns the status reason phrase for the given 3xx status code.
+    pub fn get_3xx_status_msg(&self) -> &'static [u8] {
+        match self.0 {
+            // 3xx redirect status codes.
             300 => b"300 Multiple Choices",
             301 => b"301 Moved Permanently",
             302 => b"302 Found",
@@ -288,8 +236,14 @@ impl Status {
             306 => b"306 Switch Proxy",
             307 => b"307 Temporary Redirect",
             308 => b"308 Permanent Redirect",
+            _ => b"",
+        }
+    }
 
-            // 4xx client error status.
+    /// Returns the status reason phrase for the given 4xx status code.
+    pub fn get_4xx_status_msg(&self) -> &'static [u8] {
+        match self.0 {
+            // 4xx client error status codes.
             400 => b"400 Bad Request", // No or multiple Host headers, invalid request line.
             401 => b"401 Unauthorized",
             402 => b"402 Payment Required",
@@ -335,8 +289,14 @@ impl Status {
             497 => b"497 HTTP Request Sent to HTTPS Port",
             498 => b"498 Invalid Token",
             499 => b"499 Token Required or Client Closed Request",
+            _ => b"",
+        }
+    }
 
-            // 5xx server error status.
+    /// Returns the status reason phrase for the given 5xx status code.
+    pub fn get_5xx_status_msg(&self) -> &'static [u8] {
+        match self.0 {
+            // 5xx server error status codes.
             500 => b"500 Internal Server Error",
             501 => b"501 Not Implemented", // Unimplemented methods, etc.
             502 => b"502 Bad Gateway",
@@ -375,19 +335,16 @@ impl Status {
     /// Returns the `Status` reason phrase as a string slice.
     #[must_use]
     pub fn msg(&self) -> Cow<'_, str> {
-        let status = self.as_bytes();
-
-        if status.len() < 5 {
-            Cow::Borrowed("")
-        } else {
-            String::from_utf8_lossy(&status[4..])
+        match self.as_str().split_once(' ') {
+            Some((_, msg)) => msg.to_string().into(),
+            None => Cow::Borrowed(""),
         }
     }
 
     /// Returns the status code.
     #[must_use]
     pub const fn code(&self) -> u16 {
-        self.0.code()
+        self.0
     }
 }
 
@@ -418,43 +375,43 @@ impl Display for Version {
     }
 }
 
-impl TryFrom<(u8, u8)> for Version {
-    type Error = NetError;
+impl FromStr for Version {
+    type Err = NetParseError;
 
-    fn try_from((major, minor): (u8, u8)) -> NetResult<Self> {
+    fn from_str(version: &str) -> Result<Self, Self::Err> {
+        match version {
+            "HTTP/0.9" => Ok(Self::ZeroDotNine),
+            "HTTP/1.0" => Ok(Self::OneDotZero),
+            "HTTP/1.1" => Ok(Self::OneDotOne),
+            "HTTP/2" | "HTTP/2.0" => Ok(Self::TwoDotZero),
+            "HTTP/3" | "HTTP/3.0" => Ok(Self::ThreeDotZero),
+            _ => Err(NetParseError::Version),
+        }
+    }
+}
+
+impl TryFrom<(u8, u8)> for Version {
+    type Error = NetParseError;
+
+    fn try_from((major, minor): (u8, u8)) -> Result<Self, Self::Error> {
         match (major, minor) {
             (0, 9) => Ok(Self::ZeroDotNine),
             (1, 0) => Ok(Self::OneDotZero),
             (1, 1) => Ok(Self::OneDotOne),
             (2, 0) => Ok(Self::TwoDotZero),
             (3, 0) => Ok(Self::ThreeDotZero),
-            _ => Err(NetParseError::Version)?,
+            _ => Err(NetParseError::Version),
         }
     }
 }
 
 impl TryFrom<&[u8]> for Version {
-    type Error = NetError;
+    type Error = NetParseError;
 
-    fn try_from(bytes: &[u8]) -> NetResult<Self> {
-        // HTTP versions are case-sensitive and a zero is implied by a missing
-        // minor version number.
-        match bytes {
-            b"HTTP/0.9" => Ok(Self::ZeroDotNine),
-            b"HTTP/1.0" => Ok(Self::OneDotZero),
-            b"HTTP/1.1" => Ok(Self::OneDotOne),
-            b"HTTP/2" | b"HTTP/2.0" => Ok(Self::TwoDotZero),
-            b"HTTP/3" | b"HTTP/3.0" => Ok(Self::ThreeDotZero),
-            _ => Err(NetParseError::Version)?,
-        }
-    }
-}
-
-impl FromStr for Version {
-    type Err = NetError;
-
-    fn from_str(version: &str) -> NetResult<Self> {
-        Self::try_from(version.as_bytes())
+    fn try_from(version: &[u8]) -> Result<Self, Self::Error> {
+        str::from_utf8(version)
+            .map_err(|_| NetParseError::Version)
+            .and_then(Self::from_str)
     }
 }
 

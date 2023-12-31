@@ -1,20 +1,21 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
+use std::path::PathBuf;
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, Client, Connection, Header, HeaderName, HeaderNameInner,
+    Body, Client, ClientCli, Connection, Header, HeaderName, HeaderNameInner,
     HeaderValue, Headers, Method, NetError, NetParseError, NetResult,
     Request, RequestBuilder, RequestLine, Response, ResponseBuilder, Route,
-    RouteBuilder, Router, Server, ServerBuilder, ServerConfig, ServerHandle,
-    Status, StatusCode, StatusLine, Target, ThreadPool, Version, Worker,
+    RouteBuilder, Router, Server, ServerBuilder, ServerCli, ServerHandle,
+    Status, StatusLine, Style, StyleKind, StyleParts, Target,
+    ThreadPool, Version, Worker, DEFAULT_NAME,
 };
-use crate::config::DEFAULT_NAME;
-use crate::header::names::STANDARD_HEADERS;
-use crate::header_name::{
-    ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
+use crate::header::names::{
+    ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
+    CONTENT_TYPE, HOST, SERVER, STANDARD_HEADERS, USER_AGENT,
 };
-use crate::util::{self, trim_bytes, trim_start_bytes, trim_end_bytes};
+use crate::util::{self, trim, trim_start, trim_end};
 
 macro_rules! test_parsing_from_str {
     (
@@ -44,24 +45,11 @@ macro_rules! test_parsing_from_int {
     };
 }
 
-macro_rules! test_parsing_from {
-    (
-        $target:ident $label:ident:
-            $( $input:literal => $expected:expr; )+
-            $( BAD_INPUT: $bad_input:literal; )*
-    ) => {
-        #[test]
-        fn $label() {
-            $( assert_eq!($target::from($input), $expected); )+
-            $( assert!($target::from_str($bad_input).is_err()); )*
-        }
-    };
-}
-
 #[cfg(test)]
 mod method {
     use super::*;
-    test_parsing_from! {
+
+    test_parsing_from_str! {
         Method from_str:
         "GET" => Method::Get;
         "HEAD" => Method::Head;
@@ -72,57 +60,32 @@ mod method {
         "TRACE" => Method::Trace;
         "OPTIONS" => Method::Options;
         "CONNECT" => Method::Connect;
-        "SHUTDOWN" => Method::Custom("SHUTDOWN".to_string());
-        "Foo" => Method::Custom("Foo".to_string());
-        "get" => Method::Custom("get".to_string());
-    }
-}
-
-#[cfg(test)]
-mod status_code {
-    use super::*;
-    test_parsing_from_str! {
-        StatusCode from_str:
-        "101" => StatusCode(101u16);
-        "201" => StatusCode(201u16);
-        "300" => StatusCode(300u16);
-        "400" => StatusCode(400u16);
-        "501" => StatusCode(501u16);
-        BAD_INPUT: "1234";
-        BAD_INPUT: "abc";
-        BAD_INPUT: "-12";
-    }
-
-    test_parsing_from_int! {
-        StatusCode from_int:
-        201_u16 => StatusCode(201u16);
-        202_u32 => StatusCode(202u16);
-        203_i32 => StatusCode(203u16);
-        BAD_INPUT: 1001_u16;
-        BAD_INPUT: -123_i32;
-        BAD_INPUT: 0_u16;
+        "SHUTDOWN" => Method::Shutdown;
+        BAD_INPUT: "Foo";
+        BAD_INPUT: "get";
     }
 }
 
 #[cfg(test)]
 mod status {
     use super::*;
+
     test_parsing_from_str! {
         Status from_str:
-        "101 Switching Protocols" => Status(StatusCode(101u16));
-        "201 Created" => Status(StatusCode(201u16));
-        "300 Multiple Choices" => Status(StatusCode(300u16));
-        "400 Bad Request" => Status(StatusCode(400u16));
-        "501 Not Implemented" => Status(StatusCode(501u16));
+        "101 Switching Protocols" => Status(101u16);
+        "201 Created" => Status(201u16);
+        "300 Multiple Choices" => Status(300u16);
+        "400 Bad Request" => Status(400u16);
+        "501 Not Implemented" => Status(501u16);
         BAD_INPUT: "1234 Bad Status";
         BAD_INPUT: "abc";
     }
 
     test_parsing_from_int! {
         Status from_int:
-        201_u16 => Status(StatusCode(201u16));
-        202_u32 => Status(StatusCode(202u16));
-        203_i32 => Status(StatusCode(203u16));
+        201_u16 => Status(201u16);
+        202_u32 => Status(202u16);
+        203_i32 => Status(203u16);
         BAD_INPUT: 1001_u16;
         BAD_INPUT: -123_i32;
         BAD_INPUT: 0_u16;
@@ -132,6 +95,7 @@ mod status {
 #[cfg(test)]
 mod version {
     use super::*;
+
     test_parsing_from_str! {
         Version from_str:
         "HTTP/0.9" => Version::ZeroDotNine;
@@ -149,26 +113,29 @@ mod version {
 #[cfg(test)]
 mod request_line {
     use super::*;
+
     test_parsing_from_str! {
         RequestLine from_str:
         "GET /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Get, "/test");
+            RequestLine::new(Method::Get, "/test");
         "HEAD /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Head, "/test");
+            RequestLine::new(Method::Head, "/test");
         "POST /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Post, "/test");
+            RequestLine::new(Method::Post, "/test");
         "PUT /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Put, "/test");
+            RequestLine::new(Method::Put, "/test");
         "PATCH /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Patch, "/test");
+            RequestLine::new(Method::Patch, "/test");
         "DELETE /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Delete, "/test");
+            RequestLine::new(Method::Delete, "/test");
         "TRACE /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Trace, "/test");
+            RequestLine::new(Method::Trace, "/test");
         "OPTIONS /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Options, "/test");
+            RequestLine::new(Method::Options, "/test");
         "CONNECT /test HTTP/1.1\r\n" =>
-            RequestLine::new(&Method::Connect, "/test");
+            RequestLine::new(Method::Connect, "/test");
+        "SHUTDOWN / HTTP/1.1\r\n" =>
+            RequestLine::new(Method::Shutdown, "/");
         BAD_INPUT: "FOO bar baz";
         BAD_INPUT: "GET /test";
         BAD_INPUT: "GET";
@@ -178,18 +145,19 @@ mod request_line {
 #[cfg(test)]
 mod status_line {
     use super::*;
+
     test_parsing_from_str! {
         StatusLine from_str:
         "HTTP/1.1 100 Continue\r\n" =>
-            StatusLine::from(StatusCode(100u16));
+            StatusLine::try_from(100u16).unwrap();
         "HTTP/1.1 200 OK\r\n" =>
-            StatusLine::from(StatusCode(200u16));
+            StatusLine::try_from(200u16).unwrap();
         "HTTP/1.1 301 Moved Permanently\r\n" =>
-            StatusLine::from(StatusCode(301u16));
+            StatusLine::try_from(301u16).unwrap();
         "HTTP/1.1 403 Forbidden\r\n" =>
-            StatusLine::from(StatusCode(403u16));
+            StatusLine::try_from(403u16).unwrap();
         "HTTP/1.1 505 HTTP Version Not Supported\r\n" =>
-            StatusLine::from(StatusCode(505u16));
+            StatusLine::try_from(505u16).unwrap();
         BAD_INPUT: "HTTP/1.1";
         BAD_INPUT: "200 OK";
         BAD_INPUT: "FOO bar baz";
@@ -199,6 +167,7 @@ mod status_line {
 #[cfg(test)]
 mod header {
     use super::*;
+
     test_parsing_from_str! {
         Header from_str:
         "Accept: */*\r\n" =>
@@ -218,6 +187,7 @@ mod header {
 #[cfg(test)]
 mod standard_headers {
     use super::*;
+
     #[test]
     fn from_str() {
         for &(std, lowercase) in STANDARD_HEADERS {
@@ -235,6 +205,7 @@ mod standard_headers {
 #[cfg(test)]
 mod uri {
     use super::*;
+
     #[test]
     fn from_str() {
         macro_rules! test_uri_parser {
@@ -277,25 +248,27 @@ mod uri {
 #[cfg(test)]
 mod headers {
     use super::*;
+
     #[test]
     fn from_str() {
-        let input = "\
+        let test_hdrs = Headers::from_str("\
             Accept: */*\r\n\
             Accept-Encoding: gzip, deflate, br\r\n\
             Connection: keep-alive\r\n\
             Host: example.com\r\n\
             User-Agent: xh/0.19.3\r\n\
-            Pineapple: pizza\r\n\r\n";
+            Pineapple: pizza\r\n\r\n"
+        )
+        .unwrap();
 
-        let test_hdrs = Headers::from_str(input).unwrap();
-
-        let mut expected_hdrs = Headers::new();
-        expected_hdrs.accept("*/*");
-        expected_hdrs.user_agent("xh/0.19.3");
-        expected_hdrs.connection("keep-alive");
-        expected_hdrs.header("Pineapple", "pizza");
-        expected_hdrs.header("Host", "example.com");
-        expected_hdrs.accept_encoding("gzip, deflate, br");
+        let expected_hdrs = Headers(BTreeMap::from([
+            (ACCEPT, "*/*".into()),
+            (HOST, "example.com".into()),
+            (USER_AGENT, "xh/0.19.3".into()),
+            (CONNECTION, "keep-alive".into()),
+            ("Pineapple".into(), "pizza".into()),
+            (ACCEPT_ENCODING, "gzip, deflate, br".into())
+        ]));
 
         assert_eq!(test_hdrs, expected_hdrs);
     }
@@ -320,13 +293,15 @@ mod request {
 
         let mut expected_req = Request::default();
         expected_req.request_line.path = "/test".into();
-        expected_req.headers.accept("*/*");
-        expected_req.headers.user_agent("xh/0.19.3");
-        expected_req.headers.connection("keep-alive");
-        expected_req.headers.content_length(0);
-        expected_req.headers.header("Pineapple", "pizza");
-        expected_req.headers.header("Host", "example.com");
-        expected_req.headers.accept_encoding("gzip, deflate, br");
+        expected_req.headers = Headers(BTreeMap::from([
+            (ACCEPT, "*/*".into()),
+            (HOST, "example.com".into()),
+            (CONTENT_LENGTH, "0".into()),
+            (USER_AGENT, "xh/0.19.3".into()),
+            (CONNECTION, "keep-alive".into()),
+            ("Pineapple".into(), "pizza".into()),
+            (ACCEPT_ENCODING, "gzip, deflate, br".into())
+        ]));
 
         assert_eq!(test_req, expected_req);
     }
@@ -348,10 +323,12 @@ mod response {
         let test_res = Response::try_from(&input[..]).unwrap();
 
         let mut expected_res = Response::default();
-        expected_res.headers.content_length(0);
-        expected_res.headers.connection("keep-alive");
-        expected_res.headers.header("Server", "example.com");
-        expected_res.headers.header("Pineapple", "pizza");
+        expected_res.headers = Headers(BTreeMap::from([
+            (SERVER, "example.com".into()),
+            (CONTENT_LENGTH, "0".into()),
+            (CONNECTION, "keep-alive".into()),
+            ("Pineapple".into(), "pizza".into())
+        ]));
 
         assert_eq!(test_res, expected_res);
     }
@@ -362,30 +339,30 @@ mod utils {
     use super::*;
 
     #[test]
-    fn trim() {
-        assert_eq!(trim_bytes(b"  test"), b"test");
-        assert_eq!(trim_bytes(b"test    "), b"test");
-        assert_eq!(trim_bytes(b"         test       "), b"test");
-        assert_eq!(trim_bytes(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
-        assert_eq!(trim_bytes(b"                   "), b"");
-        assert_eq!(trim_bytes(b"x"), b"x");
-        assert_eq!(trim_bytes(b""), b"");
+    fn test_trim() {
+        assert_eq!(trim(b"  test"), b"test");
+        assert_eq!(trim(b"test    "), b"test");
+        assert_eq!(trim(b"         test       "), b"test");
+        assert_eq!(trim(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
+        assert_eq!(trim(b"                   "), b"");
+        assert_eq!(trim(b"x"), b"x");
+        assert_eq!(trim(b""), b"");
     }
 
     #[test]
-    fn trim_start() {
-        assert_eq!(trim_start_bytes(b"  test"), b"test");
-        assert_eq!(trim_start_bytes(b"test    "), b"test    ");
-        assert_eq!(trim_start_bytes(b"         test       "), b"test       ");
-        assert_eq!(trim_start_bytes(b"                   "), b"");
+    fn test_trim_start() {
+        assert_eq!(trim_start(b"  test"), b"test");
+        assert_eq!(trim_start(b"test    "), b"test    ");
+        assert_eq!(trim_start(b"         test       "), b"test       ");
+        assert_eq!(trim_start(b"                   "), b"");
     }
 
     #[test]
-    fn trim_end() {
-        assert_eq!(trim_end_bytes(b"  test"), b"  test");
-        assert_eq!(trim_end_bytes(b"test    "), b"test");
-        assert_eq!(trim_end_bytes(b"         test       "), b"         test");
-        assert_eq!(trim_end_bytes(b"                   "), b"");
+    fn test_trim_end() {
+        assert_eq!(trim_end(b"  test"), b"  test");
+        assert_eq!(trim_end(b"test    "), b"test");
+        assert_eq!(trim_end(b"         test       "), b"         test");
+        assert_eq!(trim_end(b"                   "), b"");
     }
 }
 
@@ -406,56 +383,164 @@ mod trait_impls {
         Body, Client, Connection, Header, HeaderNameInner, HeaderName,
         HeaderValue, Headers, Method, NetError, NetResult<()>,
         NetParseError, Request, RequestBuilder, RequestLine, Response,
-        ResponseBuilder, Route, RouteBuilder, Router, Server,
-        ServerBuilder<&str>, ServerConfig, ServerHandle<()>, Status,
-        StatusCode, StatusLine, Target, ThreadPool, Version, Worker];
+        ResponseBuilder, Route, RouteBuilder, Router, Server, ServerBuilder,
+        ServerHandle<()>, Status, StatusLine, Style, Target,
+        ThreadPool, Version, Worker];
     trait_impl_test! [sync_types implement Sync:
         Body, Client, Connection, Header, HeaderNameInner, HeaderName,
         HeaderValue, Headers, Method, NetError, NetResult<()>,
         NetParseError, Request, RequestBuilder, RequestLine, Response,
         ResponseBuilder, Route, RouteBuilder, Router, Server,
-        ServerBuilder<&str>, ServerConfig, ServerHandle<()>, Status,
-        StatusCode, StatusLine, Target, ThreadPool, Version, Worker];
+        ServerBuilder, ServerHandle<()>, Status, StatusLine,
+        Style, Target, ThreadPool, Version, Worker];
     trait_impl_test! [error_types implement Error:
         NetError, NetParseError];
 }
 
+mod style {
+    use super::*;
+
+    macro_rules! test_format_str_parsing {
+        ($( $format_str:literal: $req_style:expr, $res_style:expr; )+) => {
+            #[test]
+            fn from_format_str() {
+                use self::{StyleKind::*, StyleParts::*};
+
+                $(
+                    let expected = Style { req: $req_style, res: $res_style };
+                    let mut test = Style::default();
+                    test.from_format_str($format_str);
+                    assert_eq!(test, expected);
+                )+
+            }
+        };
+    }
+
+    test_format_str_parsing! {
+        "R": Color(Line), Color(None);
+        "H": Color(Hdrs), Color(None);
+        "B": Color(Body), Color(None);
+        "s": Color(None), Color(Line);
+        "h": Color(None), Color(Hdrs);
+        "b": Color(None), Color(Body);
+        "Rs": Color(Line), Color(Line);
+        "RHB": Color(All), Color(None);
+        "shb": Color(None), Color(All);
+        "RHsh": Color(LineHdrs), Color(LineHdrs);
+        "HBsb": Color(HdrsBody), Color(LineBody);
+        "RBsb": Color(LineBody), Color(LineBody);
+        "RHBshb": Color(All), Color(All);
+        "*": Color(All), Color(All);
+        "": Color(None), Color(None);
+        "xyz3s": Color(None), Color(Line);
+    }
+}
+
 mod client_cli {
     use super::*;
-    use crate::{ClientBuilder, ClientCli, OutputStyle, Parts, Style};
 
     #[test]
     fn parse_args() {
         let mut args = VecDeque::from([
-            "./client", "--output", "Rshb", "--method", "POST", "--header",
-            "content-type:text/html; charset=utf-8", "--body", "Test message.",
-            "--plain", "--no-dates", "httpbin.org/test"
+            "./client",
+            "--plain",
+            "--no-dates",
+            "--output", "/Bs2Rhb1",
+            "--method", "posT",
+            "-H", "acCEpT:*/*",
+            "-H", "conteNt-leNgth:13",
+            "-H", "caCHe-controL:no-CACHE",
+            "--debug",
+            "-H", "cOntent-tYpe:text/html; charset=utf-8",
+            "-H", "pineaPPle:yUm123",
+            "--body", "This is a test meSSage :) in the request bOdy.",
+            "httpbin.org/json"
         ]);
 
-        let test_client = ClientCli::parse_args(&mut args).unwrap();
-
-        let output = OutputStyle {
+        let expected_cli = ClientCli {
             no_dates: true,
-            req_style: Style::Plain(Parts::Line),
-            res_style: Style::Plain(Parts::All),
+            do_debug: true,
+            do_plain: true,
+            style: Style {
+                req: StyleKind::Plain(StyleParts::LineBody),
+                res: StyleKind::Plain(StyleParts::All)
+            },
+            method: Method::Post,
+            path: "/json".into(),
+            addr: Some("httpbin.org:80".to_string()),
+            headers: Headers(BTreeMap::from([
+                (ACCEPT, "*/*".into()),
+                (CONTENT_LENGTH, "13".into()),
+                (CACHE_CONTROL, "no-cache".into()),
+                (util::to_titlecase(b"Pineapple").into(),
+                    "yum123".into()),
+                (CONTENT_TYPE, "text/html; charset=utf-8".into()),
+            ])),
+            body: Body::Text(
+                Vec::from("This is a test meSSage :) in the request bOdy.")
+            ),
+            ..ClientCli::default()
         };
 
-        let expected_client = ClientBuilder::<&str>::new()
-            .method(Method::Post)
-            .path("/test")
-            .addr("httpbin.org:80")
-            .header("Content-Type", "text/html; charset=utf-8")
-            .header("Content-Length", "13")
-            .body(Body::Text(Vec::from("Test message.")))
-            .output(output)
-            .build()
-            .unwrap();
+        let test_cli = ClientCli::parse_args(&mut args).unwrap();
 
-        assert_eq!(test_client.do_send, expected_client.do_send);
-        assert_eq!(test_client.debug, expected_client.debug);
-        assert_eq!(test_client.req, expected_client.req);
-        assert_eq!(test_client.res, expected_client.res);
-        assert_eq!(test_client.output, expected_client.output);
+        assert_eq!(test_cli, expected_cli);
+
+        let test_client = Client::try_from(test_cli).unwrap();
+        let expected_client = Client::try_from(expected_cli).unwrap();
+
+        assert_eq!(test_client, expected_client);
     }
 }
-    
+
+mod server_cli {
+    use super::*;
+
+    #[test]
+    fn parse_args() {
+        let mut args = VecDeque::from([
+            "./server", "--test", "-d",
+            "--log-file", "./log_file.txt",
+            "-I", "./favicon.ico",
+            "-0", "./static/error_404.html",
+            "-T", "pUt:/put:test message1.",
+            "-T", "pAtch:/patCh:test message2.",
+            "-T", "DeleTe:/dEletE:test message3.",
+            "-F", "GeT:/geT:./static/get.html",
+            "-F", "HEaD:/hEad:./static/head.html",
+            "-F", "pOst:/poSt:./static/post.html",
+            "127.0.0.1:7879"
+        ]);
+
+        let test_cli = ServerCli::parse_args(&mut args);
+
+        let expected_cli = ServerCli {
+            do_log: true,
+            do_debug: true,
+            is_test: true,
+            addr: Some("127.0.0.1:7879".to_string()),
+            log_file: Some(PathBuf::from("./log_file.txt")),
+            router: Router(BTreeMap::from([
+                (Route::Shutdown, Target::Shutdown),
+                (Route::NotFound,
+                    Target::File("./static/error_404.html".into())),
+                (Route::Get("/get".into()),
+                    Target::File("./static/get.html".into())),
+                (Route::Put("/put".into()),
+                    Target::Text("test message1.".to_string())),
+                (Route::Post("/post".into()),
+                    Target::File("./static/post.html".into())),
+                (Route::Head("/head".into()),
+                    Target::File("./static/head.html".into())),
+                (Route::Get("/favicon.ico".into()),
+                    Target::File("./favicon.ico".into())),
+                (Route::Patch("/patch".into()),
+                    Target::Text("test message2.".to_string())),
+                (Route::Delete("/delete".into()),
+                    Target::Text("test message3.".to_string())),
+            ]))
+        };
+
+        assert_eq!(test_cli, expected_cli);
+    }
+}

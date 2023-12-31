@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 use std::str;
 
+use crate::{NetParseError, Target};
 use crate::util::get_extension;
-use crate::{NetError, NetResult, Target};
 
 /// A respresentation of the message body.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -65,9 +65,9 @@ impl Debug for Body {
 }
 
 impl TryFrom<Target> for Body {
-    type Error = NetError;
+    type Error = NetParseError;
 
-    fn try_from(target: Target) -> NetResult<Self> {
+    fn try_from(target: Target) -> Result<Self, Self::Error> {
         match target {
             Target::Empty | Target::NotFound => Ok(Self::Empty),
             Target::Shutdown => {
@@ -182,8 +182,9 @@ impl Body {
     /// # Errors
     ///
     /// Returns an error if reading the file at `filepath` fails.
-    pub fn from_filepath(filepath: &Path) -> NetResult<Self> {
-        let data = fs::read(filepath)?;
+    pub fn from_filepath(filepath: &Path) -> Result<Self, NetParseError> {
+        let data = fs::read(filepath)
+            .map_err(|_| NetParseError::Body)?;
 
         match get_extension(filepath) {
             Some("txt") => Ok(Self::Text(data)),

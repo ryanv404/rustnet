@@ -1,10 +1,5 @@
-use std::process::Command;
-
-use rustnet::{Body, Response};
-
 #[macro_use]
 mod common;
-use common::{get_expected_for_client, get_expected_for_server};
 
 mod get {
     use super::*;
@@ -22,36 +17,28 @@ mod get {
 
 mod post {
     use super::*;
-    run_test!(CLIENT: POST status_101);
-    run_test!(CLIENT: POST status_200);
+    run_test!(CLIENT: POST status_201);
     run_test!(CLIENT: POST status_301);
     run_test!(CLIENT: POST status_404);
-    run_test!(CLIENT: POST status_502);
 }
 
 mod patch {
     use super::*;
-    run_test!(CLIENT: PATCH status_101);
     run_test!(CLIENT: PATCH status_200);
     run_test!(CLIENT: PATCH status_301);
     run_test!(CLIENT: PATCH status_404);
-    run_test!(CLIENT: PATCH status_502);
 }
 
 mod put {
     use super::*;
-    run_test!(CLIENT: PUT status_101);
     run_test!(CLIENT: PUT status_200);
     run_test!(CLIENT: PUT status_301);
     run_test!(CLIENT: PUT status_404);
-    run_test!(CLIENT: PUT status_502);
 }
 
 mod delete {
     use super::*;
-    run_test!(CLIENT: DELETE status_101);
     run_test!(CLIENT: DELETE status_200);
     run_test!(CLIENT: DELETE status_301);
     run_test!(CLIENT: DELETE status_404);
-    run_test!(CLIENT: DELETE status_502);
 }

@@ -1,21 +1,20 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
-use std::str::FromStr;
+use std::str::{self, FromStr};
 
-use crate::{Body, NetError, NetParseError, NetResult};
-use crate::colors::{BLU, CLR, CYAN};
-use crate::config::DEFAULT_NAME;
+use crate::{Body, NetParseError, DEFAULT_NAME};
+use crate::style::colors::{BR_BLU, BR_CYAN, CLR};
 use crate::util;
 
 pub mod names;
 pub mod values;
 
-pub use names::{HeaderName, HeaderNameInner};
-pub use names::header_name::{
-    self, ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
+use names::{
+    ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
     CONTENT_TYPE, HOST, SERVER, USER_AGENT,
 };
+pub use names::{HeaderName, HeaderNameInner};
 pub use values::HeaderValue;
 
 pub const MAX_HEADERS: u16 = 1024;
@@ -29,41 +28,42 @@ pub struct Header {
 
 impl Display for Header {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}: {}", self.name, self.value)
-    }
-}
-
-impl TryFrom<&[u8]> for Header {
-    type Error = NetError;
-
-    fn try_from(header: &[u8]) -> NetResult<Self> {
-        let mut tokens = header.splitn(2, |b| *b == b':');
-
-        match (tokens.next(), tokens.next()) {
-            (Some(name), Some(value)) => {
-                let name = util::trim_bytes(name);
-                let name = HeaderName::try_from(name)?;
-
-                let value = util::trim_bytes(value);
-                let value = HeaderValue::from(value);
-
-                Ok(Self { name, value })
-            },
-            (_, _) => Err(NetParseError::Header)?,
-        }
+        write!(f, "{}: {}", &self.name, &self.value)
     }
 }
 
 impl FromStr for Header {
-    type Err = NetError;
+    type Err = NetParseError;
 
-    fn from_str(header: &str) -> NetResult<Self> {
+    fn from_str(header: &str) -> Result<Self, Self::Err> {
         Self::try_from(header.as_bytes())
     }
 }
 
+impl TryFrom<&[u8]> for Header {
+    type Error = NetParseError;
+
+    fn try_from(header: &[u8]) -> Result<Self, Self::Error> {
+        let mut tokens = header.splitn(2, |b| *b == b':');
+
+        let name = tokens
+            .next()
+            .ok_or(NetParseError::Header)
+            .and_then(|name| str::from_utf8(name)
+                .map_err(|_| NetParseError::Header))
+            .map(|name| HeaderName::from(name.trim()))?;
+
+        let value = tokens
+            .next()
+            .ok_or(NetParseError::Header)
+            .map(HeaderValue::from)?;
+
+        Ok(Self { name, value })
+    }
+}
+
 /// A wrapper around an object that maps header names to header values.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
 
 impl Display for Headers {
@@ -77,23 +77,23 @@ impl Display for Headers {
 }
 
 impl FromStr for Headers {
-    type Err = NetError;
+    type Err = NetParseError;
 
-    fn from_str(many_headers: &str) -> NetResult<Self> {
+    fn from_str(many_headers: &str) -> Result<Self, Self::Err> {
         Self::try_from(many_headers.as_bytes())
     }
 }
 
 impl TryFrom<&[u8]> for Headers {
-    type Error = NetError;
+    type Error = NetParseError;
 
-    fn try_from(many_headers: &[u8]) -> NetResult<Self> {
+    fn try_from(many_headers: &[u8]) -> Result<Self, Self::Error> {
         let mut headers = Self::new();
 
         let lines = many_headers
             .split(|b| *b == b'\n')
             .map_while(|line| {
-                let trimmed = util::trim_bytes(line);
+                let trimmed = util::trim(line);
 
                 if trimmed.is_empty() {
                     None
@@ -103,7 +103,7 @@ impl TryFrom<&[u8]> for Headers {
             });
 
         for line in lines {
-            headers.insert_parsed_header_bytes(line)?;
+            headers.insert_header_from_bytes(line)?;
         }
 
         Ok(headers)
@@ -143,11 +143,13 @@ impl Headers {
 
     /// Returns the entry for associated with the given `HeaderName` key.
     #[must_use]
-    pub fn entry(
-        &mut self,
-        name: HeaderName,
-    ) -> Entry<HeaderName, HeaderValue> {
+    pub fn entry(&mut self, name: HeaderName) -> Entry<HeaderName, HeaderValue> {
         self.0.entry(name)
+    }
+
+    /// Append another `Headers` collection to this one.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
     }
 
     /// Inserts a header field entry.
@@ -169,11 +171,12 @@ impl Headers {
     /// # Errors
     ///
     /// Returns an error if `Header` parsing fails.
-    pub fn insert_parsed_header_str(&mut self, line: &str) -> NetResult<()> {
+    pub fn insert_header_from_str(
+        &mut self,
+        line: &str
+    ) -> Result<(), NetParseError> {
         let header = Header::from_str(line)?;
-
         self.insert(header.name.clone(), header.value);
-
         Ok(())
     }
 
@@ -183,14 +186,12 @@ impl Headers {
     /// # Errors
     ///
     /// Returns an error if `Header` parsing fails.
-    pub fn insert_parsed_header_bytes(
+    pub fn insert_header_from_bytes(
         &mut self,
         line: &[u8]
-    ) -> NetResult<()> {
+    ) -> Result<(), NetParseError> {
         let header = Header::try_from(line)?;
-
         self.insert(header.name.clone(), header.value);
-
         Ok(())
     }
 
@@ -213,8 +214,8 @@ impl Headers {
     /// Inserts sensible values for a default set of request headers if they
     /// are not already present.
     pub fn default_request_headers(&mut self, body: &Body, addr: SocketAddr) {
-        self.insert_if_empty(ACCEPT, "*/*".into());
         self.insert_if_empty(HOST, addr.into());
+        self.insert_if_empty(ACCEPT, "*/*".into());
         self.insert_if_empty(USER_AGENT, DEFAULT_NAME.into());
         self.insert_if_empty(CONTENT_LENGTH, body.len().into());
 
@@ -286,7 +287,10 @@ impl Headers {
         let mut headers = String::new();
 
         for (name, value) in &self.0 {
-            let header = format!("{BLU}{name}{CLR}: {CYAN}{value}{CLR}\n");
+            let header = format!(
+                "{BR_BLU}{name}{CLR}: {BR_CYAN}{value}{CLR}\n"
+            );
+
             headers.push_str(&header);
         }
 

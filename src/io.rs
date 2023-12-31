@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{
     BufRead, BufReader, BufWriter, Read, Result as IoResult, Write,
 };
@@ -9,13 +9,15 @@ use std::str;
 
 use crate::{
     Body, Headers, NetError, NetParseError, NetResult, Request, RequestLine,
-    Response, StatusLine,
+    Response, StatusLine, DEFAULT_NAME,
 };
-use crate::colors::{CLR, RED};
-use crate::config::{DEFAULT_NAME, READER_BUFSIZE, WRITER_BUFSIZE};
 use crate::header::MAX_HEADERS;
-use crate::header_name::{CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER};
+use crate::header::names::{CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER};
+use crate::style::colors::{BR_RED, CLR};
 use crate::util;
+
+pub const READER_BUFSIZE: usize = 2048;
+pub const WRITER_BUFSIZE: usize = 2048;
 
 /// Represents the TCP connection between a client and a server.
 #[derive(Debug)]
@@ -24,6 +26,18 @@ pub struct Connection {
     pub writer: BufWriter<TcpStream>,
     pub local_addr: SocketAddr,
     pub remote_addr: SocketAddr,
+}
+
+impl Display for Connection {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        writeln!(f, "Connection {{")?;
+        writeln!(f, "    reader: BufReader {{ TcpStream {{ ... }} }},")?;
+        writeln!(f, "    writer: BufWriter {{ TcpStream {{ ... }} }},")?;
+        writeln!(f, "    local_addr: {},", self.local_addr)?;
+        writeln!(f, "    remote_addr: {},", self.remote_addr)?;
+        write!(f, "}}")?;
+        Ok(())
+    }
 }
 
 impl Read for Connection {
@@ -151,9 +165,9 @@ impl Connection {
         buf: &mut Vec<u8>
     ) -> NetResult<RequestLine> {
         match self.read_until(b'\n', buf) {
-            Ok(0) => Err(NetError::UnexpectedEof),
-            Ok(_) => RequestLine::try_from(&buf[..]),
-            Err(e) => Err(NetError::Read(e.kind())),
+            Ok(0) => Err(NetError::UnexpectedEof)?,
+            Ok(_) => Ok(RequestLine::try_from(&buf[..])?),
+            Err(e) => Err(NetError::Read(e.kind()))?,
         }
     }
 
@@ -169,7 +183,7 @@ impl Connection {
     ) -> NetResult<StatusLine> {
         match self.read_until(b'\n', buf) {
             Ok(0) => Err(NetError::UnexpectedEof),
-            Ok(_) => StatusLine::try_from(&buf[..]),
+            Ok(_) => Ok(StatusLine::try_from(&buf[..])?),
             Err(e) => Err(NetError::Read(e.kind())),
         }
     }
@@ -201,13 +215,13 @@ impl Connection {
                 Err(e) => Err(NetError::Read(e.kind()))?,
                 Ok(0) => Err(NetError::UnexpectedEof)?,
                 Ok(_) => {
-                    let trimmed = util::trim_bytes(&buf[..]);
+                    let trimmed = util::trim(&buf[..]);
 
                     if trimmed.is_empty() {
                         break;
                     }
 
-                    headers.insert_parsed_header_bytes(trimmed)?;
+                    headers.insert_header_from_bytes(trimmed)?;
                 },
             }
 
@@ -413,17 +427,17 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_500_error(&mut self, err_msg: &str) -> NetResult<()> {
-        let mut res = Response::try_from(500)?;
+        let body = Body::Text(err_msg.as_bytes().to_vec());
 
-        // Include the provided error message.
-        res.body = Body::Text(err_msg.into());
-
-        // Update the response headers.
-        res.headers.connection("close");
-        res.headers.server(DEFAULT_NAME);
-        res.headers.cache_control("no-cache");
-        res.headers.content_length(res.body.len());
-        res.headers.content_type("text/plain; charset=utf-8");
+        let res = Response::builder()
+            .status_code(500)
+            .header("Connection", "close")
+            .header("Server", DEFAULT_NAME)
+            .header("Cache-Control", "no-cache")
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .header("Content-Length", &format!("{}", body.len()))
+            .body(body)
+            .build()?;
 
         self.write_status_line(&res.status_line)?;
         self.write_headers(&res.headers)?;
@@ -437,25 +451,25 @@ impl Connection {
 pub trait WriteCliError {
     /// Prints unknown option error message and exits the program.
     fn unknown_opt(&self, name: &str) {
-        eprintln!("{RED}Unknown option: `{name}`{CLR}");
+        eprintln!("{BR_RED}Unknown option: `{name}`{CLR}");
         process::exit(1);
     }
 
     /// Prints unknown argument error message and exits the program.
     fn unknown_arg(&self, name: &str) {
-        eprintln!("{RED}Unknown argument: `{name}`{CLR}");
+        eprintln!("{BR_RED}Unknown argument: `{name}`{CLR}");
         process::exit(1);
     }
 
     /// Prints missing argument error message and exits the program.
     fn missing_arg(&self, name: &str) {
-        eprintln!("{RED}Missing `{name}` argument.{CLR}");
+        eprintln!("{BR_RED}Missing `{name}` argument.{CLR}");
         process::exit(1);
     }
 
     /// Prints invalid argument error message and exits the program.
     fn invalid_arg(&self, name: &str, arg: &str) {
-        eprintln!("{RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
+        eprintln!("{BR_RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
         process::exit(1);
     }
 }

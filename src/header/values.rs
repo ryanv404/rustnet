@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
 
-#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
+use crate::util;
+
+#[derive(Clone, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
 
 impl Display for HeaderValue {
@@ -13,50 +15,46 @@ impl Display for HeaderValue {
 
 impl Debug for HeaderValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{self}")
+        write!(f, "{:?}", self.to_string())
     }
 }
 
 impl From<&str> for HeaderValue {
-    fn from(s: &str) -> Self {
-        Self(Vec::from(s.trim()))
+    fn from(value: &str) -> Self {
+        Self(Vec::from(value.trim()))
     }
 }
 
 impl From<String> for HeaderValue {
-    fn from(s: String) -> Self {
-        if !s.starts_with(' ') && !s.ends_with(' ') {
-            // Avoid a new allocation if possible.
-            Self(s.into_bytes())
-        } else {
-            Self(Vec::from(s.trim()))
-        }
+    fn from(value: String) -> Self {
+        Self::from(value.as_str())
     }
 }
 
 impl From<&[u8]> for HeaderValue {
     fn from(bytes: &[u8]) -> Self {
-        Self(bytes.to_vec())
+        Self(util::trim(bytes).to_vec())
     }
 }
 
 impl From<usize> for HeaderValue {
     fn from(num: usize) -> Self {
         let num = num.to_string();
-        Self(Vec::from(num.as_str()))
+        Self(num.into_bytes())
     }
 }
 
 impl From<Vec<u8>> for HeaderValue {
-    fn from(vec: Vec<u8>) -> Self {
-        Self(vec)
+    fn from(bytes: Vec<u8>) -> Self {
+        let trimmed = util::trim(bytes.as_slice()).to_vec();
+        Self(trimmed)
     }
 }
 
 impl From<SocketAddr> for HeaderValue {
     fn from(sock: SocketAddr) -> Self {
-        let sock_str = sock.to_string();
-        Self(sock_str.into_bytes())
+        let sock = sock.to_string();
+        Self(sock.into_bytes())
     }
 }
 

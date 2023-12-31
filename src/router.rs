@@ -2,29 +2,28 @@ use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::path::{Path, PathBuf};
 
+use crate::{Body, Method, NetResult, Response, UriPath};
 use crate::util::get_extension;
-use crate::{Body, Method, NetResult, Response};
 
 /// Represents a server endpoint defined by an HTTP method and a URI path.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Route {
     NotFound,
     Shutdown,
-    Get(String),
-    Head(String),
-    Post(String),
-    Put(String),
-    Patch(String),
-    Delete(String),
-    Trace(String),
-    Options(String),
-    Connect(String),
-    Custom((String, String)),
+    Get(UriPath),
+    Head(UriPath),
+    Post(UriPath),
+    Put(UriPath),
+    Patch(UriPath),
+    Delete(UriPath),
+    Trace(UriPath),
+    Options(UriPath),
+    Connect(UriPath),
 }
 
 impl Default for Route {
     fn default() -> Self {
-        Self::Get(String::from("/"))
+        Self::Get(UriPath::default())
     }
 }
 
@@ -33,18 +32,15 @@ impl Display for Route {
         match self {
             Self::NotFound => write!(f, "NotFound"),
             Self::Shutdown => write!(f, "Shutdown"),
-            Self::Get(ref path) => write!(f, "Get {path}"),
-            Self::Head(ref path) => write!(f, "Head {path}"),
-            Self::Post(ref path) => write!(f, "Post {path}"),
-            Self::Put(ref path) => write!(f, "Put {path}"),
-            Self::Patch(ref path) => write!(f, "Patch {path}"),
-            Self::Delete(ref path) => write!(f, "Delete {path}"),
-            Self::Trace(ref path) => write!(f, "Trace {path}"),
-            Self::Options(ref path) => write!(f, "Options {path}"),
-            Self::Connect(ref path) => write!(f, "Connect {path}"),
-            Self::Custom((ref method, ref path)) => {
-                write!(f, "{method} {path}")
-            },
+            Self::Get(UriPath(ref path)) => write!(f, "Get {path}"),
+            Self::Head(UriPath(ref path)) => write!(f, "Head {path}"),
+            Self::Post(UriPath(ref path)) => write!(f, "Post {path}"),
+            Self::Put(UriPath(ref path)) => write!(f, "Put {path}"),
+            Self::Patch(UriPath(ref path)) => write!(f, "Patch {path}"),
+            Self::Delete(UriPath(ref path)) => write!(f, "Delete {path}"),
+            Self::Trace(UriPath(ref path)) => write!(f, "Trace {path}"),
+            Self::Options(UriPath(ref path)) => write!(f, "Options {path}"),
+            Self::Connect(UriPath(ref path)) => write!(f, "Connect {path}"),
         }
     }
 }
@@ -54,18 +50,15 @@ impl Debug for Route {
         match self {
             Self::NotFound => write!(f, "NotFound"),
             Self::Shutdown => write!(f, "Shutdown"),
-            Self::Get(ref path) => write!(f, "Get({path:?})"),
-            Self::Head(ref path) => write!(f, "Head({path:?})"),
-            Self::Post(ref path) => write!(f, "Post({path:?})"),
-            Self::Put(ref path) => write!(f, "Put({path:?})"),
-            Self::Patch(ref path) => write!(f, "Patch({path:?})"),
-            Self::Delete(ref path) => write!(f, "Delete({path:?})"),
-            Self::Trace(ref path) => write!(f, "Trace({path:?})"),
-            Self::Options(ref path) => write!(f, "Options({path:?})"),
-            Self::Connect(ref path) => write!(f, "Connect({path:?})"),
-            Self::Custom((ref method, ref path)) => {
-                write!(f, "{method}({path:?})")
-            },
+            Self::Get(UriPath(ref path)) => write!(f, "Get({path:?})"),
+            Self::Head(UriPath(ref path)) => write!(f, "Head({path:?})"),
+            Self::Post(UriPath(ref path)) => write!(f, "Post({path:?})"),
+            Self::Put(UriPath(ref path)) => write!(f, "Put({path:?})"),
+            Self::Patch(UriPath(ref path)) => write!(f, "Patch({path:?})"),
+            Self::Delete(UriPath(ref path)) => write!(f, "Delete({path:?})"),
+            Self::Trace(UriPath(ref path)) => write!(f, "Trace({path:?})"),
+            Self::Options(UriPath(ref path)) => write!(f, "Options({path:?})"),
+            Self::Connect(UriPath(ref path)) => write!(f, "Connect({path:?})"),
         }
     }
 }
@@ -74,28 +67,28 @@ impl Route {
     /// Returns a new `Route` based on the provided method and URI path.
     #[must_use]
     pub fn new(method: &Method, path: &str) -> Self {
-        let path = path.to_string();
+        let path = path.into();
 
         match method {
-            Method::Get => Self::Get(path),
-            Method::Head => Self::Head(path),
-            Method::Post => Self::Post(path),
-            Method::Put => Self::Put(path),
-            Method::Patch => Self::Patch(path),
-            Method::Delete => Self::Delete(path),
-            Method::Trace => Self::Trace(path),
-            Method::Options => Self::Options(path),
-            Method::Connect => Self::Connect(path),
-            Method::Custom(ref s) if s == "SHUTDOWN" => Self::Shutdown,
-            Method::Custom(ref s) => Self::Custom((s.to_string(), path)),
+            Method::Shutdown => Self::Shutdown,
+            Method::Get => Self::Get(UriPath(path)),
+            Method::Head => Self::Head(UriPath(path)),
+            Method::Post => Self::Post(UriPath(path)),
+            Method::Put => Self::Put(UriPath(path)),
+            Method::Patch => Self::Patch(UriPath(path)),
+            Method::Delete => Self::Delete(UriPath(path)),
+            Method::Trace => Self::Trace(UriPath(path)),
+            Method::Options => Self::Options(UriPath(path)),
+            Method::Connect => Self::Connect(UriPath(path)),
         }
     }
 
     /// Returns this route's HTTP method.
     #[must_use]
-    pub fn method(&self) -> Option<Method> {
+    pub const fn method(&self) -> Option<Method> {
         match self {
             Self::NotFound => None,
+            Self::Shutdown => Some(Method::Shutdown),
             Self::Get(_) => Some(Method::Get),
             Self::Head(_) => Some(Method::Head),
             Self::Post(_) => Some(Method::Post),
@@ -105,10 +98,6 @@ impl Route {
             Self::Trace(_) => Some(Method::Trace),
             Self::Options(_) => Some(Method::Options),
             Self::Connect(_) => Some(Method::Connect),
-            Self::Shutdown => Some(Method::Custom("SHUTDOWN".to_string())),
-            Self::Custom((ref method, _)) => {
-                Some(Method::Custom(method.to_string()))
-            },
         }
     }
 
@@ -117,17 +106,34 @@ impl Route {
     pub fn path(&self) -> Option<&str> {
         match self {
             Self::NotFound | Self::Shutdown => None,
-            Self::Get(ref path)
-            | Self::Head(ref path)
-            | Self::Post(ref path)
-            | Self::Put(ref path)
-            | Self::Patch(ref path)
-            | Self::Delete(ref path)
-            | Self::Trace(ref path)
-            | Self::Options(ref path)
-            | Self::Connect(ref path)
-            | Self::Custom((_, ref path)) => Some(path),
+            Self::Get(UriPath(ref path))
+            | Self::Head(UriPath(ref path))
+            | Self::Post(UriPath(ref path))
+            | Self::Put(UriPath(ref path))
+            | Self::Patch(UriPath(ref path))
+            | Self::Delete(UriPath(ref path))
+            | Self::Trace(UriPath(ref path))
+            | Self::Options(UriPath(ref path))
+            | Self::Connect(UriPath(ref path)) => Some(path),
         }
+    }
+
+    /// Returns true if this `Route` is the server shutdown route.
+    #[must_use]
+    pub const fn is_shutdown(&self) -> bool {
+        matches!(self, Self::Shutdown)
+    }
+
+    /// Returns true if this `Route` is the 404 not found route.
+    #[must_use]
+    pub const fn is_not_found(&self) -> bool {
+        matches!(self, Self::NotFound)
+    }
+
+    /// Returns true if the `Route` is a GET route.
+    #[must_use]
+    pub const fn is_get(&self) -> bool {
+        matches!(self, Self::Get(_))
     }
 
     /// Returns true if the `Route` is a HEAD route.
@@ -142,15 +148,45 @@ impl Route {
         matches!(self, Self::Post(_))
     }
 
-    /// Returns true if this `Route` is the server shutdown route.
+    /// Returns true if the `Route` is a PUT route.
     #[must_use]
-    pub const fn is_shutdown(&self) -> bool {
-        matches!(self, Self::Shutdown)
+    pub const fn is_put(&self) -> bool {
+        matches!(self, Self::Put(_))
+    }
+
+    /// Returns true if the `Route` is a PATCH route.
+    #[must_use]
+    pub const fn is_patch(&self) -> bool {
+        matches!(self, Self::Patch(_))
+    }
+
+    /// Returns true if the `Route` is a DELETE route.
+    #[must_use]
+    pub const fn is_delete(&self) -> bool {
+        matches!(self, Self::Delete(_))
+    }
+
+    /// Returns true if the `Route` is a TRACE route.
+    #[must_use]
+    pub const fn is_trace(&self) -> bool {
+        matches!(self, Self::Trace(_))
+    }
+
+    /// Returns true if the `Route` is a OPTIONS route.
+    #[must_use]
+    pub const fn is_options(&self) -> bool {
+        matches!(self, Self::Options(_))
+    }
+
+    /// Returns true if the `Route` is a CONNECT route.
+    #[must_use]
+    pub const fn is_connect(&self) -> bool {
+        matches!(self, Self::Connect(_))
     }
 }
 
 /// The server router.
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Router(pub BTreeMap<Route, Target>);
 
 impl Display for Router {
@@ -196,7 +232,7 @@ impl Router {
         self.0.is_empty()
     }
 
-    /// Appends the routes from `other` into this `Router`.
+    /// Appends another `Router` collection to this one.
     pub fn append(&mut self, other: &mut Self) {
         self.0.append(&mut other.0);
     }
@@ -217,18 +253,19 @@ impl Router {
     /// the route does not exist in the `Router`.
     #[must_use]
     pub fn get_target(&self, route: &Route) -> Target {
-        match self.0.get(route).cloned() {
+        match self.0.get(route) {
+            Some(target) => target.clone(),
             // Allow HEAD requests for all configured GET routes.
-            None if route.is_head() => route.path().map_or(
-                Target::NotFound,
-                |head_path| {
-                    let get_route = Route::Get(head_path.to_string());
-                    self.0.get(&get_route)
-                        .cloned()
-                        .unwrap_or(Target::NotFound)
-                }),
+            None if route.is_head() => {
+                route.path()
+                    .map_or(Target::NotFound, |head_path| {
+                        let get_route = Route::Get(head_path.into());
+                        self.0.get(&get_route)
+                            .cloned()
+                            .unwrap_or(Target::NotFound)
+                    })
+            },
             None => Target::NotFound,
-            Some(target) => target,
         }
     }
 
@@ -246,17 +283,19 @@ impl Router {
     /// Returns an error if `Response::from_target` is unable to construct a
     /// `Response` from the provided `Target` and status code.
     pub fn resolve(&self, route: &Route) -> NetResult<Response> {
-        let mut res = match self.get_target(route) {
+        let (status_code, target) = match self.get_target(route) {
             // Route not found.
-            Target::NotFound => {
-                let target = self.get_not_found_target();
-                Response::from_target(target, 404)?
-            },
+            Target::NotFound => (404, self.get_not_found_target()),
             // POST route found.
-            target if route.is_post() => Response::from_target(target, 201)?,
+            target if route.is_post() => (201, target),
             // Non-POST route found.
-            target => Response::from_target(target, 200)?,
+            target => (200, target),
         };
+
+        let mut res = Response::builder()
+            .status_code(status_code)
+            .target(target)
+            .build()?;
 
         // Remove the response body for HEAD requests.
         if route.is_head() {
@@ -266,184 +305,166 @@ impl Router {
         Ok(res)
     }
 
-    /// Configures handling of a GET request.
+    /// Configures a GET route that serves a file.
     #[must_use]
-    pub fn get(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_get(uri_path, file_path);
+    pub fn get<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Get(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a HEAD request.
+    /// Configures a HEAD route that serves a file.
     #[must_use]
-    pub fn head(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_head(uri_path, file_path);
+    pub fn head<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Head(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a POST request.
+    /// Configures a POST route that serves a file.
     #[must_use]
-    pub fn post(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_post(uri_path, file_path);
+    pub fn post<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Post(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a PUT request.
+    /// Configures a PUT route that serves a file.
     #[must_use]
-    pub fn put(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_put(uri_path, file_path);
+    pub fn put<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Put(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a PATCH request.
+    /// Configures a PATCH route that serves a file.
     #[must_use]
-    pub fn patch(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_patch(uri_path, file_path);
+    pub fn patch<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Patch(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a DELETE request.
+    /// Configures a DELETE route that serves a file.
     #[must_use]
-    pub fn delete(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_delete(uri_path, file_path);
+    pub fn delete<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Delete(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a TRACE request.
+    /// Configures a TRACE route that serves a file.
     #[must_use]
-    pub fn trace(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_trace(uri_path, file_path);
+    pub fn trace<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Trace(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of a CONNECT request.
+    /// Configures an OPTIONS route that serves a file.
     #[must_use]
-    pub fn connect(mut self,  uri_path: &str, file_path: &str) -> Self {
-        self.insert_connect(uri_path, file_path);
+    pub fn options<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Options(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures handling of an OPTIONS request.
+    /// Configures a CONNECT route that serves a file.
     #[must_use]
-    pub fn options(mut self, uri_path: &str, file_path: &str) -> Self {
-        self.insert_options(uri_path, file_path);
+    pub fn connect<F, P>(mut self, path: P, file: F) -> Self
+    where
+        F: Into<PathBuf>,
+        P: Into<UriPath>,
+    {
+        let route = Route::Connect(path.into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Sets the static file path to a favicon icon.
+    /// Configures a route that serves a favicon.
     #[must_use]
-    pub fn favicon(mut self, file_path: &str) -> Self {
-        self.insert_favicon(file_path);
+    pub fn favicon<F: Into<PathBuf>>(mut self, file: F) -> Self {
+        let route = Route::Get("/favicon.ico".into());
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
         self
     }
 
-    /// Configures a file to return with 404 Not Found responses.
+    /// Configures a route that serves a file for routes that are not
+    /// found.
     #[must_use]
-    pub fn not_found(mut self, file_path: &str) -> Self {
-        self.insert_not_found(file_path);
-        self
-    }
-
-    /// Configures handling of a GET request.
-    pub fn insert_get(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Get(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a HEAD request.
-    pub fn insert_head(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Head(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a POST request.
-    pub fn insert_post(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Post(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a PUT request.
-    pub fn insert_put(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Put(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a PATCH request.
-    pub fn insert_patch(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Patch(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a DELETE request.
-    pub fn insert_delete(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Delete(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a TRACE request.
-    pub fn insert_trace(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Trace(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of a CONNECT request.
-    pub fn insert_connect(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Connect(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures handling of an OPTIONS request.
-    pub fn insert_options(&mut self, uri_path: &str, file_path: &str) {
-        let route = Route::Options(uri_path.to_string());
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Sets the static file path to a favicon icon.
-    pub fn insert_favicon(&mut self, file_path: &str) {
-        let route = Route::Get("/favicon.ico".to_string());
-        let target = Target::Favicon(PathBuf::from(file_path));
-        self.mount(route, target);
-    }
-
-    /// Configures a file to return with 404 Not Found responses.
-    pub fn insert_not_found(&mut self, file_path: &str) {
+    pub fn not_found<F: Into<PathBuf>>(mut self, file: F) -> Self {
         let route = Route::NotFound;
-        let target = Target::File(PathBuf::from(file_path));
-        self.mount(route, target);
+        let target = Target::File(file.into());
+        self.0.insert(route, target);
+        self
     }
 
     /// Returns a `RouteBuilder`.
     #[must_use]
-    pub fn route(self, uri_path: &str) -> RouteBuilder {
-        RouteBuilder::new(self, uri_path)
+    pub fn route(self, path: &str) -> RouteBuilder {
+        RouteBuilder::new(self, path)
     }
 }
 
-/// A builder object for configuring one URI path to respond differently to
-/// different HTTP methods.
+/// Configures a single URI path to respond differently to different HTTP
+// methods.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RouteBuilder {
     pub router: Router,
-    pub path: String,
+    pub path: UriPath,
 }
 
 impl RouteBuilder {
     /// Returns a new `RouteBuilder` instance.
     #[must_use]
     pub fn new(router: Router, path: &str) -> Self {
-        let path = path.to_string();
+        let path = path.into();
         Self { router, path }
     }
 
-    /// Configures handling of a GET request.
+    /// Configures a GET route that serves the given `target`.
     #[must_use]
     pub fn get(mut self, target: Target) -> Self {
         let route = Route::Get(self.path.clone());
@@ -451,7 +472,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a Head request.
+    /// Configures a HEAD route that serves the given `target`.
     #[must_use]
     pub fn head(mut self, target: Target) -> Self {
         let route = Route::Head(self.path.clone());
@@ -459,7 +480,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a POST request.
+    /// Configures a POST route that serves the given `target`.
     #[must_use]
     pub fn post(mut self, target: Target) -> Self {
         let route = Route::Post(self.path.clone());
@@ -467,7 +488,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a PUT request.
+    /// Configures a PUT route that serves the given `target`.
     #[must_use]
     pub fn put(mut self, target: Target) -> Self {
         let route = Route::Put(self.path.clone());
@@ -475,7 +496,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a PATCH request.
+    /// Configures a PATCH route that serves the given `target`.
     #[must_use]
     pub fn patch(mut self, target: Target) -> Self {
         let route = Route::Patch(self.path.clone());
@@ -483,7 +504,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a DELETE request.
+    /// Configures a DELETE route that serves the given `target`.
     #[must_use]
     pub fn delete(mut self, target: Target) -> Self {
         let route = Route::Delete(self.path.clone());
@@ -491,7 +512,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a TRACE request.
+    /// Configures a TRACE route that serves the given `target`.
     #[must_use]
     pub fn trace(mut self, target: Target) -> Self {
         let route = Route::Trace(self.path.clone());
@@ -499,7 +520,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of an OPTIONS request.
+    /// Configures an OPTIONS route that serves the given `target`.
     #[must_use]
     pub fn options(mut self, target: Target) -> Self {
         let route = Route::Options(self.path.clone());
@@ -507,7 +528,7 @@ impl RouteBuilder {
         self
     }
 
-    /// Configures handling of a CONNECT request.
+    /// Configures a CONNECT route that serves the given `target`.
     #[must_use]
     pub fn connect(mut self, target: Target) -> Self {
         let route = Route::Connect(self.path.clone());
@@ -523,7 +544,7 @@ impl RouteBuilder {
 }
 
 /// Target resources served by routes in a `Router`.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Empty,
     NotFound,

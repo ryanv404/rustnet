@@ -1,4 +1,3 @@
-use std::borrow::{Cow, Borrow};
 use std::collections::VecDeque;
 use std::net::{SocketAddr, TcpStream};
 use std::process::{self, Command, Stdio};
@@ -7,45 +6,49 @@ use std::thread;
 use std::time::Duration;
 
 use crate::{
-    Body, Client, ClientBuilder, Headers, Method, NetError, NetResult,
-    OutputStyle, Tui, WriteCliError,
+    Body, Client, Headers, Method, NetResult, Style, Tui, UriPath, Version,
+    WriteCliError, TEST_SERVER_ADDR,
 };
-use crate::colors::{CLR, GRN, RED};
-use crate::config::TEST_SERVER_ADDR;
-use crate::header_name::{CONTENT_LENGTH, CONTENT_TYPE};
+use crate::style::colors::{BR_GRN, BR_RED, CLR};
 use crate::util;
 
 /// Contains the parsed client command line arguments.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ClientCli<'a> {
-    pub debug: bool,
+pub struct ClientCli {
     pub do_send: bool,
+    pub do_debug: bool,
+    pub do_plain: bool,
+    pub no_dates: bool,
+    pub addr: Option<String>,
+    pub style: Style,
     pub method: Method,
-    pub path: Option<Cow<'a, str>>,
-    pub addr: Option<Cow<'a, str>>,
+    pub path: UriPath,
+    pub version: Version,
     pub headers: Headers,
     pub body: Body,
-    pub output: OutputStyle,
 }
 
-impl<'a> Default for ClientCli<'a> {
+impl Default for ClientCli {
     fn default() -> Self {
         Self {
-            debug: false,
             do_send: true,
-            method: Method::Get,
-            path: None,
+            do_debug: false,
+            do_plain: false,
+            no_dates: false,
             addr: None,
-            headers: Headers::new(),
-            body: Body::Empty,
-            output: OutputStyle::default()
+            style: Style::default(),
+            method: Method::default(),
+            path: UriPath::default(),
+            version: Version::default(),
+            headers: Headers::default(),
+            body: Body::default(),
         }
     }
 }
 
-impl<'a> WriteCliError for ClientCli<'a> {}
+impl WriteCliError for ClientCli {}
 
-impl<'a> ClientCli<'a> {
+impl ClientCli {
     /// Returns a default `ClientCli` instance.
     #[must_use]
     pub fn new() -> Self {
@@ -55,196 +58,194 @@ impl<'a> ClientCli<'a> {
     /// Prints the client help message and exits the program.
     pub fn print_help(&self) {
         eprintln!("\
-{GRN}USAGE:{CLR}
+{BR_GRN}USAGE:{CLR}
     http_client [OPTIONS] [--] <URI>\n
-{GRN}ARGUMENT:{CLR}
+{BR_GRN}ARGUMENT:{CLR}
     URI   An HTTP URI (e.g. \"httpbin.org/json\")\n
-{GRN}OPTIONS:{CLR}
-    --body TEXT         Add TEXT to the request body.
-    --builder           Build a request and send it.
-    --debug             Print client debug information.
-    --header HEADER     Add a header with the format NAME:VALUE to the request.
-    --help              Display this help message.
-    --method METHOD     Use METHOD as the request method (default: \"GET\").
-    --minimal           Only print the request line and status line.
-    --no-dates          Remove Date headers from the output (useful during testing).
-    --output FORMAT     Set the output style to FORMAT, see below
-                        (default: --output \"shb\").
-    --path PATH         Use PATH as the URI path (default: \"/\").
-    --plain             Do not colorize the output.
-    --request           Print the request without sending it.
-    --server            Start a server listening on {TEST_SERVER_ADDR}.
-    --shutdown          Shut down the server running on {TEST_SERVER_ADDR}.
-    --tui               Run the client TUI.
-    --verbose           Print both the request and the response.\n
-{GRN}FORMAT OPTIONS:{CLR}
-    R = request line
-    H = request headers
-    B = request body
-    s = status line
-    h = response headers
-    b = response body\n");
+{BR_GRN}OPTIONS:{CLR}
+    -B, --body TEXT         Add TEXT to the request body.
+    -b, --builder           Build a request and send it.
+    -d, --debug             Print client debug information.
+    -H, --header HEADER     Add a header with the format NAME:VALUE to the request.
+    -h, --help              Display this help message.
+    -M, --method METHOD     Use METHOD as the request method (default: \"GET\").
+    -m, --minimal           Only print the request line and status line.
+    -n, --no-dates          Remove Date headers from the output (useful during testing).
+    -O, --output FORMAT     Set the output style to FORMAT, see below
+                            (default: --output \"shb\").
+    -P, --path PATH         Use PATH as the URI path (default: \"/\").
+    -p, --plain             Do not colorize the output.
+    -r, --request           Print the request without sending it.
+    -s, --server            Start a server listening on {TEST_SERVER_ADDR}.
+    -S, --shutdown          Shut down the server running on {TEST_SERVER_ADDR}.
+    -T, --tui               Run the client TUI.
+    -v, --verbose           Print both the request and the response.\n
+    -V, --version           Set the protocol version (default: \"HTTP/1.1\").\n
+{BR_GRN}FORMAT OPTIONS:{CLR}
+    R = request line       s = status line
+    H = request headers    h = response headers
+    B = request body       b = response body\n");
 
         process::exit(0);
     }
 
     /// Parses the command line options into a `ClientCli` object.
-    pub fn parse_args(args: &mut VecDeque<&str>) -> NetResult<Client> {
-        let mut cli = Self::new();
-
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `Client` cannot be built.
+    pub fn parse_args(args: &mut VecDeque<&str>) -> NetResult<Self> {
         let _ = args.pop_front();
 
-        while let Some(opt) = args.pop_front() {
-            if !opt.starts_with("--") {
-                // First non-option argument is the URI argument.
-                cli.handle_uri(opt);
-                break;
-            }
+        let mut cli = Self::new();
 
-            match opt.len() {
-                2 if opt == "--" => match args.pop_front() {
-                    // URI following the end of options flag.
-                    Some(uri) => cli.handle_uri(uri),
+        while let Some(opt) = args.pop_front() {
+            match opt {
+                // URI is the first argument after "--".
+                "--" => match args.pop_front() {
+                    Some(arg) => {
+                        cli.handle_uri(arg);
+                        break;
+                    },
                     None => cli.missing_arg("URI"),
                 },
-                // Run the client TUI.
-                5 if opt == "--tui" => Tui::run(),
-                6 => match opt {
-                    // Print the help message.
-                    "--help" => cli.print_help(),
-                    // Set request body data.
-                    "--body" => match args.pop_front() {
-                        Some(text) => cli.handle_body(text),
-                        None => cli.missing_arg(opt),
-                    },
-                    // Path component of the requested HTTP URI.
-                    "--path" => match args.pop_front() {
-                        Some(path) => cli.path = Some(path.into()),
-                        None => cli.missing_arg(opt),
-                    },
-                    _ => cli.unknown_opt(opt),
+                // Run request builder.
+                "--builder" => {
+                    Client::get_request_from_cli()?;
+                    break;
                 },
-                7 => match opt {
-                    // Enable debugging.
-                    "--debug" => cli.debug = true,
-                    // Do not colorize output.
-                    "--plain" => cli.output.make_plain(),
-                    _ => cli.unknown_opt(opt),
-                },
-                8 => match opt {
-                    // Start a test server at localhost:7878.
-                    "--server" => ClientCli::start_server(),
-                    // Set request method.
-                    "--method" => match args.pop_front() {
-                        Some(method) => cli.handle_method(method),
-                        None => cli.missing_arg(opt),
-                    },
-                    // Add a request header.
-                    "--header" => match args.pop_front() {
-                        Some(header) => cli.handle_header(header),
-                        None => cli.missing_arg(opt),
-                    },
-                    // Set the output style based on the format string arg.
-                    "--output" => match args.pop_front() {
-                        Some(format) => cli.output.format_str(format),
-                        None => cli.missing_arg(opt),
-                    },
-                    _ => cli.unknown_opt(opt),
-                },
-                9 => match opt {
-                    // Only print the request line and status line.
-                    "--minimal" => cli.output.format_str("Rs"),
-                    // Set verbose output style.
-                    "--verbose" => cli.output.format_str("RHBshb"),
-                    // Run the request builder.
-                    "--builder" => return cli.build_request(),
-                    // Set request output style and no send option.
-                    "--request" => {
-                        cli.do_send = false;
-                        cli.output.format_str("RHB");
-                    },
-                    _ => cli.unknown_opt(opt),
-                },
-                10 => match opt {
-                    // Remove Date headers before printing.
-                    "--no-dates" => cli.output.no_dates = true,
-                    // Send a shutdown request to localhost:7878.
-                    "--shutdown" => cli.do_shutdown(),
-                    _ => cli.unknown_opt(opt),
-                },
-                // Handle an unknown option.
-                _ => cli.unknown_opt(opt),
+                // Handle options.
+                _ if opt.starts_with('-') => cli.handle_opt(opt, args),
+                // URI is the first non-option argument.
+                _ => cli.handle_uri(opt),
             }
         }
 
-        let Some(addr) = cli.addr.take() else {
-            cli.missing_arg("URI");
-            process::exit(1);
-        };
+        if cli.do_plain {
+            cli.style.to_plain();
+        }
 
-        ClientBuilder::<&str>::new()
-            .debug(cli.debug)
-            .do_send(cli.do_send)
-            .addr(addr.borrow())
-            .path(cli.path.unwrap_or(Cow::Borrowed("/")).borrow())
-            .method(cli.method.clone())
-            .headers(cli.headers.clone())
-            .output(cli.output)
-            .body(cli.body)
-            .build()
+        Ok(cli)
     }
 
-    fn handle_method(&mut self, method: &str) {
-        let method = method.to_ascii_uppercase();
-        self.method = Method::from(method.as_str());
-    }
-
-    fn handle_header(&mut self, header: &str) {
-        match header.split_once(':') {
-            Some((name, value)) => {
-                self.headers.header(name.trim(), value.trim());
+    pub fn handle_opt(&mut self, opt: &str, args: &mut VecDeque<&str>) {
+        match opt {
+            // Run the client TUI.
+            "-T" | "--tui" => Tui::run(),
+            // Start a test server at localhost:7878.
+            "-s" | "--server" => Self::start_server(),
+            // Send a shutdown request to localhost:7878.
+            "-S" | "--shutdown" => Self::do_shutdown(),
+            // Print the help message.
+            "-h" | "--help" => self.print_help(),
+            // Do not colorize output.
+            "-p" | "--plain" => self.do_plain = true,
+            // Enable debug printing.
+            "-d" | "--debug" => self.do_debug = true,
+            // Remove Date headers before printing.
+            "-n" | "--no-dates" => self.no_dates = true,
+            // Only print the request line and status line.
+            "-m" | "--minimal" => self.style.from_format_str("Rs"),
+            // Set verbose output style.
+            "-v" | "--verbose" => self.style.from_format_str("*"),
+            // Set request output style and do not send.
+            "-r" | "--request" => {
+                self.do_send = false;
+                self.style.from_format_str("RHB");
             },
-            None => self.invalid_arg("--header", header),
+            // Set the HTTP method.
+            "-M" | "--method" => match args.pop_front() {
+                Some(method) => self.handle_method(method),
+                None => self.missing_arg(opt),
+            },
+            // Set the URI path.
+            "-P" | "--path" => match args.pop_front() {
+                Some(path) => {
+                    self.path = UriPath(path.trim().to_ascii_lowercase());
+                },
+                None => self.missing_arg(opt),
+            },
+            // Set the protocol version.
+            "-V" | "--version" => match args.pop_front() {
+                Some(version_str) => {
+                    let version_str = version_str.to_ascii_uppercase();
+
+                    match Version::from_str(version_str.trim()).ok() {
+                        Some(version) => self.version = version,
+                        None => self.invalid_arg(opt, &version_str),
+                    }
+                },
+                None => self.missing_arg(opt),
+            },
+            // Add a request header.
+            "-H" | "--header" => match args.pop_front() {
+                Some(header) => self.handle_header(header),
+                None => self.missing_arg(opt),
+            },
+            // Set the request body.
+            "-B" | "--body" => match args.pop_front() {
+                Some(body) => self.body = Body::Text(Vec::from(body.trim())),
+                None => self.missing_arg(opt),
+            },
+            // Set the output style based on a format string.
+            "-O" | "--output" => match args.pop_front() {
+                Some(format) => self.style.from_format_str(format.trim()),
+                None => self.missing_arg(opt),
+            },
+            // Handle an unknown option.
+            _ => self.unknown_opt(opt),
         }
     }
 
-    fn handle_body(&mut self, body: &str) {
-        self.body = Body::Text(Vec::from(body));
-
-        if !self.headers.contains(&CONTENT_TYPE) {
-            if let Some(con_type) = self.body.as_content_type() {
-                self.headers.content_type(con_type);
-            }
-        }
-
-        if !self.headers.contains(&CONTENT_LENGTH) {
-            self.headers.content_length(self.body.len());
-        }
-    }
-
-    fn handle_uri(&mut self, uri: &str) {
-        match util::parse_uri(uri).ok() {
-            Some((addr, path)) if self.path.is_none() => {
-                self.addr = Some(addr.into());
-                self.path = Some(path.into());
+    pub fn handle_uri(&mut self, arg: &str) {
+        match util::parse_uri(arg).ok() {
+            Some((addr, path)) if self.path.is_default() => {
+                self.path = UriPath(path.trim().to_ascii_lowercase());
+                self.addr = Some(addr.trim().to_ascii_lowercase());
             },
             // Do not clobber a previously set path.
-            Some((addr, _)) => self.addr = Some(addr.into()),
-            None => self.invalid_arg("URI", uri),
+            Some((addr, _)) => {
+                self.addr = Some(addr.trim().to_ascii_lowercase());
+            },
+            None => self.invalid_arg("URI", arg),
         }
     }
 
-    fn do_shutdown(&self) {
-        if let Err(e) = Client::shutdown(TEST_SERVER_ADDR) {
+    pub fn handle_method(&mut self, method: &str) {
+        let uppercase = method.trim().to_ascii_uppercase();
+
+        match Method::from_str(uppercase.as_str()).ok() {
+            Some(method) => self.method = method,
+            None => self.invalid_arg("--method", method),
+        }
+    }
+
+    pub fn handle_header(&mut self, header: &str) {
+        let Some((name, value)) = header.split_once(':') else {
+            return self.invalid_arg("--header", header);
+        };
+
+        let name = name.to_ascii_lowercase();
+        let value = value.to_ascii_lowercase();
+
+        let name = util::to_titlecase(name.as_bytes());
+
+        self.headers.header(name.trim(), value.trim());
+    }
+
+    pub fn do_shutdown() {
+        let uri = format!("{TEST_SERVER_ADDR}/");
+
+        if let Err(e) = Client::send(Method::Shutdown, &uri) {
             eprintln!("Could not send the shutdown request.\n{e}");
         }
 
         process::exit(0);
     }
 
-    fn start_server() {
+    pub fn start_server() {
         if let Err(e) = util::build_server() {
-            eprintln!("{RED}Server failed to build: {e}{CLR}");
+            eprintln!("{BR_RED}Server failed to build: {e}{CLR}");
             process::exit(1);
         }
 
@@ -258,53 +259,37 @@ impl<'a> ClientCli<'a> {
             .stderr(Stdio::null())
             .spawn()
         {
-            eprintln!("{RED}Failed to start server: {e}{CLR}");
+            eprintln!("{BR_RED}Failed to start server: {e}{CLR}");
             process::exit(1);
         }
 
-        if Self::check_server().is_ok() {
-            println!("{GRN}Server is listening on {TEST_SERVER_ADDR}.{CLR}");
+        if Self::check_server(TEST_SERVER_ADDR) {
+            println!("{BR_GRN}Server is listening on {TEST_SERVER_ADDR}.{CLR}");
             process::exit(0);
         }
 
-        eprintln!("{RED}Failed to start server.{CLR}");
+        eprintln!("{BR_RED}Failed to start server.{CLR}");
         process::exit(1);
     }
 
-    fn check_server() -> NetResult<()> {
+    /// Returns true if a connection can be established with the given `addr`.
+    #[must_use]
+    pub fn check_server(addr: &str) -> bool {
         let timeout = Duration::from_millis(200);
 
-        let Ok(socket) = SocketAddr::from_str(TEST_SERVER_ADDR) else {
-            return Err(NetError::NotConnected);
+        let Ok(socket) = SocketAddr::from_str(addr) else {
+            return false;
         };
 
         // Attempt to connect a maximum of five times.
         for _ in 0..5 {
             if TcpStream::connect_timeout(&socket, timeout).is_ok() {
-                return Ok(());
+                return true;
             }
 
             thread::sleep(timeout);
         }
 
-        Err(NetError::NotConnected)
-    }
-
-    pub fn build_request(&self) -> NetResult<Client> {
-        let (mut req, conn) = Tui::build_request()?;
-
-        let remote_addr = conn.remote_addr.to_string();
-        req.headers.header("Host", &remote_addr);
-
-        let client = Client {
-            debug: false,
-            do_send: true,
-            req: Some(req),
-            res: None,
-            conn: Some(conn),
-            output: OutputStyle::default()
-        };
-
-        Ok(client)
+        false
     }
 }
