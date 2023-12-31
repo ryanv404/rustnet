@@ -478,7 +478,7 @@ mod client_cli {
                 (util::to_titlecase(b"Pineapple").into(), "yum123".into())
             ])),
             body: Body::Text(
-                b"This is a test meSSage :) in the request bOdy."[..].into()
+                "This is a test meSSage :) in the request bOdy.".into()
             ),
             ..ClientCli::default()
         };
@@ -542,11 +542,11 @@ mod server_cli {
                 (Route::Head("/head".into()),
                     Path::new("./static/head.html").into()),
                 (Route::Put("/put".into()),
-                    Target::Text(b"test message1."[..].into())),
+                    Target::Text("test message1.".into())),
                 (Route::Patch("/patch".into()),
-                    Target::Text(b"test message2."[..].into())),
+                    Target::Text("test message2.".into())),
                 (Route::Delete("/delete".into()),
-                    Target::Text(b"test message3."[..].into())),
+                    Target::Text("test message3.".into())),
             ]))
         };
 

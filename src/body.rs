@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,13 +8,13 @@ use crate::{Method, NetParseError};
 use crate::util;
 
 /// A respresentation of the message body.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Body {
     Empty,
-    Xml(Cow<'static, [u8]>),
-    Html(Cow<'static, [u8]>),
-    Json(Cow<'static, [u8]>),
-    Text(Cow<'static, [u8]>),
+    Xml(Cow<'static, str>),
+    Html(Cow<'static, str>),
+    Json(Cow<'static, str>),
+    Text(Cow<'static, str>),
     Bytes(Cow<'static, [u8]>),
     Favicon(Cow<'static, [u8]>),
 }
@@ -29,14 +29,10 @@ impl Display for Body {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Empty | Self::Bytes(_) | Self::Favicon(_) => Ok(()),
-            Self::Xml(ref buf)
-                | Self::Html(ref buf)
-                | Self::Json(ref buf)
-                | Self::Text(ref buf) =>
-            {
-                let body = String::from_utf8_lossy(buf);
-                write!(f, "{}", body.trim_end())
-            },
+            Self::Xml(ref s)
+                | Self::Html(ref s)
+                | Self::Json(ref s)
+                | Self::Text(ref s) => write!(f, "{}", s.trim_end()),
         }
     }
 }
@@ -47,19 +43,35 @@ impl Debug for Body {
             Self::Empty => write!(f, "Body::Empty"),
             Self::Bytes(_) => write!(f, "Body::Bytes(...)"),
             Self::Favicon(_) => write!(f, "Body::Favicon(...)"),
-            Self::Xml(ref buf) => {
-                write!(f, "Body::Xml({:?})", String::from_utf8_lossy(buf))
-            },
-            Self::Html(ref buf) => {
-                write!(f, "Body::Html({:?})", String::from_utf8_lossy(buf))
-            },
-            Self::Json(ref buf) => {
-                write!(f, "Body::Json({:?})", String::from_utf8_lossy(buf))
-            },
-            Self::Text(ref buf) => {
-                write!(f, "Body::Text({:?})", String::from_utf8_lossy(buf))
-            },
+            Self::Xml(ref s) => write!(f, "Body::Xml({:?})", s.trim_end()),
+            Self::Html(ref s) => write!(f, "Body::Html({:?})", s.trim_end()),
+            Self::Json(ref s) => write!(f, "Body::Json({:?})", s.trim_end()),
+            Self::Text(ref s) => write!(f, "Body::Text({:?})", s.trim_end()),
         }
+    }
+}
+
+impl From<&'static str> for Body {
+    fn from(body: &'static str) -> Self {
+        Self::Text(Cow::Borrowed(body))
+    }
+}
+
+impl From<&'static [u8]> for Body {
+    fn from(bytes: &'static [u8]) -> Self {
+        Self::Bytes(Cow::Borrowed(bytes))
+    }
+}
+
+impl From<String> for Body {
+    fn from(body: String) -> Self {
+        Self::Text(Cow::Owned(body))
+    }
+}
+
+impl From<Vec<u8>> for Body {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(Cow::Owned(bytes))
     }
 }
 
@@ -69,14 +81,12 @@ impl TryFrom<Target> for Body {
     fn try_from(target: Target) -> Result<Self, Self::Error> {
         match target {
             Target::Empty | Target::NotFound => Ok(Self::Empty),
-            Target::Shutdown => {
-                Ok(Self::Text(Cow::Borrowed(b"Server is shutting down.")))
-            },
-            Target::Xml(b) => Ok(Self::Xml(b.into())),
-            Target::Html(b) => Ok(Self::Html(b.into())),
-            Target::Json(b) => Ok(Self::Json(b.into())),
-            Target::Text(b) => Ok(Self::Text(b.into())),
-            Target::Bytes(b) => Ok(Self::Bytes(b.into())),
+            Target::Shutdown => Ok("Server is shutting down.".into()),
+            Target::Xml(s) => Ok(Self::Xml(s)),
+            Target::Html(s) => Ok(Self::Html(s)),
+            Target::Json(s) => Ok(Self::Json(s)),
+            Target::Text(s) => Ok(Self::Text(s)),
+            Target::Bytes(b) => Ok(Self::Bytes(b)),
             Target::File(ref path) => Ok(Self::from_filepath(path)?),
             Target::Favicon(ref path) => Ok(Self::from_filepath(path)?),
         }
@@ -144,12 +154,13 @@ impl Body {
     pub fn get_ref(&self) -> Option<&[u8]> {
         match self {
             Self::Empty => None,
-                | Self::Xml(buf)
-                | Self::Html(buf)
-                | Self::Json(buf)
-                | Self::Text(buf)
-                | Self::Bytes(buf)
-                | Self::Favicon(buf) => Some(buf),
+            Self::Xml(s) | Self::Html(s) | Self::Json(s) | Self::Text(s) => {
+                let body: &str = s.borrow();
+                Some(body.as_bytes())
+            },
+            Self::Bytes(buf) | Self::Favicon(buf) => {
+             Some(buf.borrow())
+            },
         }
     }
 
@@ -188,26 +199,50 @@ impl Body {
         let data = fs::read(filepath).map_err(|_| NetParseError::Body)?;
 
         match util::get_extension(filepath) {
-            Some("xml") => Ok(Self::Xml(data.into())),
-            Some("txt") => Ok(Self::Text(data.into())),
-            Some("json") => Ok(Self::Json(data.into())),
             Some("ico") => Ok(Self::Favicon(data.into())),
-            Some("html" | "htm") => Ok(Self::Html(data.into())),
+            Some("xml") => {
+                let body = String::from_utf8_lossy(&data);
+                Ok(Self::Xml(body.into_owned().into()))
+            },
+            Some("txt") => {
+                let body = String::from_utf8_lossy(&data);
+                Ok(Self::Text(body.into_owned().into()))
+            },
+            Some("json") => {
+                let body = String::from_utf8_lossy(&data);
+                Ok(Self::Json(body.into_owned().into()))
+            },
+            Some("html" | "htm") => {
+                let body = String::from_utf8_lossy(&data);
+                Ok(Self::Html(body.into_owned().into()))
+            },
             Some(_) | None => Ok(Self::Bytes(data.into())),
         }
     }
 
     #[must_use]
     pub fn from_content_type(buf: &[u8], content_type: &str) -> Self {
-        let buf = buf.to_owned();
-
         match content_type.trim_start() {
-            s if s.starts_with("text/html") => Self::Html(buf.into()),
-            s if s.starts_with("text/plain") => Self::Text(buf.into()),
-            s if s.starts_with("application/xml") => Self::Xml(buf.into()),
-            s if s.starts_with("image/x-icon") => Self::Favicon(buf.into()),
-            s if s.starts_with("application/json") => Self::Json(buf.into()),
-            _ => Self::Bytes(buf.into()),
+            s if s.starts_with("text/html") => {
+                let body = String::from_utf8_lossy(buf);
+                Self::Html(body.into_owned().into())
+            },
+            s if s.starts_with("text/plain") => {
+                let body = String::from_utf8_lossy(buf);
+                Self::Text(body.into_owned().into())
+            },
+            s if s.starts_with("application/xml") => {
+                let body = String::from_utf8_lossy(buf);
+                Self::Xml(body.into_owned().into())
+            },
+            s if s.starts_with("application/json") => {
+                let body = String::from_utf8_lossy(buf);
+                Self::Json(body.into_owned().into())
+            },
+            s if s.starts_with("image/x-icon") => {
+                Self::Favicon(buf.to_vec().into())
+            },
+            _ => Self::Bytes(buf.to_vec().into()),
         }
     }
 
@@ -233,10 +268,10 @@ pub enum Target {
     Empty,
     Shutdown,
     NotFound,
-    Xml(Cow<'static, [u8]>),
-    Html(Cow<'static, [u8]>),
-    Json(Cow<'static, [u8]>),
-    Text(Cow<'static, [u8]>),
+    Xml(Cow<'static, str>),
+    Html(Cow<'static, str>),
+    Json(Cow<'static, str>),
+    Text(Cow<'static, str>),
     Bytes(Cow<'static, [u8]>),
     File(Cow<'static, Path>),
     Favicon(Cow<'static, Path>),
@@ -255,28 +290,12 @@ impl Display for Target {
             Self::Shutdown => write!(f, "Shutdown"),
             Self::NotFound => write!(f, "Not Found"),
             Self::Bytes(_) => write!(f, "Bytes(...)"),
-            Self::Xml(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Xml({})", target.trim_end())
-            },
-            Self::Html(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Html({})", target.trim_end())
-            },
-            Self::Json(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Json({})", target.trim_end())
-            },
-            Self::Text(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Text({})", target.trim_end())
-            },
-            Self::File(ref path) => {
-                write!(f, "File({})", path.display())
-            },
-            Self::Favicon(ref path) => {
-                write!(f, "Favicon({})", path.display())
-            },
+            Self::Xml(ref s) => write!(f, "Xml({})", s.trim_end()),
+            Self::Html(ref s) => write!(f, "Html({})", s.trim_end()),
+            Self::Json(ref s) => write!(f, "Json({})", s.trim_end()),
+            Self::Text(ref s) => write!(f, "Text({})", s.trim_end()),
+            Self::File(ref p) => write!(f, "File({})", p.display()),
+            Self::Favicon(ref p) => write!(f, "Favicon({})", p.display()),
         }
     }
 }
@@ -288,35 +307,19 @@ impl Debug for Target {
             Self::Shutdown => write!(f, "Shutdown"),
             Self::NotFound => write!(f, "NotFound"),
             Self::Bytes(_) => write!(f, "Bytes(...)"),
-            Self::Xml(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Xml({:?})", target.trim_end())
-            },
-            Self::Html(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Html({:?})", target.trim_end())
-            },
-            Self::Json(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Json({:?})", target.trim_end())
-            },
-            Self::Text(ref b) => {
-                let target = String::from_utf8_lossy(b);
-                write!(f, "Text({:?})", target.trim_end())
-            },
-            Self::File(ref path) => {
-                write!(f, "File({:?})", path.display())
-            },
-            Self::Favicon(ref path) => {
-                write!(f, "Favicon({:?})", path.display())
-            },
+            Self::Xml(ref s) => write!(f, "Xml({:?})", s.trim_end()),
+            Self::Html(ref s) => write!(f, "Html({:?})", s.trim_end()),
+            Self::Json(ref s) => write!(f, "Json({:?})", s.trim_end()),
+            Self::Text(ref s) => write!(f, "Text({:?})", s.trim_end()),
+            Self::File(ref p) => write!(f, "File({:?})", p.display()),
+            Self::Favicon(ref p) => write!(f, "Favicon({:?})", p.display()),
         }
     }
 }
 
 impl From<&'static str> for Target {
     fn from(text: &'static str) -> Self {
-        Self::Text(Cow::Borrowed(text.as_bytes()))
+        Self::Text(Cow::Borrowed(text))
     }
 }
 
@@ -328,7 +331,7 @@ impl From<&'static [u8]> for Target {
 
 impl From<String> for Target {
     fn from(text: String) -> Self {
-        Self::Text(Cow::Owned(text.into_bytes()))
+        Self::Text(Cow::Owned(text))
     }
 }
 

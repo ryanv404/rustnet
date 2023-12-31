@@ -185,10 +185,7 @@ impl ClientCli {
             },
             // Set the request body.
             "-B" | "--body" => match args.pop_front() {
-                Some(body) => {
-                    let body = Vec::from(body.trim());
-                    self.body = Body::Text(body.into());
-                },
+                Some(body) => self.body = String::from(body.trim()).into(),
                 None => self.missing_arg(opt),
             },
             // Set the output style based on a format string.

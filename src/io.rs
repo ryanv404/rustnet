@@ -427,7 +427,7 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_500_error(&mut self, err_msg: String) -> NetResult<()> {
-        let body = Body::Text(err_msg.into_bytes().into());
+        let body: Body = err_msg.into();
 
         let res = Response::builder()
             .status_code(500)
