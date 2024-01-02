@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
 use std::str::{self, FromStr};
 
-use crate::{Body, NetParseError, DEFAULT_NAME};
+use crate::{Body, NetError, NetParseError, NetResult, DEFAULT_NAME};
 use crate::style::colors::{BR_BLU, BR_CYAN, CLR};
 use crate::util;
 
@@ -81,6 +81,15 @@ impl FromStr for Headers {
 
     fn from_str(many_headers: &str) -> Result<Self, Self::Err> {
         Self::try_from(many_headers.as_bytes())
+    }
+}
+
+impl TryFrom<&mut Vec<u8>> for Headers {
+    type Error = NetError;
+
+    fn try_from(many_headers: &mut Vec<u8>) -> NetResult<Self> {
+        let headers = Self::try_from(&many_headers[..])?;
+        Ok(headers)
     }
 }
 

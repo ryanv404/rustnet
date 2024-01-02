@@ -199,11 +199,14 @@ impl TryFrom<&[u8]> for Response {
         let mut lines = trimmed.split(|b| *b == b'\n');
 
         // Parse the status line.
-        let Some(line) = lines.next() else {
-            return Err(NetParseError::StatusLine);
-        };
+        let line = lines
+            .next()
+            .ok_or(NetParseError::StatusLine)?;
 
-        let (version, status) = Response::parse_status_line(line)?;
+        let line_str = str::from_utf8(line)
+            .map_err(|_| NetParseError::StatusLine)?;
+
+        let (version, status) = Self::parse_status_line(line_str)?;
 
         let mut headers = Headers::new();
 
@@ -260,29 +263,6 @@ impl Response {
         Self::default()
     }
 
-    /// Parses a bytes slice into a `Version` and a `Status`.
-    #[must_use]
-    pub fn parse_status_line(
-        line: &[u8]
-    ) -> Result<(Version, Status), NetParseError> {
-        let status_line = str::from_utf8(line)
-            .map_err(|_| NetParseError::StatusLine)?;
-
-        let start_idx = status_line
-            .find("HTTP")
-            .ok_or(NetParseError::StatusLine)?;
-
-        status_line[start_idx..]
-            .split_once(' ')
-            .ok_or(NetParseError::StatusLine)
-            .and_then(|(version, status)| {
-                let version = Version::from_str(version.trim_end())?;
-                let status = Status::from_str(status.trim())?;
-
-                Ok((version, status))
-            })
-    }
-
     /// Returns a reference to the HTTP protocol `Version`.
     #[must_use]
     pub const fn version(&self) -> &Version {
@@ -317,6 +297,25 @@ impl Response {
     #[must_use]
     pub fn status_line_to_color_string(&self) -> String {
         format!("{BR_PURP}{} {}{CLR}", self.version, self.status)
+    }
+
+    /// Parses a string slice into a `Version` and a `Status`.
+    #[must_use]
+    pub fn parse_status_line(
+        line: &str
+    ) -> Result<(Version, Status), NetParseError> {
+        let start_idx = line
+            .find("HTTP")
+            .ok_or(NetParseError::StatusLine)?;
+
+        line[start_idx..]
+            .split_once(' ')
+            .ok_or(NetParseError::StatusLine)
+            .and_then(|(version, status)| {
+                let version = Version::from_str(version.trim_end())?;
+                let status = Status::from_str(status.trim())?;
+                Ok((version, status))
+            })
     }
 
     /// Returns a reference to the headers for this `Response`.

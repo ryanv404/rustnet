@@ -14,7 +14,6 @@ use crate::{
 use crate::header::MAX_HEADERS;
 use crate::header::names::{CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER};
 use crate::style::colors::{BR_RED, CLR};
-use crate::util;
 
 pub const READER_BUFSIZE: usize = 2048;
 pub const WRITER_BUFSIZE: usize = 2048;
@@ -161,12 +160,16 @@ impl Connection {
     /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`.
     pub fn recv_request_line(
-        &mut self,
-        buf: &mut Vec<u8>
+        &mut self
     ) -> NetResult<(Method, UriPath, Version)> {
-        let request_line = match self.read_until(b'\n', buf) {
+        let reader_ref = Read::by_ref(self);
+        let mut reader = reader_ref.take(2024);
+
+        let mut buf = String::with_capacity(2024);
+
+        let request_line = match reader.read_line(&mut buf) {
             Ok(0) => Err(NetError::UnexpectedEof)?,
-            Ok(_) => Request::parse_request_line(buf)?,
+            Ok(_) => Request::parse_request_line(&buf)?,
             Err(e) => Err(NetError::Read(e.kind()))?,
         };
 
@@ -180,62 +183,48 @@ impl Connection {
     /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`.
     pub fn recv_status_line(
-        &mut self,
-        buf: &mut Vec<u8>
+        &mut self
     ) -> NetResult<(Version, Status)> {
-        let status_line = match self.read_until(b'\n', buf) {
+        let reader_ref = Read::by_ref(self);
+        let mut reader = reader_ref.take(2024);
+
+        let mut buf = String::with_capacity(2024);
+
+        let status_line = match reader.read_line(&mut buf) {
             Ok(0) => Err(NetError::UnexpectedEof)?,
-            Ok(_) => Response::parse_status_line(buf)?,
+            Ok(_) => Response::parse_status_line(&buf)?,
             Err(e) => Err(NetError::Read(e.kind()))?,
         };
 
         Ok(status_line)
     }
 
-    /// Reads all headers from the underlying `TcpStream` into the provided
-    /// `String` buffer returning the total number of headers read.
+    /// Reads and parses all headers from the underlying `TcpStream`.
     ///
     /// # Errors
     ///
     /// As with the other readers, an error of kind `NetError::UnexpectedEof`
     /// is returned if `Ok(0)` is received while reading from the underlying
     /// `TcpStream`.
-    pub fn recv_headers(
-        &mut self,
-        buf: &mut Vec<u8>
-    ) -> NetResult<Headers> {
+    pub fn recv_headers(&mut self, buf: &mut Vec<u8>) -> NetResult<Headers> {
+        let reader_ref = Read::by_ref(self);
+        let mut reader = reader_ref.take(2024);
+
         let mut num_headers = 0;
 
-        let mut headers = Headers::new();
-
-        loop {
-            if num_headers >= MAX_HEADERS {
-                return Err(NetParseError::TooManyHeaders)?;
-            }
-
-            buf.clear();
-
-            match self.read_until(b'\n', buf) {
-                Err(e) => Err(NetError::Read(e.kind()))?,
+        while num_headers < MAX_HEADERS {
+            match reader.read_until(b'\n', buf) {
                 Ok(0) => Err(NetError::UnexpectedEof)?,
-                Ok(_) => {
-                    let trimmed = util::trim(&buf[..]);
-
-                    if trimmed.is_empty() {
-                        break;
-                    }
-
-                    headers.insert_header_from_bytes(trimmed)?;
-                },
+                Ok(1 | 2) => return Headers::try_from(buf),
+                Ok(_) => num_headers += 1,
+                Err(e) => Err(NetError::Read(e.kind()))?,
             }
-
-            num_headers += 1;
         }
 
-        Ok(headers)
+        Err(NetParseError::TooManyHeaders)?
     }
 
-    /// Reads a message `Body` from the underlying `TcpStream`.
+    /// Reads and parses the message body from the underlying `TcpStream`.
     ///
     /// # Errors
     ///
@@ -247,13 +236,9 @@ impl Connection {
         content_len: u64,
         content_type: &str
     ) -> NetResult<Body> {
-        if content_len == 0 {
-            return Ok(Body::Empty);
-        }
-
         let reader_ref = Read::by_ref(self);
-
         let mut reader = reader_ref.take(content_len);
+
         reader.read_to_end(buf)?;
 
         Ok(Body::from_content_type(buf, content_type))
@@ -266,13 +251,11 @@ impl Connection {
     /// An error is returned if there is a failure to read or parse the
     /// individual components of the `Request`.
     pub fn recv_request(&mut self) -> NetResult<Request> {
+        let (method, path, version) = self.recv_request_line()?;
+
         let mut buf = Vec::with_capacity(1024);
 
-        let (method, path, version) = self.recv_request_line(&mut buf)?;
-        buf.clear();
-
         let headers = self.recv_headers(&mut buf)?;
-        buf.clear();
 
         let content_len = headers
             .get(&CONTENT_LENGTH)
@@ -284,11 +267,17 @@ impl Connection {
             .map(|value| value.as_str())
             .unwrap_or(Cow::Borrowed(""));
 
-        let body = self.recv_body(
-            &mut buf,
-            content_len,
-            &content_type
-        )?;
+        buf.clear();
+
+        let body = if content_len == 0 {
+            Body::Empty
+        } else {
+            self.recv_body(
+                &mut buf,
+                content_len,
+                &content_type
+            )?
+        };
 
         Ok(Request {method, path, version, headers, body })
     }
@@ -300,13 +289,11 @@ impl Connection {
     /// An error is returned if there is a failure to read or parse the
     /// individual components of the `Response`.
     pub fn recv_response(&mut self) -> NetResult<Response> {
+        let (version, status) = self.recv_status_line()?;
+
         let mut buf = Vec::with_capacity(1024);
 
-        let (version, status) = self.recv_status_line(&mut buf)?;
-        buf.clear();
-
         let headers = self.recv_headers(&mut buf)?;
-        buf.clear();
 
         let content_len = headers
             .get(&CONTENT_LENGTH)
@@ -318,11 +305,17 @@ impl Connection {
             .map(|value| value.as_str())
             .unwrap_or(Cow::Borrowed(""));
 
-        let body = self.recv_body(
-            &mut buf,
-            content_len,
-            &content_type
-        )?;
+        buf.clear();
+
+        let body = if content_len == 0 {
+            Body::Empty
+        } else {
+            self.recv_body(
+                &mut buf,
+                content_len,
+                &content_type
+            )?
+        };
 
         Ok(Response { version, status, headers, body })
     }

@@ -245,7 +245,10 @@ impl TryFrom<&[u8]> for Request {
             .next()
             .ok_or(NetParseError::RequestLine)?;
 
-        let (method, path, version) = Request::parse_request_line(line)?;
+        let line_str = str::from_utf8(line)
+            .map_err(|_| NetParseError::RequestLine)?;
+
+        let (method, path, version) = Self::parse_request_line(line_str)?;
 
         let mut headers = Headers::new();
 
@@ -302,31 +305,6 @@ impl Request {
         Self::default()
     }
 
-    /// Parses a bytes slice into a `Method`, `UriPath`, and `Version.
-    pub fn parse_request_line(
-        line: &[u8]
-    ) -> Result<(Method, UriPath, Version), NetParseError> {
-        let line_str = str::from_utf8(line)
-            .map_err(|_| NetParseError::RequestLine)?;
-
-        let (method, remaining) = line_str
-            .trim_start()
-            .split_once(' ')
-            .ok_or(NetParseError::RequestLine)?;
-
-        remaining
-            .trim_start()
-            .split_once(' ')
-            .ok_or(NetParseError::RequestLine)
-            .and_then(|(path, version)| {
-                let method = Method::from_str(method.trim_end())?;
-                let path = path.trim_end().to_string().into();
-                let version = Version::from_str(version.trim())?;
-
-                Ok((method, path, version))
-            })
-    }
-
     /// Returns the HTTP `Method`.
     #[must_use]
     pub const fn method(&self) -> Method {
@@ -366,6 +344,27 @@ impl Request {
             &self.path,
             &self.version
         )
+    }
+
+    /// Parses a string slice into a `Method`, `UriPath`, and `Version.
+    pub fn parse_request_line(
+        line: &str
+    ) -> Result<(Method, UriPath, Version), NetParseError> {
+        let (method, remaining) = line
+            .trim_start()
+            .split_once(' ')
+            .ok_or(NetParseError::RequestLine)?;
+
+        remaining
+            .trim_start()
+            .split_once(' ')
+            .ok_or(NetParseError::RequestLine)
+            .and_then(|(path, version)| {
+                let method = Method::from_str(method.trim_end())?;
+                let path = path.trim_end().to_string().into();
+                let version = Version::from_str(version.trim())?;
+                Ok((method, path, version))
+            })
     }
 
     /// Returns a reference to the request headers.
