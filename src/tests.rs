@@ -15,7 +15,7 @@ use crate::header::names::{
     ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
     CONTENT_TYPE, HOST, SERVER, STANDARD_HEADERS, USER_AGENT,
 };
-use crate::util::{self, trim, trim_start, trim_end};
+use crate::util::{self, Trim};
 
 macro_rules! test_parsing_from_str {
     (
@@ -282,29 +282,29 @@ mod utils {
 
     #[test]
     fn test_trim() {
-        assert_eq!(trim(b"  test"), b"test");
-        assert_eq!(trim(b"test    "), b"test");
-        assert_eq!(trim(b"         test       "), b"test");
-        assert_eq!(trim(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
-        assert_eq!(trim(b"                   "), b"");
-        assert_eq!(trim(b"x"), b"x");
-        assert_eq!(trim(b""), b"");
+        assert_eq!(b"  test".trim(), b"test");
+        assert_eq!(b"test    ".trim(), b"test");
+        assert_eq!(b"         test       ".trim(), b"test");
+        assert_eq!(b"\t  \nx\t  x\r\x0c".trim(), b"x\t  x");
+        assert_eq!(b"                   ".trim(), b"");
+        assert_eq!(b"x".trim(), b"x");
+        assert_eq!(b"".trim(), b"");
     }
 
     #[test]
     fn test_trim_start() {
-        assert_eq!(trim_start(b"  test"), b"test");
-        assert_eq!(trim_start(b"test    "), b"test    ");
-        assert_eq!(trim_start(b"         test       "), b"test       ");
-        assert_eq!(trim_start(b"                   "), b"");
+        assert_eq!(b"  test".trim_start(), b"test");
+        assert_eq!(b"test    ".trim_start(), b"test    ");
+        assert_eq!(b"         test       ".trim_start(), b"test       ");
+        assert_eq!(b"                   ".trim_start(), b"");
     }
 
     #[test]
     fn test_trim_end() {
-        assert_eq!(trim_end(b"  test"), b"  test");
-        assert_eq!(trim_end(b"test    "), b"test");
-        assert_eq!(trim_end(b"         test       "), b"         test");
-        assert_eq!(trim_end(b"                   "), b"");
+        assert_eq!(b"  test".trim_end(), b"  test");
+        assert_eq!(b"test    ".trim_end(), b"test");
+        assert_eq!(b"         test       ".trim_end(), b"         test");
+        assert_eq!(b"                   ".trim_end(), b"");
     }
 }
 

@@ -5,7 +5,7 @@ use std::str::{self, FromStr};
 
 use crate::{Body, NetError, NetParseError, NetResult, DEFAULT_NAME};
 use crate::style::colors::{BR_BLU, BR_CYAN, CLR};
-use crate::util;
+use crate::util::Trim;
 
 pub mod names;
 pub mod values;
@@ -102,12 +102,12 @@ impl TryFrom<&[u8]> for Headers {
         let lines = many_headers
             .split(|b| *b == b'\n')
             .map_while(|line| {
-                let trimmed = util::trim(line);
+                let line = line.trim();
 
-                if trimmed.is_empty() {
+                if line.is_empty() {
                     None
                 } else {
-                    Some(trimmed)
+                    Some(line)
                 }
             });
 

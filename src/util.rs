@@ -8,47 +8,47 @@ use std::time::Duration;
 use crate::{NetError, NetParseError, NetResult};
 use crate::style::colors::{BR_RED, CLR};
 
-// Trims ASCII whitespace bytes from the start of a slice of bytes.
-#[must_use]
-pub fn trim_start(bytes: &[u8]) -> &[u8] {
-    if bytes.is_empty() {
-        return bytes;
-    }
-
-    // Find the index of the first non-whitespace byte.
-    for i in 0..bytes.len() {
-        if !bytes[i].is_ascii_whitespace() {
-            return &bytes[i..];
-        }
-    }
-
-    // The slice only contains whitespace.
-    &[]
+pub trait Trim {
+    fn trim_start(&self) -> &[u8];
+    fn trim_end(&self) -> &[u8];
+    fn trim(&self) -> &[u8];
 }
 
-// Trims ASCII whitespace bytes from the end of a slice of bytes.
-#[must_use]
-pub fn trim_end(bytes: &[u8]) -> &[u8] {
-    if bytes.is_empty() {
-        return bytes;
-    }
+impl Trim for [u8] {
+    /// Trim whitespace from the beginning of a bytes slice.
+    fn trim_start(&self) -> &[u8] {
+        let mut bytes = self;
 
-    // Find the index of the final non-whitespace byte.
-    for i in (0..bytes.len()).rev() {
-        if !bytes[i].is_ascii_whitespace() {
-            return &bytes[..=i];
+        while let [first, rest @ ..] = bytes {
+            if first.is_ascii_whitespace() {
+                bytes = rest;
+            } else {
+                break;
+            }
         }
+
+        bytes
     }
 
-    // The slice only contains whitespace.
-    &[]
-}
+    /// Trim whitespace from the end of a bytes slice.
+    fn trim_end(&self) -> &[u8] {
+        let mut bytes = self;
 
-// Trims ASCII whitespace bytes from both ends of a slice of bytes.
-#[must_use]
-pub fn trim(bytes: &[u8]) -> &[u8] {
-    let trimmed = trim_start(bytes);
-    trim_end(trimmed)
+        while let [rest @ .., last] = bytes {
+            if last.is_ascii_whitespace() {
+                bytes = rest;
+            } else {
+                break;
+            }
+        }
+
+        bytes
+    }
+
+    /// Trim whitespace from the beginning and the end of a bytes slice.
+    fn trim(&self) -> &[u8] {
+        self.trim_start().trim_end()
+    }
 }
 
 /// Parses a string slice into a host address and a URI path.

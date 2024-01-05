@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
 
-use crate::util;
+use crate::util::Trim;
 
 #[derive(Clone, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);
@@ -33,7 +33,7 @@ impl From<String> for HeaderValue {
 
 impl From<&[u8]> for HeaderValue {
     fn from(bytes: &[u8]) -> Self {
-        Self(util::trim(bytes).to_vec())
+        Self(bytes.trim().to_vec())
     }
 }
 
@@ -46,8 +46,7 @@ impl From<usize> for HeaderValue {
 
 impl From<Vec<u8>> for HeaderValue {
     fn from(bytes: Vec<u8>) -> Self {
-        let trimmed = util::trim(bytes.as_slice()).to_vec();
-        Self(trimmed)
+        Self(bytes.as_slice().trim().to_vec())
     }
 }
 

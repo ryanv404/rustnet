@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::header::names::CONTENT_TYPE;
 use crate::style::colors::{BR_PURP, CLR};
-use crate::util;
+use crate::util::Trim;
 
 /// An HTTP response builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -194,7 +194,7 @@ impl TryFrom<&[u8]> for Response {
     type Error = NetParseError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bytes = util::trim_start(bytes);
+        let bytes = bytes.trim_start();
 
         let mut lines = bytes.split(|b| *b == b'\n');
 
@@ -210,7 +210,7 @@ impl TryFrom<&[u8]> for Response {
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let line = util::trim(line);
+                let line = line.trim();
 
                 if line.is_empty() {
                     None

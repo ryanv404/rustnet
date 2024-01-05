@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::header::names::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
 use crate::style::colors::{BR_YLW, CLR};
-use crate::util;
+use crate::util::Trim;
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -236,7 +236,7 @@ impl TryFrom<&[u8]> for Request {
     type Error = NetParseError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bytes = util::trim_start(bytes);
+        let bytes = bytes.trim_start();
 
         let mut lines = bytes.split(|&b| b == b'\n');
 
@@ -252,7 +252,7 @@ impl TryFrom<&[u8]> for Request {
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let line = util::trim(line);
+                let line = line.trim();
 
                 if line.is_empty() {
                     None
@@ -346,13 +346,13 @@ impl Request {
     pub fn parse_request_line(
         line: &[u8]
     ) -> Result<(Method, UriPath, Version), NetParseError> {
-        let mut parts = util::trim_start(line).splitn(2, |&b| b == b' ');
+        let mut parts = line.trim_start().splitn(2, |&b| b == b' ');
 
         let (Some(method), Some(rest)) = (parts.next(), parts.next()) else {
             return Err(NetParseError::RequestLine);
         };
 
-        let mut parts = util::trim(rest).splitn(2, |&b| b == b' ');
+        let mut parts = rest.trim().splitn(2, |&b| b == b' ');
 
         let (Some(path), Some(version)) = (parts.next(), parts.next()) else {
             return Err(NetParseError::RequestLine);
@@ -364,7 +364,7 @@ impl Request {
             .map_err(|_| NetParseError::Path)?
             .into();
 
-        let version = Version::try_from(util::trim_start(version))?;
+        let version = Version::try_from(version.trim_start())?;
 
         Ok((method, path, version))
     }
