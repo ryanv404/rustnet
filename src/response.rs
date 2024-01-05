@@ -194,9 +194,9 @@ impl TryFrom<&[u8]> for Response {
     type Error = NetParseError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let trimmed = util::trim_start(bytes);
+        let bytes = util::trim_start(bytes);
 
-        let mut lines = trimmed.split(|b| *b == b'\n');
+        let mut lines = bytes.split(|b| *b == b'\n');
 
         // Parse the status line.
         let (version, status) = lines
@@ -210,12 +210,12 @@ impl TryFrom<&[u8]> for Response {
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let trimmed = util::trim(line);
+                let line = util::trim(line);
 
-                if trimmed.is_empty() {
+                if line.is_empty() {
                     None
                 } else {
-                    Some(trimmed)
+                    Some(line)
                 }
             });
 

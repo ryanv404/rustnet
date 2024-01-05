@@ -160,16 +160,15 @@ impl Connection {
     /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
     /// to read the underlying `TcpStream` returns `Ok(0)`.
     pub fn recv_request_line(
-        &mut self
+        &mut self,
+        buf: &mut Vec<u8>
     ) -> NetResult<(Method, UriPath, Version)> {
         let reader_ref = Read::by_ref(self);
         let mut reader = reader_ref.take(2024);
 
-        let mut buf = String::with_capacity(2024);
-
-        let request_line = match reader.read_line(&mut buf) {
+        let request_line = match reader.read_until(b'\n', buf) {
             Ok(0) => Err(NetError::UnexpectedEof)?,
-            Ok(_) => Request::parse_request_line(&buf)?,
+            Ok(_) => Request::parse_request_line(buf)?,
             Err(e) => Err(NetError::Read(e.kind()))?,
         };
 
@@ -250,11 +249,13 @@ impl Connection {
     /// An error is returned if there is a failure to read or parse the
     /// individual components of the `Request`.
     pub fn recv_request(&mut self) -> NetResult<Request> {
-        let (method, path, version) = self.recv_request_line()?;
-
         let mut buf = Vec::with_capacity(1024);
 
+        let (method, path, version) = self.recv_request_line(&mut buf)?;
+        buf.clear();
+
         let headers = self.recv_headers(&mut buf)?;
+        buf.clear();
 
         let content_len = headers
             .get(&CONTENT_LENGTH)
@@ -265,8 +266,6 @@ impl Connection {
             .get(&CONTENT_TYPE)
             .map(|value| value.as_str())
             .unwrap_or(Cow::Borrowed(""));
-
-        buf.clear();
 
         let body = if content_len == 0 {
             Body::Empty

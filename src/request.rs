@@ -236,19 +236,15 @@ impl TryFrom<&[u8]> for Request {
     type Error = NetParseError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let trimmed = util::trim_start(bytes);
+        let bytes = util::trim_start(bytes);
 
-        let mut lines = trimmed.split(|b| *b == b'\n');
+        let mut lines = bytes.split(|&b| b == b'\n');
 
         // Parse the request line.
-        let line = lines
+        let (method, path, version) = lines
             .next()
-            .ok_or(NetParseError::RequestLine)?;
-
-        let line_str = str::from_utf8(line)
-            .map_err(|_| NetParseError::RequestLine)?;
-
-        let (method, path, version) = Self::parse_request_line(line_str)?;
+            .ok_or(NetParseError::RequestLine)
+            .and_then(Self::parse_request_line)?;
 
         let mut headers = Headers::new();
 
@@ -256,12 +252,12 @@ impl TryFrom<&[u8]> for Request {
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let trimmed = util::trim(line);
+                let line = util::trim(line);
 
-                if trimmed.is_empty() {
+                if line.is_empty() {
                     None
                 } else {
-                    Some(trimmed)
+                    Some(line)
                 }
             });
 
@@ -346,25 +342,31 @@ impl Request {
         )
     }
 
-    /// Parses a string slice into a `Method`, `UriPath`, and `Version.
+    /// Parses a bytes slice into a `Method`, `UriPath`, and `Version`.
     pub fn parse_request_line(
-        line: &str
+        line: &[u8]
     ) -> Result<(Method, UriPath, Version), NetParseError> {
-        let (method, remaining) = line
-            .trim_start()
-            .split_once(' ')
-            .ok_or(NetParseError::RequestLine)?;
+        let mut parts = util::trim_start(line).splitn(2, |&b| b == b' ');
 
-        remaining
-            .trim_start()
-            .split_once(' ')
-            .ok_or(NetParseError::RequestLine)
-            .and_then(|(path, version)| {
-                let method = Method::from_str(method.trim_end())?;
-                let path = path.trim_end().to_string().into();
-                let version = Version::from_str(version.trim())?;
-                Ok((method, path, version))
-            })
+        let (Some(method), Some(rest)) = (parts.next(), parts.next()) else {
+            return Err(NetParseError::RequestLine);
+        };
+
+        let mut parts = util::trim(rest).splitn(2, |&b| b == b' ');
+
+        let (Some(path), Some(version)) = (parts.next(), parts.next()) else {
+            return Err(NetParseError::RequestLine);
+        };
+
+        let method = Method::try_from(method)?;
+
+        let path = String::from_utf8(path.to_vec())
+            .map_err(|_| NetParseError::Path)?
+            .into();
+
+        let version = Version::try_from(util::trim_start(version))?;
+
+        Ok((method, path, version))
     }
 
     /// Returns a reference to the request headers.
