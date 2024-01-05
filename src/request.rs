@@ -167,7 +167,7 @@ impl UriPath {
         self.as_str().as_bytes()
     }
 
-    /// Returns true if this `UriPath` iss the default path ("/").
+    /// Returns true if this `UriPath` is the default path ("/").
     #[must_use]
     pub fn is_default(&self) -> bool {
         self.as_str() == "/"

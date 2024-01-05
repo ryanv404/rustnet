@@ -199,14 +199,10 @@ impl TryFrom<&[u8]> for Response {
         let mut lines = trimmed.split(|b| *b == b'\n');
 
         // Parse the status line.
-        let line = lines
+        let (version, status) = lines
             .next()
-            .ok_or(NetParseError::StatusLine)?;
-
-        let line_str = str::from_utf8(line)
-            .map_err(|_| NetParseError::StatusLine)?;
-
-        let (version, status) = Self::parse_status_line(line_str)?;
+            .ok_or(NetParseError::StatusLine)
+            .and_then(Self::parse_status_line)?;
 
         let mut headers = Headers::new();
 
@@ -302,20 +298,27 @@ impl Response {
     /// Parses a string slice into a `Version` and a `Status`.
     #[must_use]
     pub fn parse_status_line(
-        line: &str
+        line: &[u8]
     ) -> Result<(Version, Status), NetParseError> {
-        let start_idx = line
-            .find("HTTP")
+        let start = line
+            .iter()
+            .position(|&b| b == b'H')
             .ok_or(NetParseError::StatusLine)?;
 
-        line[start_idx..]
-            .split_once(' ')
-            .ok_or(NetParseError::StatusLine)
-            .and_then(|(version, status)| {
-                let version = Version::from_str(version.trim_end())?;
-                let status = Status::from_str(status.trim())?;
-                Ok((version, status))
-            })
+        let line = &line[start..];
+
+        let version = if line.starts_with(b"HTTP/1.1 ") {
+            Version::OneDotOne
+        } else {
+            return Err(NetParseError::Version);
+        };
+
+        let status = line
+            .get(9..)
+            .ok_or(NetParseError::Status)
+            .and_then(Status::try_from)?;
+
+        Ok((version, status))
     }
 
     /// Returns a reference to the headers for this `Response`.
