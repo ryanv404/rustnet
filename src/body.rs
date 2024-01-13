@@ -224,7 +224,7 @@ impl Body {
     #[must_use]
     pub fn from_content_type(buf: &[u8], content_type: &str) -> Self {
         if buf.is_empty() || content_type.is_empty() {
-            return Body::Empty;
+            return Self::Empty;
         }
 
         match content_type.trim_start() {
@@ -254,14 +254,14 @@ impl Body {
     /// Returns true if a body is not permitted based on the given `Method`
     /// and status code.
     #[must_use]
-    pub fn should_be_empty(code: u16, method: Method) -> bool {
-        match code {
+    pub fn should_be_empty(status_code: u16, method: &Method) -> bool {
+        match status_code {
             // 1xx (Informational), 204 (No Content), and 304 (Not Modified).
             100..=199 | 204 | 304 => true,
             // CONNECT responses with a 2xx (Success) status.
-            200..=299 if method == Method::Connect => true,
+            200..=299 if method.is_connect() => true,
             // HEAD responses.
-            _ if method == Method::Head => true,
+            _ if method.is_head() => true,
             _ => false,
         }
     }
@@ -291,16 +291,16 @@ impl Default for Target {
 impl Display for Target {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Empty => write!(f, "Empty"),
-            Self::Shutdown => write!(f, "Shutdown"),
-            Self::NotFound => write!(f, "Not Found"),
-            Self::Bytes(_) => write!(f, "Bytes(...)"),
-            Self::Xml(ref s) => write!(f, "Xml({})", s.trim_end()),
-            Self::Html(ref s) => write!(f, "Html({})", s.trim_end()),
-            Self::Json(ref s) => write!(f, "Json({})", s.trim_end()),
-            Self::Text(ref s) => write!(f, "Text({})", s.trim_end()),
-            Self::File(ref p) => write!(f, "File({})", p.display()),
-            Self::Favicon(ref p) => write!(f, "Favicon({})", p.display()),
+            Self::Empty => write!(f, "Target::Empty"),
+            Self::Shutdown => write!(f, "Target::Shutdown"),
+            Self::NotFound => write!(f, "Target::NotFound"),
+            Self::Bytes(_) => write!(f, "Target::Bytes(...)"),
+            Self::Xml(ref s) => write!(f, "Target::Xml({})", s.trim_end()),
+            Self::Html(ref s) => write!(f, "Target::Html({})", s.trim_end()),
+            Self::Json(ref s) => write!(f, "Target::Json({})", s.trim_end()),
+            Self::Text(ref s) => write!(f, "Target::Text({})", s.trim_end()),
+            Self::File(ref p) => write!(f, "Target::File({})", p.display()),
+            Self::Favicon(ref p) => write!(f, "Target::Favicon({})", p.display()),
         }
     }
 }
@@ -308,16 +308,16 @@ impl Display for Target {
 impl Debug for Target {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Empty => write!(f, "Empty"),
-            Self::Shutdown => write!(f, "Shutdown"),
-            Self::NotFound => write!(f, "NotFound"),
-            Self::Bytes(_) => write!(f, "Bytes(...)"),
-            Self::Xml(ref s) => write!(f, "Xml({:?})", s.trim_end()),
-            Self::Html(ref s) => write!(f, "Html({:?})", s.trim_end()),
-            Self::Json(ref s) => write!(f, "Json({:?})", s.trim_end()),
-            Self::Text(ref s) => write!(f, "Text({:?})", s.trim_end()),
-            Self::File(ref p) => write!(f, "File({:?})", p.display()),
-            Self::Favicon(ref p) => write!(f, "Favicon({:?})", p.display()),
+            Self::Empty => write!(f, "Target::Empty"),
+            Self::Shutdown => write!(f, "Target::Shutdown"),
+            Self::NotFound => write!(f, "Target::NotFound"),
+            Self::Bytes(_) => write!(f, "Target::Bytes(...)"),
+            Self::Xml(ref s) => write!(f, "Target::Xml({:?})", s.trim_end()),
+            Self::Html(ref s) => write!(f, "Target::Html({:?})", s.trim_end()),
+            Self::Json(ref s) => write!(f, "Target::Json({:?})", s.trim_end()),
+            Self::Text(ref s) => write!(f, "Target::Text({:?})", s.trim_end()),
+            Self::File(ref p) => write!(f, "Target::File({:?})", p.display()),
+            Self::Favicon(ref p) => write!(f, "Target::Favicon({:?})", p.display()),
         }
     }
 }

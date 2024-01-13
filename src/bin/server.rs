@@ -19,8 +19,10 @@ fn main() -> NetResult<()> {
         process::exit(1);
     };
 
+    let mut router = Router::new();
+
     // Add some static HTML routes.
-    let mut router = Router::new()
+    let router = router
         .get("/about", Path::new("static/about.html"))
         .get("/get", Path::new("static/index.html"))
         .head("/head", Path::new("static/index.html"))
@@ -37,7 +39,7 @@ fn main() -> NetResult<()> {
 
     // Add a single path that serves different resources depending on
     // the HTTP method that is used.
-    router = router.route("/many_methods")
+    let mut router = router.route("/many_methods")
         .get("Hi from the GET route!")
         .head("Hi from the HEAD route!")
         .post("Hi from the POST route!")
@@ -56,16 +58,16 @@ fn main() -> NetResult<()> {
     let server = match cli.log_file.take() {
         Some(ref path) => {
             Server::http(&addr)
-                .router(router)
+                .log_file(path)
+                .router(&mut router)
                 .do_log(cli.do_log)
                 .do_debug(cli.do_debug)
                 .is_test_server(cli.is_test)
-                .log_file(path)
                 .build()?
         },
         None => {
             Server::http(&addr)
-                .router(router)
+                .router(&mut router)
                 .do_log(cli.do_log)
                 .do_debug(cli.do_debug)
                 .is_test_server(cli.is_test)

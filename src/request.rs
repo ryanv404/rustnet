@@ -5,7 +5,7 @@ use std::str::{self, FromStr};
 
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetParseError, Route,
-    Version, DEFAULT_NAME,
+    Target, Version, DEFAULT_NAME,
 };
 use crate::header::names::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
 use crate::style::colors::{BR_YLW, CLR};
@@ -279,8 +279,7 @@ impl TryFrom<&[u8]> for Request {
         // Parse the `Body` using the Content-Type header.
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map(|value| value.as_str())
-            .unwrap_or(Cow::Borrowed(""));
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
         let body = Body::from_content_type(&body_vec, &content_type);
 
@@ -322,7 +321,7 @@ impl Request {
     /// Returns a `Route` which represents the request `Method` and URI path.
     #[must_use]
     pub fn route(&self) -> Route {
-        Route::new(self.method(), self.path().to_string())
+        Route::new(self.method, self.path.clone(), Target::Empty)
     }
 
     /// Returns the request line as a `String` with plain formatting.
@@ -343,6 +342,10 @@ impl Request {
     }
 
     /// Parses a bytes slice into a `Method`, `UriPath`, and `Version`.
+    ///
+    /// # Errors
+    ///
+    /// Retuns an error if parsing of the request line fails.
     pub fn parse_request_line(
         line: &[u8]
     ) -> Result<(Method, UriPath, Version), NetParseError> {

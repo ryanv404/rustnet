@@ -1,12 +1,16 @@
 use std::borrow::Cow;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
 use crate::NetParseError;
 
 /// HTTP methods.
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Method {
+    /// Custom method used by the `Router` for 404 Not Found responses.
+    Any,
+    /// Custom method used to shut down a test server.
+    Shutdown,
     /// Transfers a current representation of the target resource.
     Get,
     /// Performs resource-specific processing on the request content.
@@ -27,8 +31,6 @@ pub enum Method {
     Options,
     /// Establishes a tunnel to the server identified by the target resource.
     Connect,
-    /// Custom method to shut down a test server.
-    Shutdown,
 }
 
 impl Default for Method {
@@ -40,6 +42,12 @@ impl Default for Method {
 impl Display for Method {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl Debug for Method {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "Method::{}", self.as_str())
     }
 }
 
@@ -59,6 +67,7 @@ impl FromStr for Method {
             "OPTIONS" => Ok(Self::Options),
             "CONNECT" => Ok(Self::Connect),
             "SHUTDOWN" => Ok(Self::Shutdown),
+            "ANY" => Ok(Self::Any),
             _ => Err(NetParseError::Method),
         }
     }
@@ -89,6 +98,7 @@ impl Method {
             Self::Options => b"OPTIONS",
             Self::Connect => b"CONNECT",
             Self::Shutdown => b"SHUTDOWN",
+            Self::Any => b"ANY",
         }
     }
 
@@ -96,6 +106,72 @@ impl Method {
     #[must_use]
     pub fn as_str(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(self.as_bytes())
+    }
+
+    /// Returns true if this `Method` is the GET method.
+    #[must_use]
+    pub fn is_get(&self) -> bool {
+        *self == Self::Get
+    }
+
+    /// Returns true if this `Method` is the HEAD method.
+    #[must_use]
+    pub fn is_head(&self) -> bool {
+        *self == Self::Head
+    }
+
+    /// Returns true if this `Method` is the POST method.
+    #[must_use]
+    pub fn is_post(&self) -> bool {
+        *self == Self::Post
+    }
+
+    /// Returns true if this `Method` is the PUT method.
+    #[must_use]
+    pub fn is_put(&self) -> bool {
+        *self == Self::Put
+    }
+
+    /// Returns true if this `Method` is the PATCH method.
+    #[must_use]
+    pub fn is_patch(&self) -> bool {
+        *self == Self::Patch
+    }
+
+    /// Returns true if this `Method` is the DELETE method.
+    #[must_use]
+    pub fn is_delete(&self) -> bool {
+        *self == Self::Delete
+    }
+
+    /// Returns true if this `Method` is the TRACE method.
+    #[must_use]
+    pub fn is_trace(&self) -> bool {
+        *self == Self::Trace
+    }
+
+    /// Returns true if this `Method` is the OPTIONS method.
+    #[must_use]
+    pub fn is_options(&self) -> bool {
+        *self == Self::Options
+    }
+
+    /// Returns true if this `Method` is the CONNECT method.
+    #[must_use]
+    pub fn is_connect(&self) -> bool {
+        *self == Self::Connect
+    }
+
+    /// Returns true if this `Method` is the custom SHUTDOWN method.
+    #[must_use]
+    pub fn is_shutdown(&self) -> bool {
+        *self == Self::Shutdown
+    }
+
+    /// Returns true if this `Method` is the custom ANY method.
+    #[must_use]
+    pub fn is_any(&self) -> bool {
+        *self == Self::Any
     }
 }
 

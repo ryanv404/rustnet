@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{self, Command, Stdio};
 use std::str::FromStr;
@@ -14,7 +15,7 @@ use crate::util;
 
 /// Contains the parsed client command line arguments.
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientCli {
     pub do_send: bool,
     pub do_debug: bool,
@@ -44,6 +45,62 @@ impl Default for ClientCli {
             headers: Headers::default(),
             body: Body::default(),
         }
+    }
+}
+
+impl Display for ClientCli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{self:?}")
+    }
+}
+
+impl Debug for ClientCli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        writeln!(
+            f,
+            "ClientCli {{\n    \
+            do_send: {:?},\n    \
+            do_debug: {:?},\n    \
+            do_plain: {:?},\n    \
+            no_dates: {:?},",
+            self.do_send,
+            self.do_debug,
+            self.do_plain,
+            self.no_dates
+        )?;
+
+        if let Some(addr) = self.addr.as_ref() {
+            writeln!(f, "    addr: Some({addr:?}),")?;
+        } else {
+            writeln!(f, "    addr: None,")?;
+        }
+
+        writeln!(
+            f,
+            "    style: {:?},\n    \
+            method: {:?},\n    \
+            path: {:?},\n    \
+            version: {:?},",
+            self.style,
+            self.method,
+            self.path,
+            self.version
+        )?;
+
+        if self.headers.is_empty() {
+            writeln!(f, "    headers: Headers(),")?;
+        } else {
+            writeln!(f, "    headers: Headers(")?;
+
+            for (name, value) in &self.headers.0 {
+                writeln!(f, "        {name:?}: {value:?},")?;
+            }
+
+            writeln!(f, "    ),")?;
+        }
+
+        writeln!(f, "    body: {:?}", self.body)?;
+        write!(f, "}}")
     }
 }
 

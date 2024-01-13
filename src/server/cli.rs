@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::path::PathBuf;
 use std::process;
 use std::str::FromStr;
 
-use crate::{Method, Route, Router, WriteCliError, TEST_SERVER_ADDR};
+use crate::{Method, Route, Router, Target, WriteCliError, TEST_SERVER_ADDR};
 use crate::style::colors::{BR_GRN, CLR};
 
 /// Contains the parsed server command line arguments.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerCli {
     pub do_log: bool,
     pub do_debug: bool,
@@ -30,6 +31,53 @@ impl Default for ServerCli {
     }
 }
 
+impl Display for ServerCli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{self:?}")
+    }
+}
+
+impl Debug for ServerCli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        writeln!(
+            f,
+            "ServerCli {{\n    \
+            do_log: {:?},\n    \
+            do_debug: {:?},\n    \
+            is_test: {:?},",
+            self.do_log,
+            self.do_debug,
+            self.is_test
+        )?;
+
+        if self.router.is_empty() {
+            writeln!(f, "    router: Router(),")?;
+        } else {
+            writeln!(f, "    router: Router(")?;
+
+            for route in &self.router.0 {
+                writeln!(f, "        {route:?},")?;
+            }
+
+            writeln!(f, "    ),")?;
+        }
+
+        if let Some(addr) = self.addr.as_ref() {
+            writeln!(f, "    addr: Some({addr:?}),")?;
+        } else {
+            writeln!(f, "    addr: None,")?;
+        }
+
+        if let Some(log_file) = self.log_file.as_ref() {
+            writeln!(f, "    log_file: Some({:?})", log_file.display())?;
+        } else {
+            writeln!(f, "    log_file: None")?;
+        }
+
+        write!(f, "}}")
+    }
+}
+
 impl WriteCliError for ServerCli {}
 
 impl ServerCli {
@@ -49,23 +97,19 @@ impl ServerCli {
 
         match opt {
             "-I" | "--favicon" => match tokens.next() {
-                Some(path) => {
-                    let route = Route::Get("/favicon.ico".into());
-                    let target = Path::new(path).to_path_buf();
-                    self.router.mount(route, target.into());
+                Some(file_path) => {
+                    let _ = self.router.favicon(PathBuf::from(file_path));
                 },
                 None => self.invalid_arg(opt, arg),
             },
             "-0" | "--not-found" => match tokens.next() {
-                Some(path) => {
-                    let route = Route::NotFound;
-                    let target = Path::new(path).to_path_buf();
-                    self.router.mount(route, target.into());
+                Some(file_path) => {
+                    let _ = self.router.not_found(PathBuf::from(file_path));
                 },
                 None => self.invalid_arg(opt, arg),
             },
             "-T" | "--text" | "-F" | "--file" => {
-                let (Some(method), Some(path), Some(target)) = (
+                let (Some(method), Some(uri_path), Some(target)) = (
                     tokens.next(),
                     tokens.next(),
                     tokens.next()
@@ -75,23 +119,21 @@ impl ServerCli {
                 };
 
                 let method = method.to_ascii_uppercase();
+
                 let Ok(method) = Method::from_str(method.as_str()) else {
                     return self.invalid_arg(opt, arg);
                 };
 
-                let route = Route::new(method, path.to_ascii_lowercase());
+                let uri_path = uri_path.to_ascii_lowercase();
 
-                match opt {
-                    "-T" | "--text" => {
-                        let target = String::from(target);
-                        self.router.mount(route, target.into());
-                    },
-                    "-F" | "--file" => {
-                        let target = Path::new(target).to_path_buf();
-                        self.router.mount(route, target.into());
-                    },
+                let target: Target = match opt {
+                    "-T" | "--text" => String::from(target).into(),
+                    "-F" | "--file" => PathBuf::from(target).into(),
                     _ => unreachable!(),
-                }
+                };
+
+                let route = Route::new(method, uri_path.into(), target);
+                self.router.mount(route);
             },
             _ => unreachable!(),
         }
@@ -153,7 +195,7 @@ impl ServerCli {
                     // Make the server a test server.
                     "-t" | "--test" => {
                         cli.is_test = true;
-                        cli.router.mount_shutdown_route();
+                        let  _ = cli.router.shutdown();
                     },
                     // Set a local log file.
                     "-f" | "--log-file" => match args.pop_front() {

@@ -237,8 +237,7 @@ impl TryFrom<&[u8]> for Response {
         // Parse the `Body` using the Content-Type header.
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map(|value| value.as_str())
-            .unwrap_or(Cow::Borrowed(""));
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
         let body = Body::from_content_type(&body_vec, &content_type);
 
@@ -295,8 +294,11 @@ impl Response {
         format!("{BR_PURP}{} {}{CLR}", self.version, self.status)
     }
 
-    /// Parses a string slice into a `Version` and a `Status`.
-    #[must_use]
+    /// Parses a bytes slice into a `Version` and a `Status`.
+    ///
+    /// # Errors
+    /// 
+    /// Returns an error if parsing of the status line fails.
     pub fn parse_status_line(
         line: &[u8]
     ) -> Result<(Version, Status), NetParseError> {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
@@ -61,6 +61,7 @@ mod method {
         "OPTIONS" => Method::Options;
         "CONNECT" => Method::Connect;
         "SHUTDOWN" => Method::Shutdown;
+        "ANY" => Method::Any;
         BAD_INPUT: "Foo";
         BAD_INPUT: "get";
     }
@@ -474,24 +475,52 @@ mod server_cli {
             is_test: true,
             addr: Some("127.0.0.1:7879".to_string()),
             log_file: Some(PathBuf::from("./log_file.txt")),
-            router: Router(BTreeMap::from([
-                (Route::Shutdown, Target::Shutdown),
-                (Route::Get("/favicon.ico".into()),
-                    Path::new("./favicon.ico").into()),
-                (Route::NotFound,
-                    Path::new("./error_404.html").into()),
-                (Route::Get("/get".into()),
-                    Path::new("./static/get.html").into()),
-                (Route::Post("/post".into()),
-                    Path::new("./static/post.html").into()),
-                (Route::Head("/head".into()),
-                    Path::new("./static/head.html").into()),
-                (Route::Put("/put".into()),
-                    Target::Text("test message1.".into())),
-                (Route::Patch("/patch".into()),
-                    Target::Text("test message2.".into())),
-                (Route::Delete("/delete".into()),
-                    Target::Text("test message3.".into())),
+            router: Router(BTreeSet::from([
+                Route {
+                    method: Method::Shutdown,
+                    path: None,
+                    target: Target::Shutdown
+                },
+                Route {
+                    method: Method::Get,
+                    path: Some("/favicon.ico".into()),
+                    target: Target::Favicon(Path::new("./favicon.ico").into())
+                },
+                Route {
+                    method: Method::Any,
+                    path: None,
+                    target: Path::new("./error_404.html").into()
+                },
+                Route {
+                    method: Method::Get,
+                    path: Some("/get".into()),
+                    target: Path::new("./static/get.html").into()
+                },
+                Route {
+                    method: Method::Post,
+                    path: Some("/post".into()),
+                    target: Path::new("./static/post.html").into()
+                },
+                Route {
+                    method: Method::Head,
+                    path: Some("/head".into()),
+                    target: Path::new("./static/head.html").into()
+                },
+                Route {
+                    method: Method::Put,
+                    path: Some("/put".into()),
+                    target: "test message1.".into()
+                },
+                Route {
+                    method: Method::Patch,
+                    path: Some("/patch".into()),
+                    target: "test message2.".into()
+                },
+                Route {
+                    method: Method::Delete,
+                    path: Some("/delete".into()),
+                    target: "test message3.".into()
+                },
             ]))
         };
 

@@ -1,8 +1,8 @@
 #!/usr/bin/bash
 
 ./target/debug/server \
-    -l \
     -d \
+    -l \
     -t \
     -f './log_file.txt' \
     -F 'get:/:static/index.html' \

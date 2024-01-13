@@ -213,13 +213,14 @@ impl Connection {
         while num_headers < MAX_HEADERS {
             match reader.read_until(b'\n', buf) {
                 Ok(0) => Err(NetError::UnexpectedEof)?,
+                // An empty line involves reading b"\r\n" or b"\n".
                 Ok(1 | 2) => return Headers::try_from(buf),
                 Ok(_) => num_headers += 1,
                 Err(e) => Err(NetError::Read(e.kind()))?,
             }
         }
 
-        Err(NetParseError::TooManyHeaders)?
+        Err(NetParseError::TooManyHeaders.into())
     }
 
     /// Reads and parses the message body from the underlying `TcpStream`.
@@ -264,8 +265,7 @@ impl Connection {
 
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map(|value| value.as_str())
-            .unwrap_or(Cow::Borrowed(""));
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
         let body = if content_len == 0 {
             Body::Empty
@@ -302,8 +302,7 @@ impl Connection {
 
         let content_type = headers
             .get(&CONTENT_TYPE)
-            .map(|value| value.as_str())
-            .unwrap_or(Cow::Borrowed(""));
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
         let body = if content_len == 0 {
             Body::Empty

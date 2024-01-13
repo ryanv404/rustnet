@@ -24,16 +24,14 @@ impl Worker {
     ) -> Self {
         let handle = thread::spawn(move || {
             while let Ok(mut conn) = receiver.lock().unwrap().recv() {
-                let route = match conn.recv_request() {
-                    Ok(req) => req.route(),
-                    Err(ref err) => {
-                        server.send_500_error(err.to_string(), &mut conn);
-                        continue;
+                let (req, mut res) = match conn.recv_request() {
+                    Ok(req) => match server.router.resolve(&req) {
+                        Ok(res) => (req, res),
+                        Err(ref err) => {
+                            server.send_500_error(err.to_string(), &mut conn);
+                            continue;
+                        },
                     },
-                };
-
-                let mut res = match server.router.resolve(&route) {
-                    Ok(res) => res,
                     Err(ref err) => {
                         server.send_500_error(err.to_string(), &mut conn);
                         continue;
@@ -46,15 +44,17 @@ impl Worker {
                 }
 
                 // Check for server shutdown signal
-                if server.is_test_server && route.is_shutdown() {
-                    server.shutdown_server(&conn);
+                if server.is_test_server && req.method.is_shutdown() {
+                    server.shutdown(&conn);
                     break;
                 }
 
                 if server.do_log {
                     let ip = conn.remote_addr.ip();
                     let status = res.status_code();
-                    server.log(&format!("[{ip}|{status}] {route}"));
+                    let method = req.method;
+                    let path = &req.path;
+                    server.log(&format!("[{ip}|{status}] {method} {path}"));
                 }
             }
         });

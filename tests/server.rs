@@ -1,6 +1,7 @@
 #[macro_use]
 mod common;
 
+// Use alphabetical module naming to start the test server first.
 mod a {
     start_test_server!();
 }
@@ -71,6 +72,7 @@ mod connect {
     run_test!(SERVER: CONNECT many_methods);
 }
 
+// Use alphabetical module naming to shut down the test server at the end.
 mod z {
     shutdown_test_server!();
 }

@@ -267,11 +267,11 @@ impl Debug for Client {
             }
             writeln!(f, "        ),")?;
             if req.body.is_empty() {
-                writeln!(f, "        body: Body::Empty,")?;
+                writeln!(f, "        body: Body::Empty")?;
             } else if req.body.is_printable() {
                 writeln!(f, "        body: {:?}", &req.body)?;
             } else {
-                writeln!(f, "        body: Body {{ ... }},")?;
+                writeln!(f, "        body: Body {{ ... }}")?;
             }
             writeln!(f, "    }}),")?;
         } else {
@@ -289,11 +289,11 @@ impl Debug for Client {
             }
             writeln!(f, "        ),")?;
             if res.body.is_empty() {
-                writeln!(f, "        body: Body::Empty,")?;
+                writeln!(f, "        body: Body::Empty")?;
             } else if res.body.is_printable() {
                 writeln!(f, "        body: {:?}", &res.body)?;
             } else {
-                writeln!(f, "        body: Body {{ ... }},")?;
+                writeln!(f, "        body: Body {{ ... }}")?;
             }
             writeln!(f, "    }}),")?;
         } else {
@@ -301,9 +301,9 @@ impl Debug for Client {
         }
 
         if self.conn.is_some() {
-            writeln!(f, "    conn: Some(Connection {{ ... }}),")?;
+            writeln!(f, "    conn: Some(Connection {{ ... }})")?;
         } else {
-            writeln!(f, "    conn: None,")?;
+            writeln!(f, "    conn: None")?;
         }
 
         write!(f, "}}")?;
