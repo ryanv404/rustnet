@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
 
-use crate::util::Trim;
+use crate::utils::Trim;
 
 #[derive(Clone, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct HeaderValue(pub Vec<u8>);

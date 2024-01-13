@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
 use crate::NetParseError;
-use crate::util;
+use crate::utils;
 
 /// Header field name.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -13,7 +13,7 @@ pub struct HeaderName {
 
 impl Display for HeaderName {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", util::to_titlecase(self.as_bytes()))
+        write!(f, "{}", utils::to_titlecase(self.as_bytes()))
     }
 }
 

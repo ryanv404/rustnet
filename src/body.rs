@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::str;
 
 use crate::{Method, NetParseError};
-use crate::util;
+use crate::utils;
 
 /// A respresentation of the message body.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -198,7 +198,7 @@ impl Body {
     pub fn from_filepath(filepath: &Path) -> Result<Self, NetParseError> {
         let data = fs::read(filepath).map_err(|_| NetParseError::Body)?;
 
-        match util::get_extension(filepath) {
+        match utils::get_extension(filepath) {
             Some("ico") => Ok(Self::Favicon(data.into())),
             Some("xml") => {
                 let body = String::from_utf8_lossy(&data);
@@ -436,7 +436,7 @@ impl Target {
             Self::Text(_) | Self::Shutdown => Some("text/plain; charset=utf-8"),
             Self::Bytes(_) => Some("application/octet-stream"),
             Self::File(ref path) | Self::Favicon(ref path) => {
-                util::content_type_from_ext(path)
+                utils::content_type_from_ext(path)
             },
         }
     }

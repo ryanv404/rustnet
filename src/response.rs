@@ -5,11 +5,11 @@ use std::str::{self, FromStr};
 
 use crate::{
     Body, HeaderName, HeaderValue, Headers, NetParseError, NetResult, Status,
-    Target, Version, DEFAULT_NAME,
+    Target, Version,
 };
-use crate::header::names::CONTENT_TYPE;
+use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{BR_PURP, CLR};
-use crate::util::Trim;
+use crate::utils::Trim;
 
 /// An HTTP response builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -94,9 +94,6 @@ impl ResponseBuilder {
     /// Returns an error if an invalid status code was set or if an error
     /// occurred while converting from a route `Target` to a response `Body`.
     pub fn build(&mut self) -> NetResult<Response> {
-        let version = self.version.take().unwrap_or_default();
-        let headers = self.headers.take().unwrap_or_default();
-
         let status = match self.status.take() {
             Some(Err(e)) => Err(e)?,
             Some(Ok(status)) => status,
@@ -109,27 +106,15 @@ impl ResponseBuilder {
             None => Body::default(),
         };
 
-        let mut res = Response { version, status, headers, body };
+        let mut res = Response {
+            version: self.version.take().unwrap_or_default(),
+            status,
+            headers: self.headers.take().unwrap_or_default(),
+            body
+        };
 
-        // Ensure standard response headers are set.
-        res.headers.server(DEFAULT_NAME);
-        res.headers.cache_control("no-cache");
-
-        if !res.body.is_empty() {
-            // Cache favicon for 1 week.
-            if res.body.is_favicon() {
-                res.headers.cache_control("max-age=604800");
-            }
-
-            // Ensure the Content-Length is set
-            res.headers.content_length(res.body.len());
-
-            // Ensure the Content-Type is set
-            if let Some(content_type) = res.body.as_content_type() {
-                res.headers.content_type(content_type);
-            }
-        }
-
+        // Ensure the default response headers are set.
+        res.headers.default_response_headers(&res.body);
         Ok(res)
     }
 }

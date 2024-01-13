@@ -1,17 +1,16 @@
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::net::{SocketAddr, TcpStream};
 use std::process::{self, Command, Stdio};
 use std::str::FromStr;
-use std::thread;
-use std::time::Duration;
 
-use crate::{
-    Body, Client, Headers, Method, NetResult, Style, Tui, UriPath, Version,
-    WriteCliError, TEST_SERVER_ADDR,
+use rustnet::{
+    Body, Client, Headers, Method, NetError, NetResult, Style, UriPath,
+    Version, WriteCliError, CLIENT_NAME, TEST_SERVER_ADDR,
 };
-use crate::style::colors::{BR_GRN, BR_RED, CLR};
-use crate::util;
+use rustnet::style::colors::{BR_GRN, BR_RED, CLR};
+use rustnet::utils;
+
+use crate::Tui;
 
 /// Contains the parsed client command line arguments.
 #[allow(clippy::struct_excessive_bools)]
@@ -104,6 +103,36 @@ impl Debug for ClientCli {
     }
 }
 
+impl TryFrom<ClientCli> for Client {
+    type Error = NetError;
+
+    fn try_from(cli: ClientCli) -> NetResult<Self> {
+        // Establish a connection.
+        let Some(addr) = cli.addr.as_ref() else {
+            return Err(NetError::NotConnected);
+        };
+
+        let mut client = Self::builder()
+            .do_send(cli.do_send)
+            .do_debug(cli.do_debug)
+            .no_dates(cli.no_dates)
+            .style(cli.style)
+            .method(cli.method)
+            .path(cli.path.clone())
+            .version(cli.version)
+            .headers(cli.headers.clone())
+            .body(cli.body.clone())
+            .addr(addr)
+            .build()?;
+
+        if cli.do_plain {
+            client.style.to_plain();
+        }
+
+        Ok(client)
+    }
+}
+
 impl WriteCliError for ClientCli {}
 
 impl ClientCli {
@@ -117,7 +146,7 @@ impl ClientCli {
     pub fn print_help(&self) {
         eprintln!("\
 {BR_GRN}USAGE:{CLR}
-    http_client [OPTIONS] [--] <URI>\n
+    {CLIENT_NAME} [OPTIONS] [--] <URI>\n
 {BR_GRN}ARGUMENT:{CLR}
     URI   An HTTP URI (e.g. \"httpbin.org/json\")\n
 {BR_GRN}OPTIONS:{CLR}
@@ -140,19 +169,19 @@ impl ClientCli {
     -v, --verbose           Print both the request and the response.\n
     -V, --version           Set the protocol version (default: \"HTTP/1.1\").\n
 {BR_GRN}FORMAT OPTIONS:{CLR}
-    R = request line       s = status line
-    H = request headers    h = response headers
-    B = request body       b = response body\n");
+    R = request line        s = status line
+    H = request headers     h = response headers
+    B = request body        b = response body\n");
 
         process::exit(0);
     }
 
-    /// Parses the command line options into a `ClientCli` object.
+    /// Parses the command line options into a `Client`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the `Client` cannot be built.
-    pub fn parse_args(args: &mut VecDeque<&str>) -> NetResult<Self> {
+    /// Returns an error if a `Client` cannot be built.
+    pub fn parse_args(args: &mut VecDeque<&str>) -> NetResult<Client> {
         let _ = args.pop_front();
 
         let mut cli = Self::new();
@@ -169,8 +198,9 @@ impl ClientCli {
                 },
                 // Run request builder.
                 "--builder" => {
-                    Client::get_request_from_cli()?;
-                    break;
+                    let mut client = Client::default();
+                    client.get_request_from_user()?;
+                    return Ok(client);
                 },
                 // Handle options.
                 _ if opt.starts_with('-') => cli.handle_opt(opt, args),
@@ -183,7 +213,7 @@ impl ClientCli {
             cli.style.to_plain();
         }
 
-        Ok(cli)
+        Client::try_from(cli)
     }
 
     pub fn handle_opt(&mut self, opt: &str, args: &mut VecDeque<&str>) {
@@ -256,7 +286,7 @@ impl ClientCli {
     }
 
     pub fn handle_uri(&mut self, arg: &str) {
-        match util::parse_uri(arg).ok() {
+        match utils::parse_uri(arg).ok() {
             Some((addr, path)) if self.path.is_default() => {
                 self.path = path.into();
                 self.addr = Some(addr.trim().to_ascii_lowercase());
@@ -286,7 +316,7 @@ impl ClientCli {
         let name = name.to_ascii_lowercase();
         let value = value.to_ascii_lowercase();
 
-        let name = util::to_titlecase(name.as_bytes());
+        let name = utils::to_titlecase(name.as_bytes());
 
         self.headers.header(name.trim(), value.trim());
     }
@@ -302,7 +332,7 @@ impl ClientCli {
     }
 
     pub fn start_server() {
-        if let Err(e) = util::build_server() {
+        if let Err(e) = utils::build_server() {
             eprintln!("{BR_RED}Server failed to build: {e}{CLR}");
             process::exit(1);
         }
@@ -321,33 +351,12 @@ impl ClientCli {
             process::exit(1);
         }
 
-        if Self::check_server(TEST_SERVER_ADDR) {
+        if utils::check_server(TEST_SERVER_ADDR) {
             println!("{BR_GRN}Server is listening on {TEST_SERVER_ADDR}.{CLR}");
             process::exit(0);
         }
 
         eprintln!("{BR_RED}Failed to start server.{CLR}");
         process::exit(1);
-    }
-
-    /// Returns true if a connection can be established with the given `addr`.
-    #[must_use]
-    pub fn check_server(addr: &str) -> bool {
-        let timeout = Duration::from_millis(200);
-
-        let Ok(socket) = SocketAddr::from_str(addr) else {
-            return false;
-        };
-
-        // Attempt to connect a maximum of five times.
-        for _ in 0..5 {
-            if TcpStream::connect_timeout(&socket, timeout).is_ok() {
-                return true;
-            }
-
-            thread::sleep(timeout);
-        }
-
-        false
     }
 }

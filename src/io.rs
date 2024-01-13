@@ -9,14 +9,38 @@ use std::str;
 
 use crate::{
     Body, Headers, Method, NetError, NetParseError, NetResult, Request,
-    Response, Status, UriPath, Version, DEFAULT_NAME,
+    Response, Status, UriPath, Version, MAX_HEADERS, READER_BUFSIZE,
+    WRITER_BUFSIZE,
 };
-use crate::header::MAX_HEADERS;
-use crate::header::names::{CONTENT_LENGTH, CONTENT_TYPE, HOST, SERVER};
+use crate::headers::names::{CONTENT_LENGTH, CONTENT_TYPE};
 use crate::style::colors::{BR_RED, CLR};
 
-pub const READER_BUFSIZE: usize = 2048;
-pub const WRITER_BUFSIZE: usize = 2048;
+/// A trait for printing CLI argument errors to the terminal.
+pub trait WriteCliError {
+    /// Prints unknown option error message and exits the program.
+    fn unknown_opt(&self, name: &str) {
+        eprintln!("{BR_RED}Unknown option: `{name}`{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints unknown argument error message and exits the program.
+    fn unknown_arg(&self, name: &str) {
+        eprintln!("{BR_RED}Unknown argument: `{name}`{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints missing argument error message and exits the program.
+    fn missing_arg(&self, name: &str) {
+        eprintln!("{BR_RED}Missing `{name}` argument.{CLR}");
+        process::exit(1);
+    }
+
+    /// Prints invalid argument error message and exits the program.
+    fn invalid_arg(&self, name: &str, arg: &str) {
+        eprintln!("{BR_RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
+        process::exit(1);
+    }
+}
 
 /// Represents the TCP connection between a client and a server.
 #[derive(Debug)]
@@ -270,11 +294,7 @@ impl Connection {
         let body = if content_len == 0 {
             Body::Empty
         } else {
-            self.recv_body(
-                &mut buf,
-                content_len,
-                &content_type
-            )?
+            self.recv_body(&mut buf, content_len, &content_type)?
         };
 
         Ok(Request {method, path, version, headers, body })
@@ -307,11 +327,7 @@ impl Connection {
         let body = if content_len == 0 {
             Body::Empty
         } else {
-            self.recv_body(
-                &mut buf,
-                content_len,
-                &content_type
-            )?
+            self.recv_body(&mut buf, content_len, &content_type)?
         };
 
         Ok(Response { version, status, headers, body })
@@ -389,12 +405,9 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
-        // Ensure the Host header is set.
-        if !req.headers.contains(&HOST) {
-            let stream = self.writer.get_ref();
-            let remote = stream.peer_addr()?;
-            req.headers.host(remote);
-        }
+        // Ensure default request headers are set.
+        let addr = self.writer.get_ref().peer_addr().ok();
+        req.headers.default_request_headers(&req.body, addr);
 
         self.write_request_line(&req.method, &req.path, &req.version)?;
         self.write_headers(&req.headers)?;
@@ -410,10 +423,8 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_response(&mut self, res: &mut Response) -> NetResult<()> {
-        // Ensure Server header is set.
-        if !res.headers.contains(&SERVER) {
-            res.headers.server(DEFAULT_NAME);
-        }
+        // Ensure default response headers are set.
+        res.headers.default_response_headers(&res.body);
 
         self.write_status_line(&res.version, &res.status)?;
         self.write_headers(&res.headers)?;
@@ -430,15 +441,15 @@ impl Connection {
     /// An error is returned if there is a failure to write any of the
     /// individual components of the `Response` to the `TcpStream`.
     pub fn send_500_error(&mut self, err_msg: String) -> NetResult<()> {
-        let body: Body = err_msg.into();
+        let body = Body::from(err_msg);
+
+        let mut headers = Headers::new();
+        headers.default_response_headers(&body);
+        headers.add_connection("close");
 
         let res = Response::builder()
             .status_code(500)
-            .header("Connection", "close")
-            .header("Server", DEFAULT_NAME)
-            .header("Cache-Control", "no-cache")
-            .header("Content-Length", &body.len().to_string())
-            .header("Content-Type", "text/plain; charset=utf-8")
+            .headers(headers)
             .body(body)
             .build()?;
 
@@ -447,32 +458,5 @@ impl Connection {
         self.write_body(&res.body)?;
         self.flush()?;
         Ok(())
-    }
-}
-
-/// A trait containing methods for printing CLI argument errors.
-pub trait WriteCliError {
-    /// Prints unknown option error message and exits the program.
-    fn unknown_opt(&self, name: &str) {
-        eprintln!("{BR_RED}Unknown option: `{name}`{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints unknown argument error message and exits the program.
-    fn unknown_arg(&self, name: &str) {
-        eprintln!("{BR_RED}Unknown argument: `{name}`{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints missing argument error message and exits the program.
-    fn missing_arg(&self, name: &str) {
-        eprintln!("{BR_RED}Missing `{name}` argument.{CLR}");
-        process::exit(1);
-    }
-
-    /// Prints invalid argument error message and exits the program.
-    fn invalid_arg(&self, name: &str, arg: &str) {
-        eprintln!("{BR_RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
-        process::exit(1);
     }
 }

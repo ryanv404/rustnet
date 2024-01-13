@@ -1,3 +1,5 @@
+use std::env;
+use std::fs;
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -5,7 +7,7 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use crate::{NetError, NetParseError, NetResult};
+use crate::{HeaderValue, NetError, NetParseError, NetResult};
 use crate::style::colors::{BR_RED, CLR};
 
 pub trait Trim {
@@ -187,39 +189,41 @@ pub fn build_server() -> NetResult<()> {
     }
 }
 
-///// Get the current date and time if the `date` program exists.
-//#[must_use]
-//pub fn get_datetime() -> Option<(HeaderName, HeaderValue)> {
-//    if !date_command_exists() {
-//        return None;
-//    }
-//
-//    Command::new("date")
-//        .env("TZ", "GMT")
-//        .arg("+%a, %d %b %Y %T %Z")
-//        .output()
-//        .map_or(None, |out| {
-//            let trimmed = trim_bytes(&out.stdout);
-//            let hdr_value = HeaderValue(trimmed.into());
-//            Some((DATE, hdr_value))
-//        })
-//}
-//
-///// Returns true if the `date` exists on the system PATH.
-//#[must_use]
-//pub fn date_command_exists() -> bool {
-//    let Ok(paths) = env::var("PATH") else {
-//        return false;
-//    };
-//
-//    for path in paths.split(':') {
-//        if fs::metadata(format!("{path}/date")).is_ok() {
-//            return true;
-//        }
-//    }
-//
-//    false
-//}
+/// Get the current date and time if the `date` program exists on Unix.
+#[must_use]
+pub fn get_datetime() -> Option<HeaderValue> {
+    let Some(date_path) = date_command_exists() else {
+        return None;
+    };
+
+    Command::new(&date_path)
+        .env("TZ", "GMT")
+        .arg("+%a, %d %b %Y %T %Z")
+        .output()
+        .map_or(None, |out| Some(HeaderValue(out.stdout.trim().into())))
+}
+
+/// Returns the path to the `date` program if it exists.
+#[must_use]
+pub fn date_command_exists() -> Option<String> {
+    if !cfg!(unix) {
+        return None;
+    }
+
+    let Ok(paths) = env::var("PATH") else {
+        return None;
+    };
+
+    for path in paths.split(':') {
+        let path = format!("{path}/date");
+
+        if fs::metadata(&path).is_ok() {
+            return Some(path);
+        }
+    }
+
+    None
+}
 
 /// Returns true if a TCP connection can be established with the provided
 /// server address.

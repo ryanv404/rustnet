@@ -4,8 +4,11 @@ use std::path::PathBuf;
 use std::process;
 use std::str::FromStr;
 
-use crate::{Method, Route, Router, Target, WriteCliError, TEST_SERVER_ADDR};
-use crate::style::colors::{BR_GRN, CLR};
+use rustnet::{
+    Method, NetError, NetResult, Route, Router, Server, Target, WriteCliError,
+    SERVER_NAME, TEST_SERVER_ADDR,
+};
+use rustnet::style::colors::{BR_GRN, CLR};
 
 /// Contains the parsed server command line arguments.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -13,9 +16,9 @@ pub struct ServerCli {
     pub do_log: bool,
     pub do_debug: bool,
     pub is_test: bool,
-    pub router: Router,
     pub addr: Option<String>,
     pub log_file: Option<PathBuf>,
+    pub router: Router,
 }
 
 impl Default for ServerCli {
@@ -24,9 +27,9 @@ impl Default for ServerCli {
             do_log: false,
             do_debug: false,
             is_test: false,
-            router: Router::new(),
             addr: None,
-            log_file: None
+            log_file: None,
+            router: Router::new()
         }
     }
 }
@@ -50,18 +53,6 @@ impl Debug for ServerCli {
             self.is_test
         )?;
 
-        if self.router.is_empty() {
-            writeln!(f, "    router: Router(),")?;
-        } else {
-            writeln!(f, "    router: Router(")?;
-
-            for route in &self.router.0 {
-                writeln!(f, "        {route:?},")?;
-            }
-
-            writeln!(f, "    ),")?;
-        }
-
         if let Some(addr) = self.addr.as_ref() {
             writeln!(f, "    addr: Some({addr:?}),")?;
         } else {
@@ -69,12 +60,49 @@ impl Debug for ServerCli {
         }
 
         if let Some(log_file) = self.log_file.as_ref() {
-            writeln!(f, "    log_file: Some({:?})", log_file.display())?;
+            writeln!(f, "    log_file: Some({:?}),", log_file.display())?;
         } else {
-            writeln!(f, "    log_file: None")?;
+            writeln!(f, "    log_file: None,")?;
+        }
+
+        if self.router.is_empty() {
+            writeln!(f, "    router: Router()")?;
+        } else {
+            writeln!(f, "    router: Router(")?;
+
+            for route in &self.router.0 {
+                writeln!(f, "        {route:?},")?;
+            }
+
+            writeln!(f, "    )")?;
         }
 
         write!(f, "}}")
+    }
+}
+
+impl TryFrom<ServerCli> for Server {
+    type Error = NetError;
+
+    fn try_from(mut cli: ServerCli) -> NetResult<Self> {
+        let Some(addr) = cli.addr.take() else {
+            return Err(NetError::Other("Missing server address.".into()));
+        };
+
+        let mut server = Self::builder();
+
+        if let Some(path) = cli.log_file.take() {
+            let _ = server.log_file(path);
+            cli.do_log = true;
+        }
+
+        server
+            .addr(&addr)
+            .do_log(cli.do_log)
+            .do_debug(cli.do_debug)
+            .is_test_server(cli.is_test)
+            .router(&mut cli.router)
+            .build()
     }
 }
 
@@ -144,9 +172,9 @@ impl ServerCli {
         eprintln!(
             "\
 {BR_GRN}USAGE:{CLR}
-    http_server [OPTIONS] [--] <SERVER ADDRESS>\n
+    {SERVER_NAME} [OPTIONS] [--] <SERVER ADDRESS>\n
 {BR_GRN}SERVER ADDRESS:{CLR}
-    IP:PORT    The server's local IP address and port.\n
+    IP:PORT              The server's IP address and port.\n
 {BR_GRN}OPTIONS:{CLR}
     -d, --debug          Prints debug information.
     -h, --help           Prints this help message.
@@ -154,20 +182,19 @@ impl ServerCli {
     -f, --log-file FILE  Enables logging of connections to FILE.
     -t, --test           Creates a test server at {TEST_SERVER_ADDR}.\n
 {BR_GRN}ROUTES:{CLR}
-    -T, --text METHOD:URI_PATH:TEXT
-        Adds a route that serves text.
-    -F, --file METHOD:URI_PATH:FILE_PATH
-        Adds a route that serves a file.
     -I, --favicon FILE_PATH
         Adds a route that serves a favicon.
     -0, --not-found FILE_PATH
-        Adds a route that handles 404 Not Found responses.\n"
-        );
+        Adds a route that handles 404 Not Found responses.
+    -T, --text METHOD:URI_PATH:TEXT
+        Adds a route that serves text.
+    -F, --file METHOD:URI_PATH:FILE_PATH
+        Adds a route that serves a file.\n");
 
         process::exit(0);
     }
 
-    /// Parses command line arguments into a `ServerCli` object.
+    /// Parses the command line arguments into a `ServerCli` object.
     #[must_use]
     pub fn parse_args(args: &mut VecDeque<&str>) -> Self {
         let mut cli = Self::new();

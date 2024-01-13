@@ -1,7 +1,6 @@
 #!/usr/bin/bash
 
 ./target/debug/server \
-    -d \
     -l \
     -t \
     -f './log_file.txt' \

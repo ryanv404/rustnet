@@ -3,21 +3,21 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
 use std::str::{self, FromStr};
 
-use crate::{Body, NetError, NetParseError, NetResult, DEFAULT_NAME};
+use crate::{
+    Body, NetError, NetParseError, NetResult, DEFAULT_NAME,
+};
 use crate::style::colors::{BR_BLU, BR_CYAN, CLR};
-use crate::util::Trim;
+use crate::utils::{self, Trim};
 
 pub mod names;
 pub mod values;
 
+pub use names::HeaderName;
 use names::{
     ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
-    CONTENT_TYPE, HOST, SERVER, USER_AGENT,
+    CONTENT_TYPE, DATE, HOST, SERVER, USER_AGENT,
 };
-pub use names::{HeaderName, HeaderNameInner};
 pub use values::HeaderValue;
-
-pub const MAX_HEADERS: u16 = 1024;
 
 /// Represents a single header field line.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -168,10 +168,9 @@ impl Headers {
             .or_insert(value);
     }
 
-    /// Inserts a header if one with the same `HeaderName` is not already
-    /// present.
-    pub fn insert_if_empty(&mut self, name: HeaderName, value: HeaderValue) {
-        self.entry(name).or_insert(value);
+    /// Inserts a new header with the given name and value.
+    pub fn header(&mut self, name: &str, value: &str) {
+        self.insert(HeaderName::from(name), HeaderValue::from(value));
     }
 
     /// Parses a `Header` from the given string slice and inserts the
@@ -220,74 +219,121 @@ impl Headers {
         self.0.clear();
     }
 
-    /// Inserts sensible values for a default set of request headers if they
-    /// are not already present.
-    pub fn default_request_headers(&mut self, body: &Body, addr: SocketAddr) {
-        self.insert_if_empty(HOST, addr.into());
-        self.insert_if_empty(ACCEPT, "*/*".into());
-        self.insert_if_empty(USER_AGENT, DEFAULT_NAME.into());
-        self.insert_if_empty(CONTENT_LENGTH, body.len().into());
+    /// Inserts a sensible set default of request headers.
+    pub fn default_request_headers(
+        &mut self,
+        body: &Body,
+        remote_addr: Option<SocketAddr>
+    ) {
+        if !self.contains(&ACCEPT) {
+            self.add_accept("*/*");
+        }
 
-        if let Some(con_type) = body.as_content_type() {
-            self.insert_if_empty(CONTENT_TYPE, con_type.into());
+        if !self.contains(&CONTENT_LENGTH) && !body.is_empty() {
+            self.add_content_length(body.len());
+        }
+
+        if !self.contains(&CONTENT_TYPE) && !body.is_empty() {
+            if let Some(content_type) = body.as_content_type() {
+                self.add_content_type(content_type);
+            }
+        }
+
+        if !self.contains(&DATE) {
+            self.add_date();
+        }
+
+        if !self.contains(&HOST) {
+            if let Some(addr) = remote_addr {
+                self.add_host(addr);
+            }
+        }
+
+        if !self.contains(&USER_AGENT) {
+            self.add_user_agent();
         }
     }
 
-    /// Inserts a collection of default server response headers.
-    pub fn default_response_headers(&mut self) {
-        todo!();
-    }
+    /// Inserts a sensible set of default response headers.
+    pub fn default_response_headers(&mut self, body: &Body) {
+        if !self.contains(&CACHE_CONTROL) {
+            // Cache favicon for 1 week.
+            if body.is_favicon() {
+                self.add_cache_control("max-age=604800");
+            } else {
+                self.add_cache_control("no-cache");
+            }
+        }
 
-    /// Inserts a new header with the given name and value.
-    pub fn header(&mut self, name: &str, value: &str) {
-        self.insert(HeaderName::from(name), HeaderValue::from(value));
-    }
+        if !self.contains(&CONTENT_LENGTH) && !body.is_empty() {
+            self.add_content_length(body.len());
+        }
 
-    /// Inserts a Host header that is parsed from the given `SocketAddr`.
-    pub fn host(&mut self, host: SocketAddr) {
-        let ip = host.ip();
-        let port = host.port();
-        self.insert(HOST, format!("{ip}:{port}").into());
-    }
+        if !self.contains(&CONTENT_TYPE) && !body.is_empty() {
+            if let Some(content_type) = body.as_content_type() {
+                self.add_content_type(content_type);
+            }
+        }
 
-    /// Inserts the default User-Agent header.
-    pub fn user_agent(&mut self, agent: &str) {
-        self.insert(USER_AGENT, agent.into());
+        if !self.contains(&DATE) {
+            self.add_date();
+        }
+
+        if !self.contains(&SERVER) {
+            self.add_server();
+        }
     }
 
     /// Inserts an Accept header with the given value.
-    pub fn accept(&mut self, accepted: &str) {
+    pub fn add_accept(&mut self, accepted: &str) {
         self.insert(ACCEPT, accepted.into());
     }
 
     /// Inserts an Accept-Encoding header with the given value.
-    pub fn accept_encoding(&mut self, encoding: &str) {
+    pub fn add_accept_encoding(&mut self, encoding: &str) {
         self.insert(ACCEPT_ENCODING, encoding.into());
     }
 
-    /// Inserts a Server header with the given value.
-    pub fn server(&mut self, server: &str) {
-        self.insert(SERVER, server.into());
+    /// Inserts a Cache-Control header with the given value.
+    pub fn add_cache_control(&mut self, directive: &str) {
+        self.insert(CACHE_CONTROL, directive.into());
     }
 
     /// Inserts a Connection header with the given value.
-    pub fn connection(&mut self, conn: &str) {
+    pub fn add_connection(&mut self, conn: &str) {
         self.insert(CONNECTION, conn.into());
     }
 
     /// Inserts a Content-Length header with the given value.
-    pub fn content_length(&mut self, len: usize) {
+    pub fn add_content_length(&mut self, len: usize) {
         self.insert(CONTENT_LENGTH, len.into());
     }
 
     /// Inserts a Content-Type header with the given value.
-    pub fn content_type(&mut self, content_type: &str) {
+    pub fn add_content_type(&mut self, content_type: &str) {
         self.insert(CONTENT_TYPE, content_type.into());
     }
 
-    /// Inserts a Cache-Control header with the given value.
-    pub fn cache_control(&mut self, directive: &str) {
-        self.insert(CACHE_CONTROL, directive.into());
+    /// Inserts a Date header with the current date and time, if possible.
+    pub fn add_date(&mut self) {
+        if let Some(date_value) = utils::get_datetime() {
+            self.insert(DATE, date_value);
+        }
+    }
+
+    /// Inserts a Host header from the given `SocketAddr`.
+    pub fn add_host(&mut self, host: SocketAddr) {
+        self.insert(HOST, format!("{host}").into());
+    }
+
+    /// Inserts the default Server header.
+    pub fn add_server(&mut self) {
+        self.insert(SERVER, DEFAULT_NAME.into());
+    }
+
+    /// Inserts the default User-Agent header.
+    pub fn add_user_agent(&mut self) {
+        self.insert(USER_AGENT, DEFAULT_NAME.into());
     }
 
     /// Returns the `Headers` as a `String` with color formatting.

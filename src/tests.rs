@@ -1,21 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::error::Error;
-use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, Client, ClientCli, Connection, Header, HeaderName, HeaderNameInner,
-    HeaderValue, Headers, Method, NetError, NetParseError, NetResult,
-    Request, RequestBuilder, Response, ResponseBuilder, Route,
-    RouteBuilder, Router, Server, ServerBuilder, ServerCli, ServerHandle,
-    Status, Style, StyleKind, StyleParts, Target,
-    ThreadPool, Version, Worker, DEFAULT_NAME,
+    Body, Client, Connection, Header, Headers, Method, NetError, NetParseError,
+    Request, Response, Route, Router, Server, ServerHandle, Status, Target,
+    UriPath, Version, DEFAULT_NAME,
 };
-use crate::header::names::{
-    ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, CONNECTION, CONTENT_LENGTH,
-    CONTENT_TYPE, HOST, SERVER, STANDARD_HEADERS, USER_AGENT,
-};
-use crate::util::{self, Trim};
 
 macro_rules! test_parsing_from_str {
     (
@@ -46,11 +35,13 @@ macro_rules! test_parsing_from_int {
 }
 
 #[cfg(test)]
-mod method {
+mod methods {
     use super::*;
 
     test_parsing_from_str! {
         Method from_str:
+        "ANY" => Method::Any;
+        "SHUTDOWN" => Method::Shutdown;
         "GET" => Method::Get;
         "HEAD" => Method::Head;
         "POST" => Method::Post;
@@ -60,33 +51,31 @@ mod method {
         "TRACE" => Method::Trace;
         "OPTIONS" => Method::Options;
         "CONNECT" => Method::Connect;
-        "SHUTDOWN" => Method::Shutdown;
-        "ANY" => Method::Any;
         BAD_INPUT: "Foo";
         BAD_INPUT: "get";
     }
 }
 
 #[cfg(test)]
-mod status {
+mod statuses {
     use super::*;
 
     test_parsing_from_str! {
         Status from_str:
-        "101 Switching Protocols" => Status(101u16);
-        "201 Created" => Status(201u16);
-        "300 Multiple Choices" => Status(300u16);
-        "400 Bad Request" => Status(400u16);
-        "501 Not Implemented" => Status(501u16);
+        "101 Switching Protocols" => Status(101);
+        "201 Created" => Status(201);
+        "300 Multiple Choices" => Status(300);
+        "400 Bad Request" => Status(400);
+        "501 Not Implemented" => Status(501);
         BAD_INPUT: "1234 Bad Status";
         BAD_INPUT: "abc";
     }
 
     test_parsing_from_int! {
         Status from_int:
-        201_u16 => Status(201u16);
-        202_u32 => Status(202u16);
-        203_i32 => Status(203u16);
+        201_u16 => Status(201);
+        202_u32 => Status(202);
+        203_i32 => Status(203);
         BAD_INPUT: 1001_u16;
         BAD_INPUT: -123_i32;
         BAD_INPUT: 0_u16;
@@ -94,7 +83,7 @@ mod status {
 }
 
 #[cfg(test)]
-mod version {
+mod versions {
     use super::*;
 
     test_parsing_from_str! {
@@ -112,28 +101,10 @@ mod version {
 }
 
 #[cfg(test)]
-mod header {
-    use super::*;
-
-    test_parsing_from_str! {
-        Header from_str:
-        "Accept: */*\r\n" =>
-            Header { name: ACCEPT, value: "*/*".into() };
-        "Host: rustnet/0.1.0\r\n" =>
-            Header { name: HOST, value: DEFAULT_NAME.into() };
-        "Content-Length: 123\r\n" =>
-            Header { name: CONTENT_LENGTH, value: "123".into() };
-        "Connection: keep-alive\r\n" =>
-            Header { name: CONNECTION, value: "keep-alive".into() };
-        "Content-Type: text/plain\r\n" =>
-            Header { name: CONTENT_TYPE, value: "text/plain".into() };
-        BAD_INPUT: "bad header";
-    }
-}
-
-#[cfg(test)]
 mod standard_headers {
     use super::*;
+    use crate::HeaderName;
+    use crate::headers::names::{HeaderNameInner, STANDARD_HEADERS};
 
     #[test]
     fn from_str() {
@@ -150,21 +121,72 @@ mod standard_headers {
 }
 
 #[cfg(test)]
-mod uri {
+mod single_header {
     use super::*;
+    use crate::headers::names::{
+        ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST,
+    };
 
+    test_parsing_from_str! {
+        Header from_str:
+        "Accept: */*\r\n" =>
+            Header { name: ACCEPT, value: "*/*".into() };
+        "Host: rustnet/0.1.1\r\n" =>
+            Header { name: HOST, value: DEFAULT_NAME.into() };
+        "Content-Length: 123\r\n" =>
+            Header { name: CONTENT_LENGTH, value: "123".into() };
+        "Connection: keep-alive\r\n" =>
+            Header { name: CONNECTION, value: "keep-alive".into() };
+        "Content-Type: text/plain\r\n" =>
+            Header { name: CONTENT_TYPE, value: "text/plain".into() };
+        BAD_INPUT: "bad header";
+    }
+}
+
+#[cfg(test)]
+mod many_headers {
+    use super::*;
+    use crate::headers::names::{HOST, USER_AGENT};
+
+    #[test]
+    fn from_str() {
+        let test_headers = Headers::from_str("\
+            Accept: */*\r\n\
+            Accept-Encoding: gzip, deflate, br\r\n\
+            Connection: keep-alive\r\n\
+            Host: example.com\r\n\
+            User-Agent: xh/0.19.3\r\n\
+            Pineapple: pizza\r\n\r\n"
+        )
+        .unwrap();
+
+        let mut expected_headers = Headers::new();
+        expected_headers.add_accept("*/*");
+        expected_headers.add_connection("keep-alive");
+        expected_headers.insert(HOST, "example.com".into());
+        expected_headers.insert(USER_AGENT, "xh/0.19.3".into());
+        expected_headers.add_accept_encoding("gzip, deflate, br");
+        expected_headers.insert("Pineapple".into(), "pizza".into());
+
+        assert_eq!(test_headers, expected_headers);
+    }
+}
+
+#[cfg(test)]
+mod uris {
     #[test]
     fn from_str() {
         macro_rules! test_uri_parser {
             ( $(SHOULD_ERROR: $uri:literal;)+ ) => {{
                 $(
-                    let parse_result = util::parse_uri($uri);
+                    let parse_result = $crate::utils::parse_uri($uri);
                     assert!(parse_result.is_err());
                 )+
             }};
             ( $($uri:literal: $addr:literal, $path:literal;)+ ) => {{
                 $(
-                    let (test_addr, test_path) = util::parse_uri($uri).unwrap();
+                    let (test_addr, test_path) = $crate::utils::parse_uri($uri)
+                        .unwrap();
                     assert_eq!(test_addr, $addr);
                     assert_eq!(test_path, $path);
                 )+
@@ -193,37 +215,10 @@ mod uri {
 }
 
 #[cfg(test)]
-mod headers {
+mod requests {
     use super::*;
+    use crate::headers::names::{HOST, USER_AGENT};
 
-    #[test]
-    fn from_str() {
-        let test_hdrs = Headers::from_str("\
-            Accept: */*\r\n\
-            Accept-Encoding: gzip, deflate, br\r\n\
-            Connection: keep-alive\r\n\
-            Host: example.com\r\n\
-            User-Agent: xh/0.19.3\r\n\
-            Pineapple: pizza\r\n\r\n"
-        )
-        .unwrap();
-
-        let expected_hdrs = Headers(BTreeMap::from([
-            (ACCEPT, "*/*".into()),
-            (HOST, "example.com".into()),
-            (USER_AGENT, "xh/0.19.3".into()),
-            (CONNECTION, "keep-alive".into()),
-            ("Pineapple".into(), "pizza".into()),
-            (ACCEPT_ENCODING, "gzip, deflate, br".into())
-        ]));
-
-        assert_eq!(test_hdrs, expected_hdrs);
-    }
-}
-
-#[cfg(test)]
-mod request {
-    use super::*;
     #[test]
     fn from_bytes() {
         let input = b"\
@@ -238,23 +233,29 @@ mod request {
 
         let test_req = Request::try_from(&input[..]).unwrap();
 
-        let mut expected_req = Request::new();
-        expected_req.path = "/test".into();
-        expected_req.headers.insert(ACCEPT, "*/*".into());
-        expected_req.headers.insert(HOST, "example.com".into());
-        expected_req.headers.insert(CONTENT_LENGTH, "0".into());
-        expected_req.headers.insert(USER_AGENT, "xh/0.19.3".into());
-        expected_req.headers.insert(CONNECTION, "keep-alive".into());
-        expected_req.headers.insert("Pineapple".into(), "pizza".into());
-        expected_req.headers.insert(ACCEPT_ENCODING, "gzip, deflate, br".into());
+        let mut headers = Headers::new();
+        headers.add_accept("*/*");
+        headers.add_content_length(0);
+        headers.add_connection("keep-alive");
+        headers.add_accept_encoding("gzip, deflate, br");
+        headers.insert(HOST, "example.com".into());
+        headers.insert(USER_AGENT, "xh/0.19.3".into());
+        headers.insert("Pineapple".into(), "pizza".into());
+
+        let expected_req = Request {
+            path: UriPath("/test".into()),
+            headers,
+            ..Request::default()
+        };
 
         assert_eq!(test_req, expected_req);
     }
 }
 
 #[cfg(test)]
-mod response {
+mod responses {
     use super::*;
+    use crate::headers::names::SERVER;
 
     #[test]
     fn from_bytes() {
@@ -267,91 +268,50 @@ mod response {
 
         let test_res = Response::try_from(&input[..]).unwrap();
 
-        let mut expected_res = Response::new();
-        expected_res.headers.insert(SERVER, "example.com".into());
-        expected_res.headers.insert(CONTENT_LENGTH, "0".into());
-        expected_res.headers.insert(CONNECTION, "keep-alive".into());
-        expected_res.headers.insert("Pineapple".into(), "pizza".into());
+        let mut headers = Headers::new();
+        headers.add_content_length(0);
+        headers.add_connection("keep-alive");
+        headers.insert(SERVER, "example.com".into());
+        headers.insert("Pineapple".into(), "pizza".into());
+
+        let expected_res = Response {
+            headers,
+            ..Response::default()
+        };
 
         assert_eq!(test_res, expected_res);
     }
 }
 
 #[cfg(test)]
-mod utils {
-    use super::*;
+mod trim {
+    use crate::utils::Trim;
 
     #[test]
-    fn test_trim() {
+    fn whitespace_bytes() {
         assert_eq!(b"  test".trim(), b"test");
         assert_eq!(b"test    ".trim(), b"test");
         assert_eq!(b"         test       ".trim(), b"test");
-        assert_eq!(b"\t  \nx\t  x\r\x0c".trim(), b"x\t  x");
         assert_eq!(b"                   ".trim(), b"");
-        assert_eq!(b"x".trim(), b"x");
+        assert_eq!(b"\t  \nx\t  x\r\x0c".trim(), b"x\t  x");
+        assert_eq!(b"test".trim(), b"test");
         assert_eq!(b"".trim(), b"");
     }
-
-    #[test]
-    fn test_trim_start() {
-        assert_eq!(b"  test".trim_start(), b"test");
-        assert_eq!(b"test    ".trim_start(), b"test    ");
-        assert_eq!(b"         test       ".trim_start(), b"test       ");
-        assert_eq!(b"                   ".trim_start(), b"");
-    }
-
-    #[test]
-    fn test_trim_end() {
-        assert_eq!(b"  test".trim_end(), b"  test");
-        assert_eq!(b"test    ".trim_end(), b"test");
-        assert_eq!(b"         test       ".trim_end(), b"         test");
-        assert_eq!(b"                   ".trim_end(), b"");
-    }
 }
 
-mod trait_impls {
-    use super::*;
-
-    macro_rules! trait_impl_test {
-        ($label:ident implement $test_trait:ident: $( $test_type:ty ),+) => {
-            #[test]
-            const fn $label() {
-                const fn trait_implementation_test<T: $test_trait>() {}
-                $( trait_implementation_test::<$test_type>(); )+
-            }
-        };
-    }
-
-    trait_impl_test! [send_types implement Send:
-        Body, Client, Connection, Header, HeaderNameInner, HeaderName,
-        HeaderValue, Headers, Method, NetError, NetResult<()>,
-        NetParseError, Request, RequestBuilder, Response,
-        ResponseBuilder, Route, RouteBuilder, Router, Server, ServerBuilder,
-        ServerHandle<()>, Status, Style, Target, ThreadPool, Version, Worker];
-    trait_impl_test! [sync_types implement Sync:
-        Body, Client, Connection, Header, HeaderNameInner, HeaderName,
-        HeaderValue, Headers, Method, NetError, NetResult<()>,
-        NetParseError, Request, RequestBuilder, Response,
-        ResponseBuilder, Route, RouteBuilder, Router, Server,
-        ServerBuilder, ServerHandle<()>, Status, Style, Target, ThreadPool,
-        Version, Worker];
-    trait_impl_test! [error_types implement Error:
-        NetError, NetParseError];
-}
-
-mod style {
-    use super::*;
-
+mod styles {
     macro_rules! test_format_str_parsing {
         ($( $format_str:literal: $req_style:expr, $res_style:expr; )+) => {
             #[test]
             fn from_format_str() {
-                use self::{StyleKind::*, StyleParts::*};
+                use $crate::{Style, StyleKind::*, StyleParts::*};
 
                 $(
                     let expected = Style { req: $req_style, res: $res_style };
+
                     let mut test = Style::default();
                     test.from_format_str($format_str);
+
                     assert_eq!(test, expected);
                 )+
             }
@@ -384,146 +344,31 @@ mod style {
     }
 }
 
-mod client_cli {
+mod trait_impls {
     use super::*;
+    use std::error::Error;
 
-    #[test]
-    fn parse_args() {
-        let mut args = VecDeque::from([
-            "./client",
-            "--plain",
-            "--no-dates",
-            "--output", "/Bs2Rhb1",
-            "--method", "posT",
-            "-H", "acCEpT:*/*",
-            "-H", "conteNt-leNgth:13",
-            "-H", "caCHe-controL:no-CACHE",
-            "--debug",
-            "-H", "cOntent-tYpe:text/html; charset=utf-8",
-            "-H", "pineaPPle:yUm123",
-            "--body", "This is a test meSSage :) in the request bOdy.",
-            "httpbin.org/json"
-        ]);
-
-        let expected_cli = ClientCli {
-            no_dates: true,
-            do_debug: true,
-            do_plain: true,
-            style: Style {
-                req: StyleKind::Plain(StyleParts::LineBody),
-                res: StyleKind::Plain(StyleParts::All)
-            },
-            method: Method::Post,
-            path: "/json".into(),
-            addr: Some("httpbin.org:80".to_string()),
-            headers: Headers(BTreeMap::from([
-                (ACCEPT, "*/*".into()),
-                (CONTENT_LENGTH, "13".into()),
-                (CACHE_CONTROL, "no-cache".into()),
-                (CONTENT_TYPE, "text/html; charset=utf-8".into()),
-                (util::to_titlecase(b"Pineapple").into(), "yum123".into())
-            ])),
-            body: Body::Text(
-                "This is a test meSSage :) in the request bOdy.".into()
-            ),
-            ..ClientCli::default()
+    macro_rules! trait_impl_test {
+        ($label:ident implement $test_trait:ident: $( $test_type:ty ),+) => {
+            #[test]
+            const fn $label() {
+                const fn trait_implementation_test<T: $test_trait>() {}
+                $( trait_implementation_test::<$test_type>(); )+
+            }
         };
-
-        let test_cli = ClientCli::parse_args(&mut args).unwrap();
-
-        assert_eq!(test_cli, expected_cli);
-
-        let mut test_client = Client::try_from(test_cli).unwrap();
-        let mut expected_client = Client::try_from(expected_cli).unwrap();
-
-        if let Some(req) = test_client.req.as_mut() {
-            req.headers.header("Host", "httpbin.org");
-        }
-
-        if let Some(req) = expected_client.req.as_mut() {
-            req.headers.header("Host", "httpbin.org");
-        }
-
-        assert_eq!(test_client, expected_client);
     }
-}
 
-mod server_cli {
-    use super::*;
-
-    #[test]
-    fn parse_args() {
-        let mut args = VecDeque::from([
-            "./server", "--test", "-d",
-            "--log-file", "./log_file.txt",
-            "-I", "./favicon.ico",
-            "-0", "./error_404.html",
-            "-T", "pUt:/put:test message1.",
-            "-T", "pAtch:/patCh:test message2.",
-            "-T", "DeleTe:/dEletE:test message3.",
-            "-F", "GeT:/geT:./static/get.html",
-            "-F", "HEaD:/hEad:./static/head.html",
-            "-F", "pOst:/poSt:./static/post.html",
-            "127.0.0.1:7879"
-        ]);
-
-        let test_cli = ServerCli::parse_args(&mut args);
-
-        let expected_cli = ServerCli {
-            do_log: true,
-            do_debug: true,
-            is_test: true,
-            addr: Some("127.0.0.1:7879".to_string()),
-            log_file: Some(PathBuf::from("./log_file.txt")),
-            router: Router(BTreeSet::from([
-                Route {
-                    method: Method::Shutdown,
-                    path: None,
-                    target: Target::Shutdown
-                },
-                Route {
-                    method: Method::Get,
-                    path: Some("/favicon.ico".into()),
-                    target: Target::Favicon(Path::new("./favicon.ico").into())
-                },
-                Route {
-                    method: Method::Any,
-                    path: None,
-                    target: Path::new("./error_404.html").into()
-                },
-                Route {
-                    method: Method::Get,
-                    path: Some("/get".into()),
-                    target: Path::new("./static/get.html").into()
-                },
-                Route {
-                    method: Method::Post,
-                    path: Some("/post".into()),
-                    target: Path::new("./static/post.html").into()
-                },
-                Route {
-                    method: Method::Head,
-                    path: Some("/head".into()),
-                    target: Path::new("./static/head.html").into()
-                },
-                Route {
-                    method: Method::Put,
-                    path: Some("/put".into()),
-                    target: "test message1.".into()
-                },
-                Route {
-                    method: Method::Patch,
-                    path: Some("/patch".into()),
-                    target: "test message2.".into()
-                },
-                Route {
-                    method: Method::Delete,
-                    path: Some("/delete".into()),
-                    target: "test message3.".into()
-                },
-            ]))
-        };
-
-        assert_eq!(test_cli, expected_cli);
-    }
+    trait_impl_test! [send_types implement Send:
+        Body, Client, Connection, Header, Headers, Method, NetError,
+        NetParseError, Request, Response, Route, Router, Server,
+        ServerHandle<()>, Status, Target, Version
+    ];
+    trait_impl_test! [sync_types implement Sync:
+        Body, Client, Connection, Header, Headers, Method, NetError,
+        NetParseError, Request, Response, Route, Router, Server,
+        ServerHandle<()>, Status, Target, Version
+    ];
+    trait_impl_test! [error_types implement Error:
+        NetError, NetParseError
+    ];
 }

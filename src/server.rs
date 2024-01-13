@@ -10,9 +10,6 @@ use std::sync::Arc;
 use std::thread::{self, spawn, JoinHandle};
 use std::time::Duration;
 
-pub mod cli;
-pub use cli::ServerCli;
-
 use crate::{Connection, NetError, NetResult, Router, ThreadPool};
 
 pub const NUM_WORKERS: usize = 4;
@@ -167,31 +164,6 @@ impl PartialEq for Server {
 }
 
 impl Eq for Server {}
-
-impl TryFrom<ServerCli> for Server {
-    type Error = NetError;
-
-    fn try_from(mut cli: ServerCli) -> NetResult<Self> {
-        let Some(addr) = cli.addr.take() else {
-            return Err(NetError::Other("Missing server address.".into()));
-        };
-
-        let mut server = Self::builder();
-
-        if let Some(path) = cli.log_file.take() {
-            let _ = server.log_file(path);
-            cli.do_log = true;
-        }
-
-        server
-            .addr(&addr)
-            .do_log(cli.do_log)
-            .do_debug(cli.do_debug)
-            .is_test_server(cli.is_test)
-            .router(&mut cli.router)
-            .build()
-    }
-}
 
 impl Server {
     /// Returns a `ServerBuilder` instance.

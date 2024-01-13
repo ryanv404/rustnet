@@ -1,18 +1,16 @@
-#![allow(clippy::missing_errors_doc)]
-
 use std::io::{self, BufRead, Write};
 use std::process::{self, Child, Command, Stdio};
 use std::str::FromStr;
 
-use crate::{
+use rustnet::{
     Client, Connection, HeaderValue, Method, NetError, NetParseError,
-    NetResult, Request, TEST_SERVER_ADDR,
+    NetResult, Request, TEST_SERVER_ADDR, TUI_NAME,
 };
-use crate::header::names::{CONNECTION, HOST};
-use crate::style::colors::{
+use rustnet::headers::names::{CONNECTION, HOST};
+use rustnet::style::colors::{
     BR_BLU, BR_CYAN, BR_GRN, BR_PURP, BR_RED, BR_YLW, CLR,
 };
-use crate::util;
+use rustnet::utils;
 
 /// A shell-like TUI for an HTTP client.
 #[derive(Debug)]
@@ -65,9 +63,8 @@ impl Tui {
         Self::print_intro()?;
 
         while tui.running {
-            tui.print_prompt()?;
-
             line.clear();
+            tui.print_prompt()?;
             io::stdin().lock().read_line(&mut line)?;
 
             if let Err(e) = tui.handle_user_input(line.trim()) {
@@ -97,14 +94,14 @@ impl Tui {
                 | "response"
                 | "verbose" => self.output_style(input),
             "builder" => {
-                let cli = Client::get_request_from_cli()?;
-                self.client = Client::try_from(cli)?;
+                self.client.get_request_from_user()?;
 
                 if let Some(conn) = self.client.conn.as_ref() {
                     self.last_addr = Some(conn.remote_addr.to_string());
                 }
 
                 println!();
+
                 self.send_request_and_print_output()?;
             },
             "log-server" => self.toggle_logging(),
@@ -136,7 +133,7 @@ impl Tui {
                             let stream = conn.writer.get_ref();
 
                             if let Ok(remote) = stream.peer_addr() {
-                                req.headers.host(remote);
+                                req.headers.add_host(remote);
                             }
                         }
                     }
@@ -154,16 +151,16 @@ impl Tui {
         let mut builder = Request::builder();
 
         let uri = match input.split_once(' ') {
-            None => input,
             Some((method, uri)) => {
                 let method = method.to_ascii_uppercase();
                 let method = Method::from_str(method.as_str())?;
                 builder.method(method);
                 uri
             },
+            None => input,
         };
 
-        match util::parse_uri(uri).ok() {
+        match utils::parse_uri(uri).ok() {
             Some((addr, path)) => {
                 let req = builder.path(path.into()).build();
                 self.client.req = Some(req);
@@ -225,6 +222,8 @@ impl Tui {
 
     /// Prints the intro message on program start-up.
     pub fn print_intro() -> NetResult<()> {
+        Self::clear_screen()?;
+
         let face = format!(r#"
               .-''''''-.
             .' _      _ '.
@@ -238,9 +237,8 @@ impl Tui {
 
          YOU SHOULDN'T BE HERE"#);
 
-
-        Self::clear_screen()?;
-        println!("{BR_PURP}http_tui/0.1\n\n{face}{CLR}\n");
+        let version = env!("CARGO_PKG_VERSION");
+        println!("{BR_PURP}{TUI_NAME}\n{version}\n\n{face}{CLR}\n");
         Ok(())
     }
 
@@ -272,7 +270,7 @@ impl Tui {
     /// Prints the help message to stdout.
     pub fn print_help() {
         eprintln!("\
-{BR_PURP}http_tui{CLR} is a shell-like HTTP client.\n
+{BR_PURP}{TUI_NAME}{CLR} is a shell-like HTTP client.\n
 Enter a {BR_PURP}URI{CLR} to send a GET request.
     e.g. \"httpbin.org/status/201\"\n
 To send a request with a different method enter {BR_PURP}METHOD URI{CLR}.
@@ -300,21 +298,9 @@ The prior response's status code is displayed in the prompt.\n
         eprintln!("{BR_RED}Invalid input: \"{input}\"{CLR}\n");
     }
 
-    /// Prints a warning to stdout that connecting to `addr` failed.
-    pub fn warn_no_connection(&mut self, addr: &str) -> NetResult<()> {
-        // Reset prior connection.
-        self.last_addr = None;
-        self.client.req = None;
-        self.client.res = None;
-        self.client.conn = None;
-
-        println!("{BR_RED}Unable to connect to \"{addr}\"{CLR}\n");
-        Ok(())
-    }
-
     /// Starts a test server at 127.0.0.1:7878.
     pub fn start_server() -> NetResult<Child> {
-        if let Err(e) = util::build_server() {
+        if let Err(e) = utils::build_server() {
             eprintln!("{BR_RED}Server failed to build: {e}{CLR}\n");
             return Err(NetError::NotConnected);
         }
@@ -336,7 +322,7 @@ The prior response's status code is displayed in the prompt.\n
             },
         };
 
-        if util::check_server(TEST_SERVER_ADDR) {
+        if utils::check_server(TEST_SERVER_ADDR) {
             println!(
                 "{BR_GRN}Server is listening at: {TEST_SERVER_ADDR}{CLR}\n"
             );

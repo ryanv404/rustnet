@@ -7,12 +7,9 @@ use crate::{
     Body, Connection, Headers, Method, NetError, NetResult, Request,
     Response, Style, UriPath, Version,
 };
-use crate::header::names::{DATE, HOST};
+use crate::headers::names::{DATE, HOST};
 use crate::style::colors::{BR_CYAN, BR_RED, CLR};
-use crate::util;
-
-pub mod cli;
-pub use cli::ClientCli;
+use crate::utils;
 
 /// An HTTP client builder object.
 #[derive(Debug)]
@@ -160,7 +157,7 @@ impl ClientBuilder {
 
         // Ensure the Host header is set.
         if !req.contains(&HOST) {
-            req.headers.host(conn.remote_addr);
+            req.headers.add_host(conn.remote_addr);
         }
 
         Ok(Client {
@@ -311,36 +308,6 @@ impl Debug for Client {
     }
 }
 
-impl TryFrom<ClientCli> for Client {
-    type Error = NetError;
-
-    fn try_from(cli: ClientCli) -> NetResult<Self> {
-        // Establish a connection.
-        let Some(addr) = cli.addr.as_ref() else {
-            return Err(NetError::NotConnected);
-        };
-
-        let mut client = Self::builder()
-            .do_send(cli.do_send)
-            .do_debug(cli.do_debug)
-            .no_dates(cli.no_dates)
-            .style(cli.style)
-            .method(cli.method)
-            .path(cli.path.clone())
-            .version(cli.version)
-            .headers(cli.headers.clone())
-            .body(cli.body.clone())
-            .addr(addr)
-            .build()?;
-
-        if cli.do_plain {
-            client.style.to_plain();
-        }
-
-        Ok(client)
-    }
-}
-
 impl Client {
     /// Returns a new `ClientBuilder` instance.
     #[must_use]
@@ -355,7 +322,7 @@ impl Client {
     /// Returns an error `TcpStream::connect` is unable to connect to the the
     /// given `uri`.
     pub fn new(method: Method, uri: &str) -> NetResult<Self> {
-        let (addr, path) = util::parse_uri(uri)?;
+        let (addr, path) = utils::parse_uri(uri)?;
 
         Self::builder()
             .method(method)
@@ -372,7 +339,7 @@ impl Client {
     /// Returns an error `TcpStream::connect` is unable to connect to the the
     /// given `uri` or if sending the request fails.
     pub fn send(method: Method, uri: &str) -> NetResult<Self> {
-        let (addr, path) = util::parse_uri(uri)?;
+        let (addr, path) = utils::parse_uri(uri)?;
 
         Self::builder()
             .method(method)
@@ -675,22 +642,27 @@ impl Client {
     /// Returns an error if a problem is encountered while writing prompts to
     /// the terminal or while building the `Client`.
     #[allow(clippy::missing_errors_doc)]
-    pub fn get_request_from_cli() -> NetResult<ClientCli> {
+    pub fn get_request_from_user(&mut self) -> NetResult<()> {
         let mut line = String::with_capacity(1024);
 
         let method = Self::get_method(&mut line)?;
-        let addr = Self::get_addr(&mut line).ok();
+        let addr = Self::get_addr(&mut line)?;
         let path = Self::get_path(&mut line)?;
         let headers = Self::get_headers(&mut line)?;
         let body = Self::get_body(&mut line)?;
 
-        Ok(ClientCli {
-            addr,
-            method,
-            path,
-            headers,
-            body,
-            ..ClientCli::default()
-        })
+        self.req = Some(Request::builder()
+            .method(method)
+            .path(path)
+            .headers(headers)
+            .body(body)
+            .build());
+
+        self.conn = TcpStream::connect(&addr)
+            .map_err(|e| NetError::Io(e.kind()))
+            .and_then(Connection::try_from)
+            .ok();
+
+        Ok(())
     }
 }

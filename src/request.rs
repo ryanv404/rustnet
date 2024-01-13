@@ -5,11 +5,11 @@ use std::str::{self, FromStr};
 
 use crate::{
     Body, HeaderName, HeaderValue, Headers, Method, NetParseError, Route,
-    Target, Version, DEFAULT_NAME,
+    Target, Version,
 };
-use crate::header::names::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
+use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{BR_YLW, CLR};
-use crate::util::Trim;
+use crate::utils::Trim;
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -88,30 +88,8 @@ impl RequestBuilder {
             body: self.body.take().unwrap_or_default()
         };
 
-        // Ensure Accept header is set.
-        if !req.headers.contains(&ACCEPT) {
-            req.headers.accept("*/*");
-        }
-
-        // Ensure User-Agent header is set.
-        if !req.headers.contains(&USER_AGENT) {
-            req.headers.user_agent(DEFAULT_NAME);
-        }
-
-        if !req.body.is_empty() {
-            // Ensure Content-Length header is set.
-            if !req.headers.contains(&CONTENT_LENGTH) {
-                req.headers.content_length(req.body.len());
-            }
-
-            // Ensure Content-Type header is set.
-            if !req.headers.contains(&CONTENT_TYPE) {
-                if let Some(cont_type) = req.body.as_content_type() {
-                    req.headers.content_type(cont_type);
-                }
-            }
-        }
-
+        // Ensure default request headers are set.
+        req.headers.default_request_headers(&req.body, None);
         req
     }
 }
