@@ -285,17 +285,17 @@ mod responses {
 
 #[cfg(test)]
 mod trim {
-    use crate::utils::Trim;
+    use crate::utils::trim;
 
     #[test]
-    fn whitespace_bytes() {
-        assert_eq!(b"  test".trim(), b"test");
-        assert_eq!(b"test    ".trim(), b"test");
-        assert_eq!(b"         test       ".trim(), b"test");
-        assert_eq!(b"                   ".trim(), b"");
-        assert_eq!(b"\t  \nx\t  x\r\x0c".trim(), b"x\t  x");
-        assert_eq!(b"test".trim(), b"test");
-        assert_eq!(b"".trim(), b"");
+    fn white_space() {
+        assert_eq!(trim(b"  test"), b"test");
+        assert_eq!(trim(b"test    "), b"test");
+        assert_eq!(trim(b"         test       "), b"test");
+        assert_eq!(trim(b"                   "), b"");
+        assert_eq!(trim(b"\t  \nx\t  x\r\x0c"), b"x\t  x");
+        assert_eq!(trim(b"test"), b"test");
+        assert_eq!(trim(b""), b"");
     }
 }
 

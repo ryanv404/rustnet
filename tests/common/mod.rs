@@ -12,8 +12,7 @@ macro_rules! start_test_server {
 
             let args = [
                 "run", "--bin", SERVER_NAME, "--",
-                "--test", "--",
-                TEST_SERVER_ADDR
+                "--test", "--", TEST_SERVER_ADDR
             ];
 
             let _ = Command::new("cargo")

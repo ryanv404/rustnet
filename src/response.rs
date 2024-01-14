@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{MAGENTA, RESET};
-use crate::utils::Trim;
+use crate::utils;
 
 /// An HTTP response builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -179,9 +179,12 @@ impl TryFrom<&[u8]> for Response {
     type Error = NetParseError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bytes = bytes.trim_start();
+        let start = bytes
+            .iter()
+            .position(|&b| b == b'H')
+            .ok_or(NetParseError::StatusLine)?;
 
-        let mut lines = bytes.split(|b| *b == b'\n');
+        let mut lines = bytes[start..].split(|b| *b == b'\n');
 
         // Parse the status line.
         let (version, status) = lines
@@ -195,7 +198,7 @@ impl TryFrom<&[u8]> for Response {
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let line = line.trim();
+                let line = utils::trim(line);
 
                 if line.is_empty() {
                     None
@@ -271,27 +274,21 @@ impl Response {
     ///
     /// # Errors
     /// 
-    /// Returns an error if parsing of the status line fails.
+    /// Returns an error if status line parsing fails.
     pub fn parse_status_line(
         line: &[u8]
     ) -> Result<(Version, Status), NetParseError> {
-        let start = line
-            .iter()
-            .position(|&b| b == b'H')
-            .ok_or(NetParseError::StatusLine)?;
+        let mut parts = utils::trim(line).splitn(2, |&b| b == b' ');
 
-        let line = &line[start..];
-
-        let version = if line.starts_with(b"HTTP/1.1 ") {
-            Version::OneDotOne
-        } else {
-            return Err(NetParseError::Version);
+        let (Some(version), Some(status)) = (parts.next(), parts.next()) else {
+            return Err(NetParseError::StatusLine);
         };
 
-        let status = line
-            .get(9..)
-            .ok_or(NetParseError::Status)
-            .and_then(Status::try_from)?;
+        let version = utils::trim_end(version);
+        let version = Version::try_from(version)?;
+
+        let status = utils::trim_start(status);
+        let status = Status::try_from(status)?;
 
         Ok((version, status))
     }

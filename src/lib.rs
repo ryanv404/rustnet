@@ -39,6 +39,7 @@ pub use server::{Listener, Server, ServerBuilder, ServerHandle};
 pub use style::{Style, StyleKind, StyleParts};
 pub use workers::{ThreadPool, Worker};
 
+pub const MAX_HEADERS: u16 = 1024;
 pub const READER_BUFSIZE: usize = 2048;
 pub const WRITER_BUFSIZE: usize = 2048;
 pub const TEST_SERVER_ADDR: &str = "127.0.0.1:7878";
@@ -50,10 +51,6 @@ pub const DEFAULT_NAME: &str = concat!(
     "/",
     env!("CARGO_PKG_VERSION")
 );
-
-/// The maximum number of headers that a `Request` or `Response` can contain
-/// in order to mitigate against a denial of service attack.
-pub const MAX_HEADERS: u16 = 1024;
 
 #[cfg(test)]
 mod tests;

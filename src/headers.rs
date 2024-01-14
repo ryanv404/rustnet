@@ -7,7 +7,7 @@ use crate::{
     Body, NetError, NetParseError, NetResult, DEFAULT_NAME,
 };
 use crate::style::colors::{BLUE, CYAN, RESET};
-use crate::utils::{self, Trim};
+use crate::utils;
 
 pub mod names;
 pub mod values;
@@ -99,10 +99,10 @@ impl TryFrom<&[u8]> for Headers {
     fn try_from(many_headers: &[u8]) -> Result<Self, Self::Error> {
         let mut headers = Self::new();
 
-        let lines = many_headers
+        let lines = utils::trim_start(many_headers)
             .split(|b| *b == b'\n')
             .map_while(|line| {
-                let line = line.trim();
+                let line = utils::trim_end(line);
 
                 if line.is_empty() {
                     None

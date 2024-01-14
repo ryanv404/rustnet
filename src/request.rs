@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{ORANGE, RESET};
-use crate::utils::Trim;
+use crate::utils;
 
 /// An HTTP request builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -214,9 +214,7 @@ impl TryFrom<&[u8]> for Request {
     type Error = NetParseError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bytes = bytes.trim_start();
-
-        let mut lines = bytes.split(|&b| b == b'\n');
+        let mut lines = utils::trim_start(bytes).split(|&b| b == b'\n');
 
         // Parse the request line.
         let (method, path, version) = lines
@@ -230,7 +228,7 @@ impl TryFrom<&[u8]> for Request {
         let header_lines = lines
             .by_ref()
             .map_while(|line| {
-                let line = line.trim();
+                let line = utils::trim(line);
 
                 if line.is_empty() {
                     None
@@ -327,25 +325,28 @@ impl Request {
     pub fn parse_request_line(
         line: &[u8]
     ) -> Result<(Method, UriPath, Version), NetParseError> {
-        let mut parts = line.trim_start().splitn(2, |&b| b == b' ');
+        let mut parts = utils::trim(line).splitn(2, |&b| b == b' ');
 
         let (Some(method), Some(rest)) = (parts.next(), parts.next()) else {
             return Err(NetParseError::RequestLine);
         };
 
-        let mut parts = rest.trim().splitn(2, |&b| b == b' ');
+        let mut parts = utils::trim_start(rest).splitn(2, |&b| b == b' ');
 
         let (Some(path), Some(version)) = (parts.next(), parts.next()) else {
             return Err(NetParseError::RequestLine);
         };
 
+        let method = utils::trim_end(method);
         let method = Method::try_from(method)?;
 
-        let path = String::from_utf8(path.to_vec())
+        let path = utils::trim_end(path).to_vec();
+        let path = String::from_utf8(path)
             .map_err(|_| NetParseError::Path)?
             .into();
 
-        let version = Version::try_from(version.trim_start())?;
+        let version = utils::trim_start(version);
+        let version = Version::try_from(version)?;
 
         Ok((method, path, version))
     }

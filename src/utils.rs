@@ -10,47 +10,35 @@ use std::time::Duration;
 use crate::{HeaderValue, NetError, NetParseError, NetResult, SERVER_NAME};
 use crate::style::colors::{RED, RESET};
 
-pub trait Trim {
-    fn trim_start(&self) -> &[u8];
-    fn trim_end(&self) -> &[u8];
-    fn trim(&self) -> &[u8];
+/// Trim whitespace from the beginning of a bytes slice.
+pub fn trim_start(mut bytes: &[u8]) -> &[u8] {
+    while let [first, rest @ ..] = bytes {
+        if first.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+
+    bytes
 }
 
-impl Trim for [u8] {
-    /// Trim whitespace from the beginning of a bytes slice.
-    fn trim_start(&self) -> &[u8] {
-        let mut bytes = self;
-
-        while let [first, rest @ ..] = bytes {
-            if first.is_ascii_whitespace() {
-                bytes = rest;
-            } else {
-                break;
-            }
+/// Trim whitespace from the end of a bytes slice.
+pub fn trim_end(mut bytes: &[u8]) -> &[u8] {
+    while let [rest @ .., last] = bytes {
+        if last.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
         }
-
-        bytes
     }
 
-    /// Trim whitespace from the end of a bytes slice.
-    fn trim_end(&self) -> &[u8] {
-        let mut bytes = self;
+    bytes
+}
 
-        while let [rest @ .., last] = bytes {
-            if last.is_ascii_whitespace() {
-                bytes = rest;
-            } else {
-                break;
-            }
-        }
-
-        bytes
-    }
-
-    /// Trim whitespace from the beginning and the end of a bytes slice.
-    fn trim(&self) -> &[u8] {
-        self.trim_start().trim_end()
-    }
+/// Trim whitespace from the beginning and the end of a bytes slice.
+pub fn trim(bytes: &[u8]) -> &[u8] {
+    trim_end(trim_start(bytes))
 }
 
 /// Parses a string slice into a host address and a URI path.
@@ -141,13 +129,15 @@ pub fn to_titlecase(bytes: &[u8]) -> String {
         .filter(|&part| !part.is_empty())
         .for_each(|part| {
             if let Some((first, rest)) = part.split_first() {
-                // Prepend every part but the first with a hyphen.
+                // Restore hyphens.
                 if !title.is_empty() {
                     title.push('-');
                 }
 
+                // Capitalize the first letter of each path.
                 title.push(first.to_ascii_uppercase() as char);
 
+                // Append the rest of the part as-is.
                 if !rest.is_empty() {
                     title.push_str(&String::from_utf8_lossy(rest));
                 }
@@ -200,7 +190,7 @@ pub fn get_datetime() -> Option<HeaderValue> {
         .env("TZ", "GMT")
         .arg("+%a, %d %b %Y %T %Z")
         .output()
-        .map_or(None, |out| Some(HeaderValue(out.stdout.trim().into())))
+        .map_or(None, |out| Some(HeaderValue(trim(&out.stdout).into())))
 }
 
 /// Returns the path to the `date` program if it exists.
