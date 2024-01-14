@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
-use crate::{Connection, Server};
+use crate::{Connection, Method, Server};
 
 /// Contains the ID and handle for a single worker thread.
 #[derive(Debug)]
@@ -44,17 +44,21 @@ impl Worker {
                 }
 
                 // Check for server shutdown signal
-                if server.is_test_server && req.method.is_shutdown() {
+                if server.is_test_server
+                    && matches!(req.method, Method::Shutdown)
+                {
                     server.shutdown(&conn);
                     break;
                 }
 
                 if server.do_log {
-                    let ip = conn.remote_addr.ip();
-                    let status = res.status_code();
-                    let method = req.method;
-                    let path = &req.path;
-                    server.log(&format!("[{ip}|{status}] {method} {path}"));
+                    server.log(&format!(
+                        "[{}|{}] {} {}",
+                        conn.remote_addr.ip(),
+                        res.status.code(),
+                        req.method,
+                        &req.path
+                    ));
                 }
             }
         });

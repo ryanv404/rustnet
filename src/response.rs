@@ -8,7 +8,7 @@ use crate::{
     Target, Version,
 };
 use crate::headers::names::CONTENT_TYPE;
-use crate::style::colors::{BR_PURP, CLR};
+use crate::style::colors::{MAGENTA, RESET};
 use crate::utils::Trim;
 
 /// An HTTP response builder object.
@@ -255,18 +255,6 @@ impl Response {
         &self.status
     }
 
-    /// Returns the `Status` code.
-    #[must_use]
-    pub const fn status_code(&self) -> u16 {
-        self.status.code()
-    }
-
-    /// Returns the reason phrase for the response `Status`.
-    #[must_use]
-    pub fn status_msg(&self) -> Cow<'_, str> {
-        self.status.msg()
-    }
-
     /// Returns the status line as a `String` with plain formatting.
     #[must_use]
     pub fn status_line_to_plain_string(&self) -> String {
@@ -276,7 +264,7 @@ impl Response {
     /// Returns the status line as a `String` with color formatting.
     #[must_use]
     pub fn status_line_to_color_string(&self) -> String {
-        format!("{BR_PURP}{} {}{CLR}", self.version, self.status)
+        format!("{MAGENTA}{} {}{RESET}", self.version, self.status)
     }
 
     /// Parses a bytes slice into a `Version` and a `Status`.

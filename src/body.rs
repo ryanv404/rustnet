@@ -259,9 +259,9 @@ impl Body {
             // 1xx (Informational), 204 (No Content), and 304 (Not Modified).
             100..=199 | 204 | 304 => true,
             // CONNECT responses with a 2xx (Success) status.
-            200..=299 if method.is_connect() => true,
+            200..=299 if matches!(method, Method::Connect) => true,
             // HEAD responses.
-            _ if method.is_head() => true,
+            _ if matches!(method, Method::Head) => true,
             _ => false,
         }
     }

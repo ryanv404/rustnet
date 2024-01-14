@@ -7,8 +7,8 @@ use crate::{
     Body, Connection, Headers, Method, NetError, NetResult, Request,
     Response, Style, UriPath, Version,
 };
-use crate::headers::names::{DATE, HOST};
-use crate::style::colors::{BR_CYAN, BR_RED, CLR};
+use crate::headers::names::DATE;
+use crate::style::colors::{GREEN, ORANGE, RESET, BLUE};
 use crate::utils;
 
 /// An HTTP client builder object.
@@ -147,18 +147,13 @@ impl ClientBuilder {
         };
 
         // `Request::builder` sets default request headers if not present.
-        let mut req = Request::builder()
+        let req = Request::builder()
             .method(self.method.take().unwrap_or_default())
             .path(self.path.take().unwrap_or_default())
             .version(self.version.take().unwrap_or_default())
             .headers(self.headers.take().unwrap_or_default())
             .body(self.body.take().unwrap_or_default())
             .build();
-
-        // Ensure the Host header is set.
-        if !req.contains(&HOST) {
-            req.headers.add_host(conn.remote_addr);
-        }
 
         Ok(Client {
             do_send: self.do_send,
@@ -516,122 +511,139 @@ impl Client {
         println!();
     }
 
+    /// Reads and parses a URI from stdin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a problem occurs while reading or writing to the
+    /// terminal.
+    pub fn get_uri(line: &mut String) -> NetResult<(String, UriPath)> {
+        let mut stdout = io::stdout().lock();
+
+        writeln!(
+            &mut stdout,
+            "Note: press \"Enter\" to skip optional fields.\n"
+        )?;
+
+        loop {
+            write!(&mut stdout, "{BLUE}URI:{RESET} ")?;
+            stdout.flush()?;
+
+            line.clear();
+            io::stdin().lock().read_line(line)?;
+
+            let trimmed = line.trim();
+
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let Ok((addr, path)) = utils::parse_uri(trimmed) else {
+                writeln!(&mut stdout, "{ORANGE}Invalid URI.{RESET}")?;
+                continue;
+            };
+
+            return Ok((addr, path.into()));
+        }
+    }
+
     /// Reads and parses a `Method` from stdin.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a problem occurs while reading or writing to the
+    /// terminal.
     pub fn get_method(line: &mut String) -> NetResult<Method> {
         let mut stdout = io::stdout().lock();
 
-        write!(&mut stdout, "{BR_CYAN}Method [GET]:{CLR} ")?;
+        write!(
+            &mut stdout,
+            "{BLUE}Method{RESET} (optional): "
+        )?;
         stdout.flush()?;
 
         line.clear();
         io::stdin().lock().read_line(line)?;
 
-        if line.trim().is_empty() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() {
             Ok(Method::Get)
         } else {
-            let uppercase = line.trim().to_ascii_uppercase();
+            let uppercase = trimmed.to_ascii_uppercase();
             let method = Method::from_str(uppercase.as_str())?;
             Ok(method)
         }
     }
 
-    /// Reads and parses an address from stdin.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn get_addr(line: &mut String) -> NetResult<String> {
-        let mut stdout = io::stdout().lock();
-
-        loop {
-            write!(&mut stdout, "{BR_CYAN}Address:{CLR} ")?;
-            stdout.flush()?;
-
-            line.clear();
-            io::stdin().lock().read_line(line)?;
-
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            if line.contains(':') {
-                return Ok(line.trim().to_string());
-            }
-
-            return Ok(format!("{}:80", line.trim()));
-        }
-    }
-
-    /// Reads and parses a URI path from stdin.
-    #[allow(clippy::missing_errors_doc)]
-    pub fn get_path(line: &mut String) -> NetResult<UriPath> {
-        let mut stdout = io::stdout().lock();
-
-        loop {
-            write!(&mut stdout, "{BR_CYAN}Path:{CLR} ")?;
-            stdout.flush()?;
-
-            line.clear();
-            io::stdin().lock().read_line(line)?;
-
-            if line.starts_with('/') {
-                return Ok(line.trim().to_string().into());
-            }
-
-            writeln!(
-                &mut stdout,
-                "{BR_RED}Invalid input. Paths must start with a \"/\".{CLR}"
-            )?;
-        }
-    }
-
-    /// Reads and parses `Headers` from stdin.
-    #[allow(clippy::missing_errors_doc)]
+    /// Reads and parses zero or more `Header` values from stdin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a problem occurs while reading or writing to the
+    /// terminal.
     pub fn get_headers(line: &mut String) -> NetResult<Headers> {
         let mut headers = Headers::new();
+
         let mut stdout = io::stdout().lock();
 
         loop {
             write!(
                 &mut stdout,
-                "{BR_CYAN}Header (optional; \"name:value\"):{CLR} "
+                "{BLUE}Header{RESET} (optional; name:value): "
             )?;
             stdout.flush()?;
 
             line.clear();
             io::stdin().lock().read_line(line)?;
 
-            if line.trim().is_empty() {
+            let trimmed = line.trim();
+
+            if trimmed.is_empty() {
                 return Ok(headers);
             }
 
-            if let Some((name, value)) = line.trim().split_once(':') {
+            if let Some((name, value)) = trimmed.split_once(':') {
                 headers.header(name, value);
+
+                writeln!(
+                    &mut stdout,
+                    "{GREEN}{} header added.{RESET}",
+                    utils::to_titlecase(name.as_bytes())
+                )?;
+
                 continue;
             }
 
             writeln!(
                 &mut stdout,
-                "{BR_RED}Invalid input.\n\
-                The header name and value should be separated with \
-                a \":\".{CLR}"
+                "{ORANGE}Invalid input.\n\
+                Press \"Enter\" to finish adding headers.{RESET}"
             )?;
         }
     }
 
     /// Reads and parses a `Body` from stdin.
-    #[allow(clippy::missing_errors_doc)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a problem occurs while reading or writing to the
+    /// terminal.
     pub fn get_body(line: &mut String) -> NetResult<Body> {
         let mut stdout = io::stdout().lock();
 
-        write!(&mut stdout, "{BR_CYAN}Body (optional):{CLR} ")?;
+        write!(&mut stdout, "{BLUE}Body{RESET} (optional): ")?;
         stdout.flush()?;
 
         line.clear();
         io::stdin().lock().read_line(line)?;
 
-        if line.trim().is_empty() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() {
             Ok(Body::Empty)
         } else {
-            Ok(String::from(line.trim()).into())
+            Ok(String::from(trimmed).into())
         }
     }
 
@@ -639,15 +651,13 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns an error if a problem is encountered while writing prompts to
-    /// the terminal or while building the `Client`.
-    #[allow(clippy::missing_errors_doc)]
+    /// Returns an error if a problem occurs while reading or writing to the
+    /// terminal or if building the `Request` fails.
     pub fn get_request_from_user(&mut self) -> NetResult<()> {
         let mut line = String::with_capacity(1024);
 
+        let (addr, path) = Self::get_uri(&mut line)?;
         let method = Self::get_method(&mut line)?;
-        let addr = Self::get_addr(&mut line)?;
-        let path = Self::get_path(&mut line)?;
         let headers = Self::get_headers(&mut line)?;
         let body = Self::get_body(&mut line)?;
 
@@ -658,10 +668,9 @@ impl Client {
             .body(body)
             .build());
 
-        self.conn = TcpStream::connect(&addr)
+        self.conn = Some(TcpStream::connect(&addr)
             .map_err(|e| NetError::Io(e.kind()))
-            .and_then(Connection::try_from)
-            .ok();
+            .and_then(Connection::try_from)?);
 
         Ok(())
     }

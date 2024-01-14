@@ -7,8 +7,8 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use crate::{HeaderValue, NetError, NetParseError, NetResult};
-use crate::style::colors::{BR_RED, CLR};
+use crate::{HeaderValue, NetError, NetParseError, NetResult, SERVER_NAME};
+use crate::style::colors::{RED, RESET};
 
 pub trait Trim {
     fn trim_start(&self) -> &[u8];
@@ -164,14 +164,14 @@ pub fn to_titlecase(bytes: &[u8]) -> String {
 /// Returns an error if `cargo build` does not return an exit status of 0.
 pub fn build_server() -> NetResult<()> {
     let mut build_handle = match Command::new("cargo")
-        .args(["build", "--bin", "server"])
+        .args(["build", "--bin", SERVER_NAME])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
     {
         Ok(handle) => handle,
         Err(e) => {
-            eprintln!("{BR_RED}Error while spawning cargo build.{CLR}");
+            eprintln!("{RED}Error while spawning cargo build.{RESET}");
             return Err(e.into());
         },
     };
@@ -183,7 +183,7 @@ pub fn build_server() -> NetResult<()> {
             Err(NetError::Other(msg.into()))
         },
         Err(e) => {
-            eprintln!("{BR_RED}Error while waiting for build to finish.{CLR}");
+            eprintln!("{RED}Error while waiting for build to finish.{RESET}");
             Err(e.into())
         },
     }

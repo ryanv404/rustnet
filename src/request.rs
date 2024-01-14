@@ -8,7 +8,7 @@ use crate::{
     Target, Version,
 };
 use crate::headers::names::CONTENT_TYPE;
-use crate::style::colors::{BR_YLW, CLR};
+use crate::style::colors::{ORANGE, RESET};
 use crate::utils::Trim;
 
 /// An HTTP request builder object.
@@ -312,7 +312,7 @@ impl Request {
     #[must_use]
     pub fn request_line_to_color_string(&self) -> String {
         format!(
-            "{BR_YLW}{} {} {}{CLR}",
+            "{ORANGE}{} {} {}{RESET}",
             &self.method,
             &self.path,
             &self.version

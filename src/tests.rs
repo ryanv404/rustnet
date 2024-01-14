@@ -41,7 +41,6 @@ mod methods {
     test_parsing_from_str! {
         Method from_str:
         "ANY" => Method::Any;
-        "SHUTDOWN" => Method::Shutdown;
         "GET" => Method::Get;
         "HEAD" => Method::Head;
         "POST" => Method::Post;
@@ -51,6 +50,7 @@ mod methods {
         "TRACE" => Method::Trace;
         "OPTIONS" => Method::Options;
         "CONNECT" => Method::Connect;
+        "SHUTDOWN" => Method::Shutdown;
         BAD_INPUT: "Foo";
         BAD_INPUT: "get";
     }
@@ -62,22 +62,22 @@ mod statuses {
 
     test_parsing_from_str! {
         Status from_str:
-        "101 Switching Protocols" => Status(101);
-        "201 Created" => Status(201);
-        "300 Multiple Choices" => Status(300);
-        "400 Bad Request" => Status(400);
-        "501 Not Implemented" => Status(501);
+        "101 Switching Protocols" => Status(101_u16);
+        "201 Created" => Status(201_u16);
+        "300 Multiple Choices" => Status(300_u16);
+        "400 Bad Request" => Status(400_u16);
+        "501 Not Implemented" => Status(501_u16);
         BAD_INPUT: "1234 Bad Status";
         BAD_INPUT: "abc";
     }
 
     test_parsing_from_int! {
         Status from_int:
-        201_u16 => Status(201);
-        202_u32 => Status(202);
-        203_i32 => Status(203);
+        201_u16 => Status(201_u16);
+        202_u16 => Status(202_u16);
+        203_u16 => Status(203_u16);
         BAD_INPUT: 1001_u16;
-        BAD_INPUT: -123_i32;
+        BAD_INPUT: 99_u16;
         BAD_INPUT: 0_u16;
     }
 }

@@ -239,7 +239,7 @@ impl Router {
     /// does not exist.
     #[must_use]
     pub fn get_target(&self, req: &Request) -> Target {
-        let path = if req.method.is_any() || req.method.is_shutdown() {
+        let path = if matches!(req.method, Method::Any | Method::Shutdown) {
             None
         } else {
             Some(req.path.clone())
@@ -291,7 +291,7 @@ impl Router {
                 Response::builder().status_code(404).target(target).build()?
             },
             // POST route found.
-            target if req.method.is_post() => {
+            target if matches!(req.method, Method::Post) => {
                 Response::builder().status_code(201).target(target).build()?
             },
             // Non-POST route found.
@@ -301,7 +301,7 @@ impl Router {
         };
 
         // Remove the response body, if appropriate.
-        if Body::should_be_empty(res.status_code(), &req.method) {
+        if Body::should_be_empty(res.status.code(), &req.method) {
             res.body = Body::Empty;
         }
 

@@ -13,31 +13,31 @@ use crate::{
     WRITER_BUFSIZE,
 };
 use crate::headers::names::{CONTENT_LENGTH, CONTENT_TYPE};
-use crate::style::colors::{BR_RED, CLR};
+use crate::style::colors::{RED, RESET};
 
 /// A trait for printing CLI argument errors to the terminal.
 pub trait WriteCliError {
     /// Prints unknown option error message and exits the program.
     fn unknown_opt(&self, name: &str) {
-        eprintln!("{BR_RED}Unknown option: `{name}`{CLR}");
+        eprintln!("{RED}Unknown option: `{name}`{RESET}");
         process::exit(1);
     }
 
     /// Prints unknown argument error message and exits the program.
     fn unknown_arg(&self, name: &str) {
-        eprintln!("{BR_RED}Unknown argument: `{name}`{CLR}");
+        eprintln!("{RED}Unknown argument: `{name}`{RESET}");
         process::exit(1);
     }
 
     /// Prints missing argument error message and exits the program.
     fn missing_arg(&self, name: &str) {
-        eprintln!("{BR_RED}Missing `{name}` argument.{CLR}");
+        eprintln!("{RED}Missing `{name}` argument.{RESET}");
         process::exit(1);
     }
 
     /// Prints invalid argument error message and exits the program.
     fn invalid_arg(&self, name: &str, arg: &str) {
-        eprintln!("{BR_RED}Invalid `{name}` argument: \"{arg}\"{CLR}");
+        eprintln!("{RED}Invalid `{name}` argument: \"{arg}\"{RESET}");
         process::exit(1);
     }
 }
@@ -345,12 +345,7 @@ impl Connection {
         path: &UriPath,
         version: &Version
     ) -> NetResult<()> {
-        self.write_all(method.as_bytes())?;
-        self.write_all(b" ")?;
-        self.write_all(path.as_bytes())?;
-        self.write_all(b" ")?;
-        self.write_all(version.as_bytes())?;
-        self.write_all(b"\r\n")?;
+        writeln!(self, "{method} {path} {version}\r")?;
         Ok(())
     }
 
@@ -365,10 +360,7 @@ impl Connection {
         version: &Version,
         status: &Status
     ) -> NetResult<()> {
-        self.write_all(version.as_bytes())?;
-        self.write_all(b" ")?;
-        self.write_all(status.as_bytes())?;
-        self.write_all(b"\r\n")?;
+        writeln!(self, "{version} {status}\r")?;
         Ok(())
     }
 
@@ -379,8 +371,7 @@ impl Connection {
     /// An error is returned if a problem was encountered while writing the
     /// `Headers` to the underlying `TcpStream`.
     pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
-        self.write_all(headers.to_string().as_bytes())?;
-        self.write_all(b"\r\n")?;
+        writeln!(self, "{headers}\r")?;
         Ok(())
     }
 

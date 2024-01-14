@@ -25,14 +25,15 @@ fn main() {
         return;
     }
 
+    dbg!(&client);
     if client.do_send {
         if let Err(ref e) = client.send_request() {
-            eprintln!("Error while sending request.\n{e}");
+            eprintln!("Error while sending the request.\n{e}");
             return;
         }
 
         if let Err(ref e) = client.recv_response() {
-            eprintln!("Error while receiving response.\n{e}");
+            eprintln!("Error while receiving the response.\n{e}");
             return;
         }
     } 

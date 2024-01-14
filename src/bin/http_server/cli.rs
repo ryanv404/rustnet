@@ -8,7 +8,7 @@ use rustnet::{
     Method, NetError, NetResult, Route, Router, Server, Target, WriteCliError,
     SERVER_NAME, TEST_SERVER_ADDR,
 };
-use rustnet::style::colors::{BR_GRN, CLR};
+use rustnet::style::colors::{GREEN, RESET};
 
 /// Contains the parsed server command line arguments.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -169,19 +169,18 @@ impl ServerCli {
 
     /// Prints the server help message and exists the program.
     pub fn print_help(&self) {
-        eprintln!(
-            "\
-{BR_GRN}USAGE:{CLR}
-    {SERVER_NAME} [OPTIONS] [--] <SERVER ADDRESS>\n
-{BR_GRN}SERVER ADDRESS:{CLR}
+        eprintln!("\
+{GREEN}USAGE:{RESET}
+    {SERVER_NAME} [OPTIONS] [ROUTES] [--] <SERVER ADDRESS>\n
+{GREEN}SERVER ADDRESS:{RESET}
     IP:PORT              The server's IP address and port.\n
-{BR_GRN}OPTIONS:{CLR}
+{GREEN}OPTIONS:{RESET}
     -d, --debug          Prints debug information.
     -h, --help           Prints this help message.
     -l, --log            Enables logging of connections to stdout.
     -f, --log-file FILE  Enables logging of connections to FILE.
     -t, --test           Creates a test server at {TEST_SERVER_ADDR}.\n
-{BR_GRN}ROUTES:{CLR}
+{GREEN}ROUTES:{RESET}
     -I, --favicon FILE_PATH
         Adds a route that serves a favicon.
     -0, --not-found FILE_PATH
@@ -200,6 +199,11 @@ impl ServerCli {
         let mut cli = Self::new();
 
         let _ = args.pop_front();
+
+        if args.is_empty() {
+            cli.print_help();
+            process::exit(0);
+        }
 
         while let Some(opt) = args.pop_front() {
             match opt {

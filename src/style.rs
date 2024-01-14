@@ -1,19 +1,15 @@
 use crate::WriteCliError;
 
+/// ANSI colors.
 pub mod colors {
-    pub const RED: &str = "\x1b[31m";
-    pub const GRN: &str = "\x1b[32m";
-    pub const YLW: &str = "\x1b[33m";
-    pub const BLU: &str = "\x1b[34m";
-    pub const PURP: &str = "\x1b[35m";
-    pub const CYAN: &str = "\x1b[36m";
-    pub const BR_RED: &str = "\x1b[91m";
-    pub const BR_GRN: &str = "\x1b[92m";
-    pub const BR_YLW: &str = "\x1b[93m";
-    pub const BR_BLU: &str = "\x1b[94m";
-    pub const BR_PURP: &str = "\x1b[95m";
-    pub const BR_CYAN: &str = "\x1b[96m";
-    pub const CLR: &str = "\x1b[0m";
+    pub const RED: &str = "\x1b[38;2;255;0;0m";
+    pub const GREEN: &str = "\x1b[38;2;0;255;145m";
+    pub const YELLOW: &str = "\x1b[38;2;255;255;0m";
+    pub const BLUE: &str = "\x1b[38;2;0;170;235m";
+    pub const MAGENTA: &str = "\x1b[38;2;255;0;155m";
+    pub const CYAN: &str = "\x1b[38;2;0;255;255m";
+    pub const ORANGE: &str = "\x1b[38;2;255;128;0m";
+    pub const RESET: &str = "\x1b[0m";
 }
 
 /// Controls which components are printed.

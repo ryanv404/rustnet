@@ -6,7 +6,7 @@ use std::str::{self, FromStr};
 use crate::{
     Body, NetError, NetParseError, NetResult, DEFAULT_NAME,
 };
-use crate::style::colors::{BR_BLU, BR_CYAN, CLR};
+use crate::style::colors::{BLUE, CYAN, RESET};
 use crate::utils::{self, Trim};
 
 pub mod names;
@@ -343,7 +343,7 @@ impl Headers {
 
         for (name, value) in &self.0 {
             let header = format!(
-                "{BR_BLU}{name}{CLR}: {BR_CYAN}{value}{CLR}\n"
+                "{BLUE}{name}{RESET}: {CYAN}{value}{RESET}\n"
             );
 
             headers.push_str(&header);

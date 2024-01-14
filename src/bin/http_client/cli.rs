@@ -5,12 +5,12 @@ use std::str::FromStr;
 
 use rustnet::{
     Body, Client, Headers, Method, NetError, NetResult, Style, UriPath,
-    Version, WriteCliError, CLIENT_NAME, TEST_SERVER_ADDR,
+    Version, WriteCliError, CLIENT_NAME, SERVER_NAME, TEST_SERVER_ADDR,
+    utils,
 };
-use rustnet::style::colors::{BR_GRN, BR_RED, CLR};
-use rustnet::utils;
+use rustnet::style::colors::{GREEN, RED, RESET};
 
-use crate::Tui;
+use super::Tui;
 
 /// Contains the parsed client command line arguments.
 #[allow(clippy::struct_excessive_bools)]
@@ -113,6 +113,7 @@ impl TryFrom<ClientCli> for Client {
         };
 
         let mut client = Self::builder()
+            .addr(addr)
             .do_send(cli.do_send)
             .do_debug(cli.do_debug)
             .no_dates(cli.no_dates)
@@ -122,7 +123,6 @@ impl TryFrom<ClientCli> for Client {
             .version(cli.version)
             .headers(cli.headers.clone())
             .body(cli.body.clone())
-            .addr(addr)
             .build()?;
 
         if cli.do_plain {
@@ -145,11 +145,11 @@ impl ClientCli {
     /// Prints the client help message and exits the program.
     pub fn print_help(&self) {
         eprintln!("\
-{BR_GRN}USAGE:{CLR}
+{GREEN}USAGE:{RESET}
     {CLIENT_NAME} [OPTIONS] [--] <URI>\n
-{BR_GRN}ARGUMENT:{CLR}
-    URI   An HTTP URI (e.g. \"httpbin.org/json\")\n
-{BR_GRN}OPTIONS:{CLR}
+{GREEN}ARGUMENT:{RESET}
+    URI     An HTTP URI (e.g. \"httpbin.org/json\").\n
+{GREEN}OPTIONS:{RESET}
     -B, --body TEXT         Add TEXT to the request body.
     -b, --builder           Build a request and send it.
     -d, --debug             Print client debug information.
@@ -157,7 +157,7 @@ impl ClientCli {
     -h, --help              Display this help message.
     -M, --method METHOD     Use METHOD as the request method (default: \"GET\").
     -m, --minimal           Only print the request line and status line.
-    -n, --no-dates          Remove Date headers from the output (useful during testing).
+    -n, --no-dates          Remove Date headers from the output (used during testing).
     -O, --output FORMAT     Set the output style to FORMAT, see below
                             (default: --output \"shb\").
     -P, --path PATH         Use PATH as the URI path (default: \"/\").
@@ -166,9 +166,9 @@ impl ClientCli {
     -s, --server            Start a server listening on {TEST_SERVER_ADDR}.
     -S, --shutdown          Shut down the server running on {TEST_SERVER_ADDR}.
     -T, --tui               Run the client TUI.
-    -v, --verbose           Print both the request and the response.\n
+    -v, --verbose           Print both the request and the response.
     -V, --version           Set the protocol version (default: \"HTTP/1.1\").\n
-{BR_GRN}FORMAT OPTIONS:{CLR}
+{GREEN}FORMAT OPTIONS:{RESET}
     R = request line        s = status line
     H = request headers     h = response headers
     B = request body        b = response body\n");
@@ -182,9 +182,14 @@ impl ClientCli {
     ///
     /// Returns an error if a `Client` cannot be built.
     pub fn parse_args(args: &mut VecDeque<&str>) -> NetResult<Client> {
+        let mut cli = Self::new();
+
         let _ = args.pop_front();
 
-        let mut cli = Self::new();
+        if args.is_empty() {
+            cli.print_help();
+            process::exit(0);
+        }
 
         while let Some(opt) = args.pop_front() {
             match opt {
@@ -197,9 +202,14 @@ impl ClientCli {
                     None => cli.missing_arg("URI"),
                 },
                 // Run request builder.
-                "--builder" => {
+                "-b" | "--builder" => {
                     let mut client = Client::default();
                     client.get_request_from_user()?;
+
+                    // Set output style to "verbose".
+                    client.style.from_format_str("*");
+
+                    println!();
                     return Ok(client);
                 },
                 // Handle options.
@@ -314,31 +324,22 @@ impl ClientCli {
         };
 
         let name = name.to_ascii_lowercase();
-        let value = value.to_ascii_lowercase();
-
         let name = utils::to_titlecase(name.as_bytes());
+
+        let value = value.to_ascii_lowercase();
 
         self.headers.header(name.trim(), value.trim());
     }
 
-    pub fn do_shutdown() {
-        let uri = format!("{TEST_SERVER_ADDR}/");
-
-        if let Err(e) = Client::send(Method::Shutdown, &uri) {
-            eprintln!("Could not send the shutdown request.\n{e}");
-        }
-
-        process::exit(0);
-    }
-
+    /// Start a test server at 127.0.0.1:7878.
     pub fn start_server() {
         if let Err(e) = utils::build_server() {
-            eprintln!("{BR_RED}Server failed to build: {e}{CLR}");
+            eprintln!("{RED}Server failed to build: {e}{RESET}");
             process::exit(1);
         }
 
         let args = [
-            "run", "--bin", "server", "--", "--test", "--", TEST_SERVER_ADDR
+            "run", "--bin", SERVER_NAME, "--", "--test", "--", TEST_SERVER_ADDR
         ];
 
         if let Err(e) = Command::new("cargo")
@@ -347,16 +348,29 @@ impl ClientCli {
             .stderr(Stdio::null())
             .spawn()
         {
-            eprintln!("{BR_RED}Failed to start server: {e}{CLR}");
+            eprintln!("{RED}Failed to start server: {e}{RESET}");
             process::exit(1);
         }
 
         if utils::check_server(TEST_SERVER_ADDR) {
-            println!("{BR_GRN}Server is listening on {TEST_SERVER_ADDR}.{CLR}");
+            println!(
+                "{GREEN}Server is listening on {TEST_SERVER_ADDR}.{RESET}"
+            );
             process::exit(0);
         }
 
-        eprintln!("{BR_RED}Failed to start server.{CLR}");
+        eprintln!("{RED}Failed to start server.{RESET}");
         process::exit(1);
+    }
+
+    /// Shuts down a test server running at 127.0.0.1:7878.
+    pub fn do_shutdown() {
+        let uri = format!("{TEST_SERVER_ADDR}/");
+
+        if let Err(e) = Client::send(Method::Shutdown, &uri) {
+            eprintln!("Could not send the shutdown request.\n{e}");
+        }
+
+        process::exit(0);
     }
 }
