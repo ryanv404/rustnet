@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::num::NonZeroU16;
 use std::str::{self, FromStr};
 
 use crate::NetParseError;
@@ -101,7 +103,7 @@ impl Method {
 
     /// Returns the `Method` as a bytes slice.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &'static [u8] {
         self.as_str().as_bytes()
     }
 
@@ -126,35 +128,27 @@ impl Method {
 
 /// The HTTP response status.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Status(pub u16);
+pub struct Status(pub NonZeroU16);
 
 impl Default for Status {
     fn default() -> Self {
-        Self(200u16)
+        // SAFETY: we know that `NonZeroU16::new` returns a `Some` variant
+        // since we supplied the input.
+        Self(NonZeroU16::new(200u16).unwrap())
     }
 }
 
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.code())?;
-
-        if let Some(msg) = self.msg() {
-            write!(f, " {msg}")?;
-        }
-
-        Ok(())
+        write!(f, "{}", self.as_str())
     }
 }
 
 impl FromStr for Status {
     type Err = NetParseError;
 
-    fn from_str(status: &str) -> Result<Self, Self::Err> {
-        let Some((code, _)) = status.trim_start().split_once(' ') else {
-            return Err(NetParseError::Status);
-        };
-
-        u16::from_str(code)
+    fn from_str(status_code: &str) -> Result<Self, Self::Err> {
+        u16::from_str(status_code)
             .map_err(|_| NetParseError::Status)
             .and_then(Self::try_from)
     }
@@ -163,8 +157,8 @@ impl FromStr for Status {
 impl TryFrom<&[u8]> for Status {
     type Error = NetParseError;
 
-    fn try_from(status: &[u8]) -> Result<Self, Self::Error> {
-        str::from_utf8(status)
+    fn try_from(status_code: &[u8]) -> Result<Self, Self::Error> {
+        str::from_utf8(status_code)
             .map_err(|_| NetParseError::Status)
             .and_then(Self::from_str)
     }
@@ -173,23 +167,41 @@ impl TryFrom<&[u8]> for Status {
 impl TryFrom<u16> for Status {
     type Error = NetParseError;
 
-    fn try_from(status_code: u16) -> Result<Self, Self::Error> {
-        if matches!(status_code, 100..=999) {
-            Ok(Self(status_code))
-        } else {
-            Err(NetParseError::Status)
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        if !matches!(code, 100..=999) {
+            return Err(NetParseError::Status);
         }
+
+        NonZeroU16::new(code).map(Self).ok_or(NetParseError::Status)
     }
 }
 
 macro_rules! impl_status_methods {
-    ($( $num:literal $reason:literal, )+) => {
+    ($( $num:literal, $text:literal, $bytes:literal; )+) => {
         impl Status {
+            /// Returns the `Status` as a copy-on-write string slice.
+            #[must_use]
+            pub fn as_str(&self) -> Cow<'static, str> {
+                match self.code() {
+                    $( $num => $text.into(), )+
+                    code => format!("{code}").into(),
+                }
+            }
+
+            /// Returns the `Status` as a copy-on-write bytes slice.
+            #[must_use]
+            pub fn as_bytes(&self) -> Cow<'static, [u8]> {
+                match self.code() {
+                    $( $num => $bytes[..].into(), )+
+                    code => format!("{code}").into_bytes().into(),
+                }
+            }
+
             /// Returns a reason phrase for this `Status`, if possible.
             #[must_use]
-            pub fn msg(&self) -> Option<&'static str> {
-                match self.0 {
-                    $( $num => Some($reason), )+
+            pub const fn msg(&self) -> Option<&'static str> {
+                match self.code() {
+                    $( $num => Some($text), )+
                     _ => None,
                 }
             }
@@ -197,7 +209,7 @@ macro_rules! impl_status_methods {
             /// Returns the status code as a u16 integer.
             #[must_use]
             pub const fn code(&self) -> u16 {
-                self.0
+                self.0.get()
             }
 
             /// Returns true if the status code is greater than or equal to 100 and
@@ -239,101 +251,196 @@ macro_rules! impl_status_methods {
 }
 
 impl_status_methods! {
-    100 "Continue",
-    101 "Switching Protocols",
-    102 "Processing",
-    103 "Early Hints",
-    200 "OK",
-    201 "Created",
-    202 "Accepted",
-    203 "Non-Authoritative Information",
-    204 "No Content",
-    205 "Reset Content",
-    206 "Partial Content",
-    207 "Multi-Status",
-    208 "Already Reported",
-    218 "This Is Fine",
-    226 "IM Used",
-    300 "Multiple Choices",
-    301 "Moved Permanently",
-    302 "Found",
-    303 "See Other",
-    304 "Not Modified",
-    305 "Use Proxy",
-    306 "Switch Proxy",
-    307 "Temporary Redirect",
-    308 "Permanent Redirect",
-    400 "Bad Request",
-    401 "Unauthorized",
-    402 "Payment Required",
-    403 "Forbidden",
-    404 "Not Found",
-    405 "Method Not Allowed",
-    406 "Not Acceptable",
-    407 "Proxy Authentication Required",
-    408 "Request Timeout",
-    409 "Conflict",
-    410 "Gone",
-    411 "Length Required",
-    412 "Precondition Failed",
-    413 "Payload Too Large",
-    414 "URI Too Long",
-    415 "Unsupported Media Type",
-    416 "Range Not Satisfiable",
-    417 "Expectation Failed",
-    418 "I'm a Teapot",
-    419 "Page Expired",
-    420 "Method Failure or Enhance Your Calm",
-    421 "Misdirected Request",
-    422 "Unprocessable Entity",
-    423 "Locked",
-    424 "Failed Dependency",
-    425 "Too Early",
-    426 "Upgrade Required",
-    428 "Precondition Required",
-    429 "Too Many Requests",
-    430 "HTTP Status Code",
-    431 "Request Header Fields Too Large",
-    440 "Login Time-Out",
-    444 "No Response",
-    449 "Retry With",
-    450 "Blocked by Windows Parental Controls",
-    451 "Unavailable For Legal Reasons",
-    460 "Client Closed Connection Prematurely",
-    463 "Too Many Forwarded IP Addresses",
-    464 "Incompatible Protocol",
-    494 "Request Header Too Large",
-    495 "SSL Certificate Error",
-    496 "SSL Certificate Required",
-    497 "HTTP Request Sent to HTTPS Port",
-    498 "Invalid Token",
-    499 "Token Required or Client Closed Request",
-    500 "Internal Server Error",
-    501 "Not Implemented",
-    502 "Bad Gateway",
-    503 "Service Unavailable",
-    504 "Gateway Timeout",
-    505 "HTTP Version Not Supported",
-    506 "Variant Also Negotiates",
-    507 "Insufficient Storage",
-    508 "Loop Detected",
-    509 "Bandwidth Limit Exceeded",
-    510 "Not Extended",
-    511 "Network Authentication Required",
-    520 "Web Server Is Returning an Unknown Error",
-    521 "Web Server Is Down",
-    522 "Connection Timed Out",
-    523 "Origin Is Unreachable",
-    524 "A Timeout Occurred",
-    525 "SSL Handshake Failed",
-    526 "Invalid SSL Certificate",
-    527 "Railgun Listener to Origin",
-    529 "The Service Is Overloaded",
-    530 "Site Frozen",
-    561 "Unauthorized",
-    598 "Network Read Timeout Error",
-    599 "Network Connect Timeout Error",
-    999 "Request Denied",
+    100, "100 Continue",
+        b"100 Continue";
+    101, "101 Switching Protocols",
+        b"101 Switching Protocols";
+    102, "102 Processing",
+        b"102 Processing";
+    103, "103 Early Hints",
+        b"103 Early Hints";
+    200, "200 OK",
+        b"200 OK";
+    201, "201 Created",
+        b"201 Created";
+    202, "202 Accepted",
+        b"202 Accepted";
+    203, "203 Non-Authoritative Information",
+        b"203 Non-Authoritative Information";
+    204, "204 No Content",
+        b"204 No Content";
+    205, "205 Reset Content",
+        b"205 Reset Content";
+    206, "206 Partial Content",
+        b"206 Partial Content";
+    207, "207 Multi-Status",
+        b"207 Multi-Status";
+    208, "208 Already Reported",
+        b"208 Already Reported";
+    218, "218 This Is Fine",
+        b"218 This Is Fine";
+    226, "226 IM Used",
+        b"226 IM Used";
+    300, "300 Multiple Choices",
+        b"300 Multiple Choices";
+    301, "301 Moved Permanently",
+        b"301 Moved Permanently";
+    302, "302 Found",
+        b"302 Found";
+    303, "303 See Other",
+        b"303 See Other";
+    304, "304 Not Modified",
+        b"304 Not Modified";
+    305, "305 Use Proxy",
+        b"305 Use Proxy";
+    306, "306 Switch Proxy",
+        b"306 Switch Proxy";
+    307, "307 Temporary Redirect",
+        b"307 Temporary Redirect";
+    308, "308 Permanent Redirect",
+        b"308 Permanent Redirect";
+    400, "400 Bad Request",
+        b"400 Bad Request";
+    401, "401 Unauthorized",
+        b"401 Unauthorized";
+    402, "402 Payment Required",
+        b"402 Payment Required";
+    403, "403 Forbidden",
+        b"403 Forbidden";
+    404, "404 Not Found",
+        b"404 Not Found";
+    405, "405 Method Not Allowed",
+        b"405 Method Not Allowed";
+    406, "406 Not Acceptable",
+        b"406 Not Acceptable";
+    407, "407 Proxy Authentication Required",
+        b"407 Proxy Authentication Required";
+    408, "408 Request Timeout",
+        b"408 Request Timeout";
+    409, "409 Conflict",
+        b"409 Conflict";
+    410, "410 Gone",
+        b"410 Gone";
+    411, "411 Length Required",
+        b"411 Length Required";
+    412, "412 Precondition Failed",
+        b"412 Precondition Failed";
+    413, "413 Payload Too Large",
+        b"413 Payload Too Large";
+    414, "414 URI Too Long",
+        b"414 URI Too Long";
+    415, "415 Unsupported Media Type",
+        b"415 Unsupported Media Type";
+    416, "416 Range Not Satisfiable",
+        b"416 Range Not Satisfiable";
+    417, "417 Expectation Failed",
+        b"417 Expectation Failed";
+    418, "418 I'm a Teapot",
+        b"418 I'm a Teapot";
+    419, "419 Page Expired",
+        b"419 Page Expired";
+    420, "420 Method Failure or Enhance Your Calm",
+        b"420 Method Failure or Enhance Your Calm";
+    421, "421 Misdirected Request",
+        b"421 Misdirected Request";
+    422, "422 Unprocessable Entity",
+        b"422 Unprocessable Entity";
+    423, "423 Locked",
+        b"423 Locked";
+    424, "424 Failed Dependency",
+        b"424 Failed Dependency";
+    425, "425 Too Early",
+        b"425 Too Early";
+    426, "426 Upgrade Required",
+        b"426 Upgrade Required";
+    428, "428 Precondition Required",
+        b"428 Precondition Required";
+    429, "429 Too Many Requests",
+        b"429 Too Many Requests";
+    430, "430 HTTP Status Code",
+        b"430 HTTP Status Code";
+    431, "431 Request Header Fields Too Large",
+        b"431 Request Header Fields Too Large";
+    440, "440 Login Time-Out",
+        b"440 Login Time-Out";
+    444, "444 No Response",
+        b"444 No Response";
+    449, "449 Retry With",
+        b"449 Retry With";
+    450, "450 Blocked by Windows Parental Controls",
+        b"450 Blocked by Windows Parental Controls";
+    451, "451 Unavailable For Legal Reasons",
+        b"451 Unavailable For Legal Reasons";
+    460, "460 Client Closed Connection Prematurely",
+        b"460 Client Closed Connection Prematurely";
+    463, "463 Too Many Forwarded IP Addresses",
+        b"463 Too Many Forwarded IP Addresses";
+    464, "464 Incompatible Protocol",
+        b"464 Incompatible Protocol";
+    494, "494 Request Header Too Large",
+        b"494 Request Header Too Large";
+    495, "495 SSL Certificate Error",
+        b"495 SSL Certificate Error";
+    496, "496 SSL Certificate Required",
+        b"496 SSL Certificate Required";
+    497, "497 HTTP Request Sent to HTTPS Port",
+        b"497 HTTP Request Sent to HTTPS Port";
+    498, "498 Invalid Token",
+        b"498 Invalid Token";
+    499, "499 Token Required or Client Closed Request",
+        b"499 Token Required or Client Closed Request";
+    500, "500 Internal Server Error",
+        b"500 Internal Server Error";
+    501, "501 Not Implemented",
+        b"501 Not Implemented";
+    502, "502 Bad Gateway",
+        b"502 Bad Gateway";
+    503, "503 Service Unavailable",
+        b"503 Service Unavailable";
+    504, "504 Gateway Timeout",
+        b"504 Gateway Timeout";
+    505, "505 HTTP Version Not Supported",
+        b"505 HTTP Version Not Supported";
+    506, "506 Variant Also Negotiates",
+        b"506 Variant Also Negotiates";
+    507, "507 Insufficient Storage",
+        b"507 Insufficient Storage";
+    508, "508 Loop Detected",
+        b"508 Loop Detected";
+    509, "509 Bandwidth Limit Exceeded",
+        b"509 Bandwidth Limit Exceeded";
+    510, "510 Not Extended",
+        b"510 Not Extended";
+    511, "511 Network Authentication Required",
+        b"511 Network Authentication Required";
+    520, "520 Web Server Is Returning an Unknown Error",
+        b"520 Web Server Is Returning an Unknown Error";
+    521, "521 Web Server Is Down",
+        b"521 Web Server Is Down";
+    522, "522 Connection Timed Out",
+        b"522 Connection Timed Out";
+    523, "523 Origin Is Unreachable",
+        b"523 Origin Is Unreachable";
+    524, "524 A Timeout Occurred",
+        b"524 A Timeout Occurred";
+    525, "525 SSL Handshake Failed",
+        b"525 SSL Handshake Failed";
+    526, "526 Invalid SSL Certificate",
+        b"526 Invalid SSL Certificate";
+    527, "527 Railgun Listener to Origin",
+        b"527 Railgun Listener to Origin";
+    529, "529 The Service Is Overloaded",
+        b"529 The Service Is Overloaded";
+    530, "530 Site Frozen",
+        b"530 Site Frozen";
+    561, "561 Unauthorized",
+        b"561 Unauthorized";
+    598, "598 Network Read Timeout Error",
+        b"598 Network Read Timeout Error";
+    599, "599 Network Connect Timeout Error",
+        b"599 Network Connect Timeout Error";
+    999, "999 Request Denied",
+        b"999 Request Denied";
 }
 
 /// The HTTP protocol version.
@@ -404,7 +511,7 @@ impl Version {
 
     /// Returns the the protocol `Version` as a bytes slice.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &'static [u8] {
         self.as_str().as_bytes()
     }
 

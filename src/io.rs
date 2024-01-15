@@ -12,7 +12,7 @@ use crate::{
     Response, Status, UriPath, Version, MAX_HEADERS, READER_BUFSIZE,
     WRITER_BUFSIZE,
 };
-use crate::headers::names::{CONTENT_LENGTH, CONTENT_TYPE};
+use crate::headers::names::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
 use crate::style::colors::{RED, RESET};
 
 /// A trait for printing CLI argument errors to the terminal.
@@ -45,19 +45,19 @@ pub trait WriteCliError {
 /// Represents the TCP connection between a client and a server.
 #[derive(Debug)]
 pub struct Connection {
-    pub reader: BufReader<TcpStream>,
-    pub writer: BufWriter<TcpStream>,
     pub local_addr: SocketAddr,
     pub remote_addr: SocketAddr,
+    pub reader: BufReader<TcpStream>,
+    pub writer: BufWriter<TcpStream>,
 }
 
 impl Display for Connection {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         writeln!(f, "Connection {{")?;
-        writeln!(f, "    reader: BufReader {{ TcpStream {{ ... }} }},")?;
-        writeln!(f, "    writer: BufWriter {{ TcpStream {{ ... }} }},")?;
         writeln!(f, "    local_addr: {},", self.local_addr)?;
         writeln!(f, "    remote_addr: {},", self.remote_addr)?;
+        writeln!(f, "    reader: BufReader {{ TcpStream {{ ... }} }},")?;
+        writeln!(f, "    writer: BufWriter {{ TcpStream {{ ... }} }},")?;
         write!(f, "}}")?;
         Ok(())
     }
@@ -177,48 +177,21 @@ impl Connection {
         Ok(Self { reader, writer, local_addr, remote_addr })
     }
 
-    /// Reads and parses the request line from the underlying `TcpStream`.
+    /// Reads a single line from the underlying `TcpStream`.
     ///
     /// # Errors
     ///
     /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
-    /// to read the underlying `TcpStream` returns `Ok(0)`.
-    pub fn recv_request_line(
-        &mut self,
-        buf: &mut Vec<u8>
-    ) -> NetResult<(Method, UriPath, Version)> {
-        let reader_ref = Read::by_ref(self);
-        let mut reader = reader_ref.take(2024);
+    /// to read from the underlying `TcpStream` returns `Ok(0)`.
+    pub fn recv_line(&mut self, buf: &mut Vec<u8>) -> NetResult<()> {
+        let max_bytes = u64::try_from(READER_BUFSIZE).unwrap_or(4000);
+        let mut reader = self.reader.by_ref().take(max_bytes);
 
-        let request_line = match reader.read_until(b'\n', buf) {
-            Ok(0) => Err(NetError::UnexpectedEof)?,
-            Ok(_) => Request::parse_request_line(buf)?,
-            Err(e) => Err(NetError::Read(e.kind()))?,
-        };
-
-        Ok(request_line)
-    }
-
-    /// Reads and parses the status line from the underlying `TcpStream`.
-    ///
-    /// # Errors
-    ///
-    /// An error of kind `NetError::UnexpectedEof` is returned if an attempt
-    /// to read the underlying `TcpStream` returns `Ok(0)`.
-    pub fn recv_status_line(
-        &mut self,
-        buf: &mut Vec<u8>
-    ) -> NetResult<(Version, Status)> {
-        let reader_ref = Read::by_ref(self);
-        let mut reader = reader_ref.take(2024);
-
-        let status_line = match reader.read_until(b'\n', buf) {
-            Ok(0) => Err(NetError::UnexpectedEof)?,
-            Ok(_) => Response::parse_status_line(buf)?,
-            Err(e) => Err(NetError::Read(e.kind()))?,
-        };
-
-        Ok(status_line)
+        match reader.read_until(b'\n', buf) {
+            Err(e) => Err(NetError::Read(e.kind())),
+            Ok(0) => Err(NetError::UnexpectedEof),
+            Ok(_) => Ok(()),
+        }
     }
 
     /// Reads and parses all headers from the underlying `TcpStream`.
@@ -229,22 +202,26 @@ impl Connection {
     /// is returned if `Ok(0)` is received while reading from the underlying
     /// `TcpStream`.
     pub fn recv_headers(&mut self, buf: &mut Vec<u8>) -> NetResult<Headers> {
-        let reader_ref = Read::by_ref(self);
-        let mut reader = reader_ref.take(2024);
+        let max_bytes = u64::try_from(READER_BUFSIZE).unwrap_or(4000);
+        let mut reader = self.reader.by_ref().take(max_bytes);
 
         let mut num_headers = 0;
 
-        while num_headers < MAX_HEADERS {
+        loop {
+            if num_headers >= MAX_HEADERS {
+                return Err(NetParseError::TooManyHeaders.into());
+            }
+
             match reader.read_until(b'\n', buf) {
-                Ok(0) => Err(NetError::UnexpectedEof)?,
-                // An empty line involves reading b"\r\n" or b"\n".
-                Ok(1 | 2) => return Headers::try_from(buf),
+                Err(e) => return Err(NetError::Read(e.kind())),
+                Ok(0) => return Err(NetError::UnexpectedEof),
+                Ok(1 | 2) => break,
                 Ok(_) => num_headers += 1,
-                Err(e) => Err(NetError::Read(e.kind()))?,
             }
         }
 
-        Err(NetParseError::TooManyHeaders.into())
+        Headers::try_from(buf.as_slice())
+            .map_err(|_| NetParseError::Header.into())
     }
 
     /// Reads and parses the message body from the underlying `TcpStream`.
@@ -256,15 +233,23 @@ impl Connection {
     pub fn recv_body(
         &mut self,
         buf: &mut Vec<u8>,
-        content_len: u64,
-        content_type: &str
+        headers: &Headers
     ) -> NetResult<Body> {
-        let reader_ref = Read::by_ref(self);
-        let mut reader = reader_ref.take(content_len);
+        let content_len = headers
+            .get(&CONTENT_LENGTH)
+            .and_then(|value| value.as_str().parse::<u64>().ok())
+            .unwrap_or(0);
 
-        reader.read_to_end(buf)?;
+        let content_type = headers
+            .get(&CONTENT_TYPE)
+            .map_or(Cow::Borrowed(""), |value| value.as_str());
 
-        Ok(Body::from_content_type(buf, content_type))
+        if content_len == 0 {
+            Ok(Body::Empty)
+        } else {
+            self.reader.by_ref().take(content_len).read_to_end(buf)?;
+            Ok(Body::from_content_type(buf, &content_type))
+        }
     }
 
     /// Reads and parses a `Request` from a `TcpStream`.
@@ -274,28 +259,16 @@ impl Connection {
     /// An error is returned if there is a failure to read or parse the
     /// individual components of the `Request`.
     pub fn recv_request(&mut self) -> NetResult<Request> {
-        let mut buf = Vec::with_capacity(1024);
+        let mut buf = Vec::with_capacity(READER_BUFSIZE);
 
-        let (method, path, version) = self.recv_request_line(&mut buf)?;
+        self.recv_line(&mut buf)?;
+        let (method, path, version) = Request::parse_request_line(&buf)?;
         buf.clear();
 
         let headers = self.recv_headers(&mut buf)?;
         buf.clear();
 
-        let content_len = headers
-            .get(&CONTENT_LENGTH)
-            .and_then(|value| value.as_str().trim().parse::<u64>().ok())
-            .unwrap_or(0);
-
-        let content_type = headers
-            .get(&CONTENT_TYPE)
-            .map_or(Cow::Borrowed(""), |value| value.as_str());
-
-        let body = if content_len == 0 {
-            Body::Empty
-        } else {
-            self.recv_body(&mut buf, content_len, &content_type)?
-        };
+        let body = self.recv_body(&mut buf, &headers)?;
 
         Ok(Request {method, path, version, headers, body })
     }
@@ -307,28 +280,16 @@ impl Connection {
     /// An error is returned if there is a failure to read or parse the
     /// individual components of the `Response`.
     pub fn recv_response(&mut self) -> NetResult<Response> {
-        let mut buf = Vec::with_capacity(1024);
+        let mut buf = Vec::with_capacity(READER_BUFSIZE);
 
-        let (version, status) = self.recv_status_line(&mut buf)?;
+        self.recv_line(&mut buf)?;
+        let (version, status) = Response::parse_status_line(&buf)?;
         buf.clear();
 
         let headers = self.recv_headers(&mut buf)?;
         buf.clear();
 
-        let content_len = headers
-            .get(&CONTENT_LENGTH)
-            .and_then(|value| value.as_str().trim().parse::<u64>().ok())
-            .unwrap_or(0);
-
-        let content_type = headers
-            .get(&CONTENT_TYPE)
-            .map_or(Cow::Borrowed(""), |value| value.as_str());
-
-        let body = if content_len == 0 {
-            Body::Empty
-        } else {
-            self.recv_body(&mut buf, content_len, &content_type)?
-        };
+        let body = self.recv_body(&mut buf, &headers)?;
 
         Ok(Response { version, status, headers, body })
     }
@@ -345,7 +306,12 @@ impl Connection {
         path: &UriPath,
         version: &Version
     ) -> NetResult<()> {
-        writeln!(self, "{method} {path} {version}\r")?;
+        self.writer.write_all(method.as_bytes())?;
+        self.writer.write_all(b" ")?;
+        self.writer.write_all(path.as_bytes())?;
+        self.writer.write_all(b" ")?;
+        self.writer.write_all(version.as_bytes())?;
+        self.writer.write_all(b"\r\n")?;
         Ok(())
     }
 
@@ -360,22 +326,32 @@ impl Connection {
         version: &Version,
         status: &Status
     ) -> NetResult<()> {
-        writeln!(self, "{version} {status}\r")?;
+        self.writer.write_all(version.as_bytes())?;
+        self.writer.write_all(b" ")?;
+        self.writer.write_all(&status.as_bytes())?;
+        self.writer.write_all(b"\r\n")?;
         Ok(())
     }
 
-    /// Writes a `Headers` map to a `TcpStream`.
+    /// Writes a `Headers` map to the underlying `TcpStream`.
     ///
     /// # Errors
     ///
     /// An error is returned if a problem was encountered while writing the
     /// `Headers` to the underlying `TcpStream`.
     pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
-        writeln!(self, "{headers}\r")?;
+        for (name, value) in headers.0.iter() {
+            self.writer.write_all(name.as_bytes())?;
+            self.writer.write_all(b": ")?;
+            self.writer.write_all(value.as_bytes())?;
+            self.writer.write_all(b"\r\n")?;
+        }
+
+        self.writer.write_all(b"\r\n")?;
         Ok(())
     }
 
-    /// Writes a message `Body` to a `TcpStream`.
+    /// Writes a message `Body` to the underlying `TcpStream`.
     ///
     /// # Errors
     ///
@@ -383,7 +359,7 @@ impl Connection {
     /// to the underlying `TcpStream` successfully.
     pub fn write_body(&mut self, body: &Body) -> NetResult<()> {
         if !body.is_empty() {
-            self.write_all(body.as_bytes())?;
+            self.writer.write_all(body.as_bytes())?;
         }
 
         Ok(())
@@ -397,13 +373,12 @@ impl Connection {
     /// individual components of the `Request` to the `TcpStream`.
     pub fn send_request(&mut self, req: &mut Request) -> NetResult<()> {
         // Ensure default request headers are set.
-        let addr = self.writer.get_ref().peer_addr().ok();
-        req.headers.default_request_headers(&req.body, addr);
+        req.headers.default_request_headers(&req.body, Some(self.remote_addr));
 
         self.write_request_line(&req.method, &req.path, &req.version)?;
         self.write_headers(&req.headers)?;
         self.write_body(&req.body)?;
-        self.flush()?;
+        self.writer.flush()?;
         Ok(())
     }
 
@@ -420,34 +395,34 @@ impl Connection {
         self.write_status_line(&res.version, &res.status)?;
         self.write_headers(&res.headers)?;
         self.write_body(&res.body)?;
-        self.flush()?;
+        self.writer.flush()?;
         Ok(())
     }
 
-    /// Writes an internal server error `Response` to a `TcpStream`
-    /// that contains the provided error message.
+    /// Writes an error `Response` to the underlying `TcpStream`.
     ///
     /// # Errors
     ///
-    /// An error is returned if there is a failure to write any of the
-    /// individual components of the `Response` to the `TcpStream`.
-    pub fn send_500_error(&mut self, err_msg: String) -> NetResult<()> {
+    /// An error is returned if writing to the underlying `TcpStream` fails
+    /// or if the provided `status_code` is not in the range 100 to 999,
+    /// inclusive.
+    pub fn send_error(
+        &mut self,
+        status_code: u16,
+        err_msg: String
+    ) -> NetResult<()> {
         let body = Body::from(err_msg);
+        let version = Version::default();
+        let status = Status::try_from(status_code)?;
 
         let mut headers = Headers::new();
         headers.default_response_headers(&body);
-        headers.add_connection("close");
+        headers.insert(CONNECTION, "close".into());
 
-        let res = Response::builder()
-            .status_code(500)
-            .headers(headers)
-            .body(body)
-            .build()?;
-
-        self.write_status_line(&res.version, &res.status)?;
-        self.write_headers(&res.headers)?;
-        self.write_body(&res.body)?;
-        self.flush()?;
+        self.write_status_line(&version, &status)?;
+        self.write_headers(&headers)?;
+        self.write_body(&body)?;
+        self.writer.flush()?;
         Ok(())
     }
 }

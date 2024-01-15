@@ -1,19 +1,17 @@
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::path::PathBuf;
 use std::process::{self, Command, Stdio};
 use std::str::FromStr;
 
-use rustnet::{
-    Body, Client, Headers, Method, NetError, NetResult, Style, UriPath,
-    Version, WriteCliError, CLIENT_NAME, SERVER_NAME, TEST_SERVER_ADDR,
-    utils,
+use crate::{
+    Body, Client, Headers, Method, NetError, NetResult, Request, Route,
+    Router, Server, Style, Target, Tui, UriPath, Version, WriteCliError,
+    CLIENT_NAME, SERVER_NAME, TEST_SERVER_ADDR, utils,
 };
-use rustnet::style::colors::{GREEN, RED, RESET};
-
-use super::Tui;
+use crate::style::colors::{GREEN, RED, RESET};
 
 /// Contains the parsed client command line arguments.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientCli {
     pub do_send: bool,
@@ -112,17 +110,21 @@ impl TryFrom<ClientCli> for Client {
             return Err(NetError::NotConnected);
         };
 
+        let req = Request {
+            method: cli.method,
+            path: cli.path.clone(),
+            version: cli.version,
+            headers: cli.headers.clone(),
+            body: cli.body.clone()
+        };
+
         let mut client = Self::builder()
-            .addr(addr)
             .do_send(cli.do_send)
             .do_debug(cli.do_debug)
             .no_dates(cli.no_dates)
             .style(cli.style)
-            .method(cli.method)
-            .path(cli.path.clone())
-            .version(cli.version)
-            .headers(cli.headers.clone())
-            .body(cli.body.clone())
+            .req(req)
+            .addr(addr)
             .build()?;
 
         if cli.do_plain {
@@ -323,12 +325,7 @@ impl ClientCli {
             return self.invalid_arg("--header", header);
         };
 
-        let name = name.to_ascii_lowercase();
-        let name = utils::to_titlecase(name.as_bytes());
-
-        let value = value.to_ascii_lowercase();
-
-        self.headers.header(name.trim(), value.trim());
+        self.headers.header(name, value.as_bytes());
     }
 
     /// Start a test server at 127.0.0.1:7878.
@@ -339,7 +336,7 @@ impl ClientCli {
         }
 
         let args = [
-            "run", "--bin", SERVER_NAME, "--", "--test", "--", TEST_SERVER_ADDR
+            "run", "--bin", "server", "--", "--test", "--", TEST_SERVER_ADDR
         ];
 
         if let Err(e) = Command::new("cargo")
@@ -352,7 +349,7 @@ impl ClientCli {
             process::exit(1);
         }
 
-        if utils::check_server(TEST_SERVER_ADDR) {
+        if utils::check_server_is_live(TEST_SERVER_ADDR) {
             println!(
                 "{GREEN}Server is listening on {TEST_SERVER_ADDR}.{RESET}"
             );
@@ -372,5 +369,254 @@ impl ClientCli {
         }
 
         process::exit(0);
+    }
+}
+
+/// Contains the parsed server command line arguments.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ServerCli {
+    pub do_log: bool,
+    pub do_debug: bool,
+    pub is_test: bool,
+    pub addr: Option<String>,
+    pub log_file: Option<PathBuf>,
+    pub router: Router,
+}
+
+impl Default for ServerCli {
+    fn default() -> Self {
+        Self {
+            do_log: false,
+            do_debug: false,
+            is_test: false,
+            addr: None,
+            log_file: None,
+            router: Router::new()
+        }
+    }
+}
+
+impl Display for ServerCli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{self:?}")
+    }
+}
+
+impl Debug for ServerCli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        writeln!(
+            f,
+            "ServerCli {{\n    \
+            do_log: {:?},\n    \
+            do_debug: {:?},\n    \
+            is_test: {:?},",
+            self.do_log,
+            self.do_debug,
+            self.is_test
+        )?;
+
+        if let Some(addr) = self.addr.as_ref() {
+            writeln!(f, "    addr: Some({addr:?}),")?;
+        } else {
+            writeln!(f, "    addr: None,")?;
+        }
+
+        if let Some(log_file) = self.log_file.as_ref() {
+            writeln!(f, "    log_file: Some({:?}),", log_file.display())?;
+        } else {
+            writeln!(f, "    log_file: None,")?;
+        }
+
+        if self.router.is_empty() {
+            writeln!(f, "    router: Router()")?;
+        } else {
+            writeln!(f, "    router: Router(")?;
+
+            for route in &self.router.0 {
+                writeln!(f, "        {route:?},")?;
+            }
+
+            writeln!(f, "    )")?;
+        }
+
+        write!(f, "}}")
+    }
+}
+
+impl TryFrom<ServerCli> for Server {
+    type Error = NetError;
+
+    fn try_from(mut cli: ServerCli) -> NetResult<Self> {
+        let Some(addr) = cli.addr.take() else {
+            return Err(NetError::Other("Missing server address.".into()));
+        };
+
+        let mut server = Self::builder();
+
+        if let Some(path) = cli.log_file.take() {
+            let _ = server.log_file(path);
+            cli.do_log = true;
+        }
+
+        server
+            .addr(&addr)
+            .do_log(cli.do_log)
+            .do_debug(cli.do_debug)
+            .is_test_server(cli.is_test)
+            .router(&mut cli.router)
+            .build()
+    }
+}
+
+impl WriteCliError for ServerCli {}
+
+impl ServerCli {
+    /// Returns a default `ServerCli` instance.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Parses and inserts a route into the server's router.
+    pub fn parse_route(&mut self, opt: &str, arg: &str) {
+        if arg.is_empty() {
+            self.missing_arg(opt);
+        }
+
+        let mut tokens = arg.splitn(3, ':');
+
+        match opt {
+            "-I" | "--favicon" => match tokens.next() {
+                Some(file_path) => {
+                    let _ = self.router.favicon(PathBuf::from(file_path));
+                },
+                None => self.invalid_arg(opt, arg),
+            },
+            "-0" | "--not-found" => match tokens.next() {
+                Some(file_path) => {
+                    let _ = self.router.not_found(PathBuf::from(file_path));
+                },
+                None => self.invalid_arg(opt, arg),
+            },
+            "-T" | "--text" | "-F" | "--file" => {
+                let (Some(method), Some(uri_path), Some(target)) = (
+                    tokens.next(),
+                    tokens.next(),
+                    tokens.next()
+                ) else {
+                    self.invalid_arg(opt, arg);
+                    return;
+                };
+
+                let method = method.to_ascii_uppercase();
+
+                let Ok(method) = Method::from_str(method.as_str()) else {
+                    return self.invalid_arg(opt, arg);
+                };
+
+                let uri_path = uri_path.to_ascii_lowercase();
+
+                let target: Target = match opt {
+                    "-T" | "--text" => String::from(target).into(),
+                    "-F" | "--file" => PathBuf::from(target).into(),
+                    _ => unreachable!(),
+                };
+
+                let route = Route::new(method, uri_path.into(), target);
+                self.router.mount(route);
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    /// Prints the server help message and exists the program.
+    pub fn print_help(&self) {
+        eprintln!("\
+{GREEN}USAGE:{RESET}
+    {SERVER_NAME} [OPTIONS] [ROUTES] [--] <SERVER ADDRESS>\n
+{GREEN}SERVER ADDRESS:{RESET}
+    IP:PORT              The server's IP address and port.\n
+{GREEN}OPTIONS:{RESET}
+    -d, --debug          Prints debug information.
+    -h, --help           Prints this help message.
+    -l, --log            Enables logging of connections to stdout.
+    -f, --log-file FILE  Enables logging of connections to FILE.
+    -t, --test           Creates a test server at {TEST_SERVER_ADDR}.\n
+{GREEN}ROUTES:{RESET}
+    -I, --favicon FILE_PATH
+        Adds a route that serves a favicon.
+    -0, --not-found FILE_PATH
+        Adds a route that handles 404 Not Found responses.
+    -T, --text METHOD:URI_PATH:TEXT
+        Adds a route that serves text.
+    -F, --file METHOD:URI_PATH:FILE_PATH
+        Adds a route that serves a file.\n");
+
+        process::exit(0);
+    }
+
+    /// Parses the command line arguments into a `ServerCli` object.
+    #[must_use]
+    pub fn parse_args(args: &mut VecDeque<&str>) -> Self {
+        let mut cli = Self::new();
+
+        let _ = args.pop_front();
+
+        if args.is_empty() {
+            cli.print_help();
+            process::exit(0);
+        }
+
+        while let Some(opt) = args.pop_front() {
+            match opt {
+                // First argument after "--" is the server address.
+                "--" => match args.pop_front() {
+                    Some(arg) => {
+                        cli.addr = Some(arg.to_string());
+                        break;
+                    },
+                    None => cli.missing_arg("SERVER ADDRESS"),
+                },
+                // Handle options.
+                _ if opt.starts_with('-') => match opt {
+                    // Enable logging of new connections.
+                    "-l" | "--log" => cli.do_log = true,
+                    // Enable debug printing.
+                    "-d" | "--debug" => cli.do_debug = true,
+                    // Print help message.
+                    "-h" | "--help" => cli.print_help(),
+                    // Make the server a test server.
+                    "-t" | "--test" => {
+                        cli.is_test = true;
+                        let  _ = cli.router.shutdown();
+                    },
+                    // Set a local log file.
+                    "-f" | "--log-file" => match args.pop_front() {
+                        Some(arg) => {
+                            cli.do_log = true;
+                            cli.log_file = Some(PathBuf::from(arg));
+                        },
+                        None => cli.missing_arg(opt),
+                    },
+                    // Add a route.
+                    "-F" | "--file"
+                        | "-I" | "--favicon"
+                        | "-0" | "--not-found"
+                        | "-T" | "--text" => match args.pop_front() {
+                        Some(arg) => cli.parse_route(opt, arg),
+                        None => cli.missing_arg(opt),
+                    },
+                    // Unknown option.
+                    _ => cli.unknown_opt(opt),
+                },
+                // First non-option argument is the server address.
+                _ => {
+                    cli.addr = Some(opt.to_string());
+                    break;
+                },
+            }
+        }
+
+        cli
     }
 }

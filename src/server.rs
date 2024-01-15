@@ -202,11 +202,16 @@ impl Server {
     }
 
     /// Writes a status 500 server error response to the given `Connection`.
-    pub fn send_500_error(&self, err: String, conn: &mut Connection) {
-        self.log(&format!("[SERVER] Error: {}", &err));
+    pub fn send_error(
+        &self,
+        status_code: u16,
+        err_msg: String,
+        conn: &mut Connection
+    ) {
+        self.log(&format!("[SERVER] Error: {}", &err_msg));
 
-        if let Err(ref err2) = conn.send_500_error(err) {
-            self.log(&format!("[SERVER] Error: {err2}"));
+        if let Err(ref err) = conn.send_error(status_code, err_msg) {
+            self.log(&format!("[SERVER] Error: {err}"));
         }
     }
 

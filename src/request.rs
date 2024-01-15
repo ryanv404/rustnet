@@ -3,10 +3,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::iter;
 use std::str::{self, FromStr};
 
-use crate::{
-    Body, HeaderName, HeaderValue, Headers, Method, NetParseError, Route,
-    Target, Version,
-};
+use crate::{Body, Headers, Method, NetParseError, Version};
 use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{ORANGE, RESET};
 use crate::utils;
@@ -14,11 +11,11 @@ use crate::utils;
 /// An HTTP request builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestBuilder {
-    pub method: Option<Method>,
-    pub path: Option<UriPath>,
-    pub version: Option<Version>,
-    pub headers: Option<Headers>,
-    pub body: Option<Body>,
+    pub method: Method,
+    pub path: UriPath,
+    pub version: Version,
+    pub headers: Headers,
+    pub body: Body,
 }
 
 impl RequestBuilder {
@@ -30,67 +27,52 @@ impl RequestBuilder {
 
     /// Sets the HTTP method.
     pub fn method(&mut self, method: Method) -> &mut Self {
-        self.method = Some(method);
+        self.method = method;
         self
     }
 
     /// Sets the URI path.
     pub fn path(&mut self, path: UriPath) -> &mut Self {
-        self.path = Some(path);
+        self.path = path;
         self
     }
 
-    /// Sets the HTTP version.
+    /// Sets the HTTP protocol version.
     pub fn version(&mut self, version: Version) -> &mut Self {
-        self.version = Some(version);
+        self.version = version;
         self
     }
 
-    /// Inserts a request header.
-    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
-        if let Some(headers) = self.headers.as_mut() {
-            headers.header(name, value);
-        } else {
-            let mut headers = Headers::default();
-            headers.header(name, value);
-            self.headers = Some(headers);
-        }
-
+    /// Inserts a header entry from the given name and value.
+    pub fn header(&mut self, name: &str, value: &[u8]) -> &mut Self {
+        self.headers.header(name, value);
         self
     }
 
-    /// Sets the request headers.
-    pub fn headers(&mut self, mut headers: Headers) -> &mut Self {
-        match self.headers.as_mut() {
-            Some(hdrs) => hdrs.append(&mut headers),
-            None => self.headers = Some(headers),
-        }
-
+    /// Appends the header entries from `other`.
+    pub fn headers(&mut self, mut other: Headers) -> &mut Self {
+        self.headers.append(&mut other);
         self
     }
 
     /// Sets the request body.
     pub fn body(&mut self, body: Body) -> &mut Self {
-        if !body.is_empty() {
-            self.body = Some(body);
-        }
-
+        self.body = body;
         self
     }
 
-    /// Builds and returns a new `Request`.
+    /// Builds and returns a new `Request` instance.
     pub fn build(&mut self) -> Request {
-        let mut req = Request {
-            method: self.method.take().unwrap_or_default(),
-            path: self.path.take().unwrap_or_default(),
-            version: self.version.take().unwrap_or_default(),
-            headers: self.headers.take().unwrap_or_default(),
-            body: self.body.take().unwrap_or_default()
-        };
+        // Ensure the default request headers are set.
+        self.headers.default_request_headers(&self.body, None);
 
-        // Ensure default request headers are set.
-        req.headers.default_request_headers(&req.body, None);
-        req
+        Request {
+            method: self.method,
+            path: self.path.clone(),
+            version: self.version,
+            headers: self.headers.clone(),
+            body: self.body.clone()
+        }
     }
 }
 
@@ -106,7 +88,7 @@ impl Default for UriPath {
 
 impl Display for UriPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", &self.0)
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -126,9 +108,7 @@ impl TryFrom<&'static [u8]> for UriPath {
     type Error = NetParseError;
 
     fn try_from(bytes: &'static [u8]) -> Result<Self, Self::Error> {
-        str::from_utf8(bytes)
-            .map_err(|_| NetParseError::Path)
-            .map(Into::into)
+        str::from_utf8(bytes).map_err(|_| NetParseError::Path).map(Into::into)
     }
 }
 
@@ -166,9 +146,7 @@ impl Display for Request {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         writeln!(f, "{} {} {}", &self.method, &self.path, &self.version)?;
 
-        for (name, value) in &self.headers.0 {
-            writeln!(f, "{name}: {value}")?;
-        }
+        writeln!(f, "{}", &self.headers)?;
 
         if self.body.is_printable() {
             writeln!(f, "{}", &self.body)?;
@@ -184,12 +162,14 @@ impl Debug for Request {
         writeln!(f, "    method: {:?},", &self.method)?;
         writeln!(f, "    path: {:?},", &self.path)?;
         writeln!(f, "    version: {:?}", &self.version)?;
+
         writeln!(f, "    headers: Headers(")?;
         for (name, value) in &self.headers.0 {
             write!(f, "        ")?;
             writeln!(f, "{name:?}: {value:?},")?;
         }
         writeln!(f, "    ),")?;
+
         if self.body.is_empty() {
             writeln!(f, "    body: Body::Empty")?;
         } else if self.body.is_printable() {
@@ -197,6 +177,7 @@ impl Debug for Request {
         } else {
             writeln!(f, "    body: Body {{ ... }}")?;
         }
+
         write!(f, "}}")?;
         Ok(())
     }
@@ -213,19 +194,15 @@ impl FromStr for Request {
 impl TryFrom<&[u8]> for Request {
     type Error = NetParseError;
 
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let mut lines = utils::trim_start(bytes).split(|&b| b == b'\n');
+    fn try_from(req: &[u8]) -> Result<Self, Self::Error> {
+        let mut lines = utils::trim_start(req).split(|&b| b == b'\n');
 
-        // Parse the request line.
         let (method, path, version) = lines
             .next()
             .ok_or(NetParseError::RequestLine)
             .and_then(Self::parse_request_line)?;
 
-        let mut headers = Headers::new();
-
-        // Collect the trimmed header lines into a new iterator.
-        let header_lines = lines
+        let headers_bytes = lines
             .by_ref()
             .map_while(|line| {
                 let line = utils::trim(line);
@@ -235,29 +212,23 @@ impl TryFrom<&[u8]> for Request {
                 } else {
                     Some(line)
                 }
-            });
-
-        // Parse and insert each header.
-        for line in header_lines {
-            headers.insert_header_from_bytes(line)?;
-        }
-
-        // Collect the remaining bytes while restoring the newlines that were
-        // removed from each line due to the call to `split` above.
-        let body_vec = lines
-            .flat_map(|line| line
-                .iter()
-                .copied()
-                .chain(iter::once(b'\n'))
-            )
+            })
+            // Restore newline characters removed by `split` above.
+            .flat_map(|line| line.iter().copied().chain(iter::once(b'\n')))
             .collect::<Vec<u8>>();
 
-        // Parse the `Body` using the Content-Type header.
+        let headers = Headers::try_from(&headers_bytes[..])?;
+
         let content_type = headers
             .get(&CONTENT_TYPE)
             .map_or(Cow::Borrowed(""), |value| value.as_str());
 
-        let body = Body::from_content_type(&body_vec, &content_type);
+        let body_bytes = lines
+            // Restore newline characters removed by `split` above.
+            .flat_map(|line| line.iter().copied().chain(iter::once(b'\n')))
+            .collect::<Vec<u8>>();
+
+        let body = Body::from_content_type(&body_bytes, &content_type);
 
         Ok(Self { method, path, version, headers, body })
     }
@@ -276,6 +247,47 @@ impl Request {
         Self::default()
     }
 
+    /// Parses a bytes slice into a `Method`, `UriPath`, and `Version`.
+    ///
+    /// # Errors
+    ///
+    /// Retuns an error if parsing of the request line fails.
+    pub fn parse_request_line(
+        line: &[u8]
+    ) -> Result<(Method, UriPath, Version), NetParseError> {
+        let mut parts = utils::trim_start(line).split(|&b| b == b' ');
+
+        let method = parts
+            .next()
+            .map(utils::trim_end)
+            .ok_or(NetParseError::RequestLine)
+            .and_then(Method::try_from)?;
+
+        let path = parts
+            .next()
+            .map(utils::trim)
+            .ok_or(NetParseError::RequestLine)
+            .and_then(|path| {
+                String::from_utf8(path.to_vec())
+                    .map_err(|_| NetParseError::Path)
+                    .and_then(|s| Ok(UriPath::from(s)))
+            })?;
+
+        let version = parts
+            .next()
+            .map(utils::trim)
+            .ok_or(NetParseError::RequestLine)
+            .and_then(Version::try_from)?;
+
+        Ok((method, path, version))
+    }
+
+    /// Returns the HTTP protocol `Version`.
+    #[must_use]
+    pub const fn version(&self) -> Version {
+        self.version
+    }
+
     /// Returns the HTTP `Method`.
     #[must_use]
     pub const fn method(&self) -> Method {
@@ -286,18 +298,6 @@ impl Request {
     #[must_use]
     pub fn path(&self) -> &str {
         self.path.as_str()
-    }
-
-    /// Returns the HTTP protocol `Version`.
-    #[must_use]
-    pub const fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Returns a `Route` which represents the request `Method` and URI path.
-    #[must_use]
-    pub fn route(&self) -> Route {
-        Route::new(self.method, self.path.clone(), Target::Empty)
     }
 
     /// Returns the request line as a `String` with plain formatting.
@@ -317,55 +317,10 @@ impl Request {
         )
     }
 
-    /// Parses a bytes slice into a `Method`, `UriPath`, and `Version`.
-    ///
-    /// # Errors
-    ///
-    /// Retuns an error if parsing of the request line fails.
-    pub fn parse_request_line(
-        line: &[u8]
-    ) -> Result<(Method, UriPath, Version), NetParseError> {
-        let mut parts = utils::trim(line).splitn(2, |&b| b == b' ');
-
-        let (Some(method), Some(rest)) = (parts.next(), parts.next()) else {
-            return Err(NetParseError::RequestLine);
-        };
-
-        let mut parts = utils::trim_start(rest).splitn(2, |&b| b == b' ');
-
-        let (Some(path), Some(version)) = (parts.next(), parts.next()) else {
-            return Err(NetParseError::RequestLine);
-        };
-
-        let method = utils::trim_end(method);
-        let method = Method::try_from(method)?;
-
-        let path = utils::trim_end(path).to_vec();
-        let path = String::from_utf8(path)
-            .map_err(|_| NetParseError::Path)?
-            .into();
-
-        let version = utils::trim_start(version);
-        let version = Version::try_from(version)?;
-
-        Ok((method, path, version))
-    }
-
-    /// Returns a reference to the request headers.
+    /// Returns a reference to the request `Headers`.
     #[must_use]
     pub const fn headers(&self) -> &Headers {
         &self.headers
-    }
-
-    /// Returns true if the header with the given `HeaderName` key is present.
-    #[must_use]
-    pub fn contains(&self, name: &HeaderName) -> bool {
-        self.headers.contains(name)
-    }
-
-    /// Adds a header to this `Request`.
-    pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
-        self.headers.insert(name, value);
     }
 
     /// Returns a reference to the request `Body`.

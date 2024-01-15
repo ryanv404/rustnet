@@ -13,6 +13,7 @@
 #![deny(clippy::suspicious)]
 
 pub mod body;
+pub mod cli;
 pub mod client;
 pub mod errors;
 pub mod headers;
@@ -23,13 +24,15 @@ pub mod response;
 pub mod router;
 pub mod server;
 pub mod style;
+pub mod tui;
 pub mod utils;
 pub mod workers;
 
 pub use body::{Body, Target};
+pub use cli::{ClientCli, ServerCli};
 pub use client::{Client, ClientBuilder};
 pub use errors::{NetError, NetParseError, NetResult};
-pub use headers::{Header, Headers, HeaderName, HeaderValue};
+pub use headers::{Headers, HeaderName, HeaderValue};
 pub use io::{Connection, WriteCliError};
 pub use http::{Method, Status, Version};
 pub use request::{Request, RequestBuilder, UriPath};
@@ -37,6 +40,7 @@ pub use response::{Response, ResponseBuilder};
 pub use router::{Route, RouteBuilder, Router};
 pub use server::{Listener, Server, ServerBuilder, ServerHandle};
 pub use style::{Style, StyleKind, StyleParts};
+pub use tui::Tui;
 pub use workers::{ThreadPool, Worker};
 
 pub const MAX_HEADERS: u16 = 1024;

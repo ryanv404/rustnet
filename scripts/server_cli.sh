@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-./target/debug/server \
+./target/debug/http_server \
     -l \
     -t \
     -f './log_file.txt' \

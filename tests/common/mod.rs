@@ -1,18 +1,16 @@
 #![allow(unused_macros)]
 
-use rustnet::Response;
-
 // Start a test server in the background.
 macro_rules! start_test_server {
     () => {
         #[test]
         fn start_test_server() {
             use std::process::{Command, Stdio};
-            use rustnet::{utils, SERVER_NAME, TEST_SERVER_ADDR};
+            use rustnet::{utils, TEST_SERVER_ADDR};
 
             let args = [
-                "run", "--bin", SERVER_NAME, "--",
-                "--test", "--", TEST_SERVER_ADDR
+                "run", "--bin", "server", "--", "--test", "--",
+                TEST_SERVER_ADDR
             ];
 
             let _ = Command::new("cargo")
@@ -22,7 +20,7 @@ macro_rules! start_test_server {
                 .spawn()
                 .unwrap();
 
-            if !utils::check_server(TEST_SERVER_ADDR) {
+            if !utils::check_server_is_live(TEST_SERVER_ADDR) {
                 assert!(false);
             }
         }
@@ -37,11 +35,10 @@ macro_rules! shutdown_test_server {
             use std::process::{Command, Stdio};
             use std::thread;
             use std::time::Duration;
-            use rustnet::{utils, CLIENT_NAME, TEST_SERVER_ADDR};
+            use rustnet::{utils, TEST_SERVER_ADDR};
 
             let args = [
-                "run", "--bin", CLIENT_NAME, "--",
-                "--shutdown", "--",
+                "run", "--bin", "client", "--", "--shutdown", "--",
                 TEST_SERVER_ADDR
             ];
 
@@ -54,7 +51,7 @@ macro_rules! shutdown_test_server {
 
             thread::sleep(Duration::from_millis(400));
 
-            if utils::check_server(TEST_SERVER_ADDR) {
+            if utils::check_server_is_live(TEST_SERVER_ADDR) {
                 assert!(false);
             }
         }
@@ -67,7 +64,7 @@ macro_rules! run_test {
             #[test]
             fn $route() {
                 use std::process::Command;
-                use rustnet::{Body, Response, CLIENT_NAME, TEST_SERVER_ADDR};
+                use rustnet::{Body, Response, TEST_SERVER_ADDR};
                 use common::{get_client_expected, get_server_expected};
 
                 let method = stringify!($method);
@@ -92,7 +89,7 @@ macro_rules! run_test {
                 };
 
                 let args = [
-                    "run", "--bin", CLIENT_NAME, "--",
+                    "run", "--bin", "client", "--",
                     "--method", method,
                     "--path", route.as_str(),
                     "--output", "sh",
@@ -117,69 +114,69 @@ macro_rules! run_test {
     };
 }
 
-pub fn get_client_expected(method: &str, route: &str) -> Response {
+pub fn get_client_expected(method: &str, route: &str) -> rustnet::Response {
     use std::str::FromStr;
-    use rustnet::{Method, Request, Status};
+    use rustnet::{Method, Request, Response, Status, DEFAULT_NAME};
     use rustnet::headers::names::{
-        ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
-        ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONTENT_LENGTH, CONTENT_TYPE,
-        HOST, LOCATION, SERVER,
+        ACCEPT, ACCESS_CONTROL_ALLOW_CREDENTIALS as ACAC,
+        ACCESS_CONTROL_ALLOW_ORIGIN as ACAO, CONNECTION, CONTENT_LENGTH,
+        CONTENT_TYPE, HOST, LOCATION, SERVER, USER_AGENT,
     };
 
-    let mut _req = Request::new();
+    let mut _req = Request::default();
     _req.method = Method::from_str(method).unwrap();
     _req.path = route.to_string().into();
-    _req.headers.add_user_agent();
-    _req.headers.add_accept("*/*");
+    _req.headers.insert(ACCEPT, "*/*".into());
     _req.headers.insert(HOST, "httpbin.org:80".into());
+    _req.headers.insert(USER_AGENT, DEFAULT_NAME.into());
 
-    let mut res = Response::new();
-    res.headers.add_content_length(0);
+    let mut res = Response::default();
     res.headers.insert(ACAO, "*".into());
     res.headers.insert(ACAC, "true".into());
-    res.headers.add_connection("keep-alive");
+    res.headers.insert(CONTENT_LENGTH, 0.into());
+    res.headers.insert(CONNECTION, "keep-alive".into());
     res.headers.insert(SERVER, "gunicorn/19.9.0".into());
-    res.headers.add_content_type("text/html; charset=utf-8");
+    res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
 
     match route {
         "/status/101" => {
-            res.status = Status(101);
             res.headers.remove(&CONTENT_LENGTH);
-            res.headers.add_connection("upgrade");
+            res.status = Status::try_from(101u16).unwrap();
+            res.headers.insert(CONNECTION, "upgrade".into());
         },
         "/status/201" => {
-            res.status = Status(201);
+            res.status = Status::try_from(201u16).unwrap();
         },
         "/status/301" => {
-            res.status = Status(301);
             res.headers.remove(&CONTENT_TYPE);
+            res.status = Status::try_from(301u16).unwrap();
             res.headers.insert(LOCATION, "/redirect/1".into());
         },
         "/status/404" => {
-            res.status = Status(404);
+            res.status = Status::try_from(404u16).unwrap();
         },
         "/status/502" => {
-            res.status = Status(502);
+            res.status = Status::try_from(502u16).unwrap();
         },
         "/xml" => {
-            res.headers.add_content_length(522);
-            res.headers.add_content_type("application/xml");
+            res.headers.insert(CONTENT_LENGTH, 522.into());
+            res.headers.insert(CONTENT_TYPE, "application/xml".into());
         },
         "/json" => {
-            res.headers.add_content_length(429);
-            res.headers.add_content_type("application/json");
+            res.headers.insert(CONTENT_LENGTH, 429.into());
+            res.headers.insert(CONTENT_TYPE, "application/json".into());
         },
         "/deny" => {
-            res.headers.add_content_length(239);
-            res.headers.add_content_type("text/plain");
+            res.headers.insert(CONTENT_LENGTH, 239.into());
+            res.headers.insert(CONTENT_TYPE, "text/plain".into());
         },
         "/html" => {
-            res.headers.add_content_length(3741);
-            res.headers.add_content_type("text/html; charset=utf-8");
+            res.headers.insert(CONTENT_LENGTH, 3741.into());
+            res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
         },
         "/image/jpeg" => {
-            res.headers.add_content_length(35588);
-            res.headers.add_content_type("image/jpeg");
+            res.headers.insert(CONTENT_LENGTH, 35588.into());
+            res.headers.insert(CONTENT_TYPE, "image/jpeg".into());
         },
         _ => {},
     }
@@ -187,33 +184,36 @@ pub fn get_client_expected(method: &str, route: &str) -> Response {
     res
 }
 
-pub fn get_server_expected(method: &str, route: &str) -> Response {
-    use rustnet::Status;
+pub fn get_server_expected(method: &str, route: &str) -> rustnet::Response {
+    use rustnet::{Response, Status, DEFAULT_NAME};
+    use rustnet::headers::names::{
+        CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, SERVER,
+    };
 
-    let mut res = Response::new();
-    res.headers.add_server();
-    res.headers.add_cache_control("no-cache");
-    res.headers.add_content_type("text/plain; charset=utf-8");
+    let mut res = Response::default();
+    res.headers.insert(SERVER, DEFAULT_NAME.into());
+    res.headers.insert(CACHE_CONTROL, "no-cache".into());
+    res.headers.insert(CONTENT_TYPE, "text/plain; charset=utf-8".into());
 
     match route {
         "/unknown" => {
-            res.headers.add_content_length(482);
-            res.status = Status(404);
-            res.headers.add_content_type("text/html; charset=utf-8");
+            res.status = Status::try_from(404u16).unwrap();
+            res.headers.insert(CONTENT_LENGTH, 482.into());
+            res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
         },
         "/favicon.ico" => {
-            res.headers.add_content_length(1406);
-            res.headers.add_content_type("image/x-icon");
-            res.headers.add_cache_control("max-age=604800");
+            res.headers.insert(CONTENT_LENGTH, 1406.into());
+            res.headers.insert(CONTENT_TYPE, "image/x-icon".into());
+            res.headers.insert(CACHE_CONTROL, "max-age=604800".into());
         },
         "/about" => {
-            res.headers.add_content_length(455);
-            res.headers.add_content_type("text/html; charset=utf-8");
+            res.headers.insert(CONTENT_LENGTH, 455.into());
+            res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
         },
         "/post" => {
-            res.status = Status(201);
-            res.headers.add_content_length(575);
-            res.headers.add_content_type("text/html; charset=utf-8");
+            res.status = Status::try_from(201u16).unwrap();
+            res.headers.insert(CONTENT_LENGTH, 575.into());
+            res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
         },
         "/get"
             | "/head"
@@ -224,19 +224,21 @@ pub fn get_server_expected(method: &str, route: &str) -> Response {
             | "/options"
             | "/connect" =>
         {
-            res.headers.add_content_length(575);
-            res.headers.add_content_type("text/html; charset=utf-8");
+            res.headers.insert(CONTENT_LENGTH, 575.into());
+            res.headers.insert(CONTENT_TYPE, "text/html; charset=utf-8".into());
         },
         "/many_methods" => match method {
-            "HEAD" => res.headers.add_content_length(23),
             "POST" => {
-                res.status = Status(201);
-                res.headers.add_content_length(23);
+                res.status = Status::try_from(201u16).unwrap();
+                res.headers.insert(CONTENT_LENGTH, 23.into());
             },
-            "DELETE" => res.headers.add_content_length(25),
-            "GET" | "PUT" => res.headers.add_content_length(22),
-            "PATCH" | "TRACE" => res.headers.add_content_length(24),
-            "OPTIONS" | "CONNECT" => res.headers.add_content_length(26),
+            "OPTIONS" | "CONNECT" => {
+                res.headers.insert(CONTENT_LENGTH, 26.into())
+            },
+            "HEAD" => res.headers.insert(CONTENT_LENGTH, 23.into()),
+            "DELETE" => res.headers.insert(CONTENT_LENGTH, 25.into()),
+            "GET" | "PUT" => res.headers.insert(CONTENT_LENGTH, 22.into()),
+            "PATCH" | "TRACE" => res.headers.insert(CONTENT_LENGTH, 24.into()),
             _ => unreachable!(),
         },
         _ => unreachable!(),

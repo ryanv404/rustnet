@@ -1,10 +1,11 @@
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::iter;
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, HeaderName, HeaderValue, Headers, NetParseError, NetResult, Status,
+    Body, Headers, HeaderName, HeaderValue, NetParseError, NetResult, Status,
     Target, Version,
 };
 use crate::headers::names::CONTENT_TYPE;
@@ -14,9 +15,9 @@ use crate::utils;
 /// An HTTP response builder object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResponseBuilder {
-    pub version: Option<Version>,
+    pub version: Version,
     pub status: Option<Result<Status, NetParseError>>,
-    pub headers: Option<Headers>,
+    pub headers: Headers,
     pub body: Option<Result<Body, NetParseError>>,
 }
 
@@ -27,67 +28,49 @@ impl ResponseBuilder {
         Self::default()
     }
 
-    /// Sets the response status using the given status `code`.
-    pub fn status_code(&mut self, code: u16) -> &mut Self {
-        let status = Status::try_from(code);
-        self.status = Some(status);
-        self
-    }
-
-    /// Sets the response status.
-    pub fn status(&mut self, status: Status) -> &mut Self {
-        self.status = Some(Ok(status));
-        self
-    }
-
-    /// Sets the protocol version.
+    /// Sets the HTTP protocol version.
+    #[must_use]
     pub fn version(&mut self, version: Version) -> &mut Self {
-        self.version = Some(version);
+        self.version = version;
         self
     }
 
-    /// Inserts a response header.
-    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
-        if let Some(headers) = self.headers.as_mut() {
-            headers.header(name, value);
-        } else {
-            let mut headers = Headers::default();
-            headers.header(name, value);
-            self.headers = Some(headers);
-        }
-
+    /// Sets the response status using the given status code.
+    #[must_use]
+    pub fn status_code(&mut self, code: u16) -> &mut Self {
+        self.status = Some(Status::try_from(code));
         self
     }
 
-    /// Sets the response headers.
-    pub fn headers(&mut self, mut headers: Headers) -> &mut Self {
-        match self.headers.as_mut() {
-            Some(hdrs) => hdrs.append(&mut headers),
-            None => self.headers = Some(headers),
-        }
+    /// Inserts a header entry from the given name and value.
+    #[must_use]
+    pub fn header(&mut self, name: &str, value: &[u8]) -> &mut Self {
+        self.headers.header(name, value);
+        self
+    }
 
+    /// Appends the header entries from `other`.
+    #[must_use]
+    pub fn headers(&mut self, mut other: Headers) -> &mut Self {
+        self.headers.append(&mut other);
         self
     }
 
     /// Sets the response body based on the given `Target`.
+    #[must_use]
     pub fn target(&mut self, target: Target) -> &mut Self {
-        if !target.is_empty() {
-            self.body = Some(Body::try_from(target));
-        }
-
+        self.body = Some(Body::try_from(target));
         self
     }
 
     /// Sets the response body.
+    #[must_use]
     pub fn body(&mut self, body: Body) -> &mut Self {
-        if !body.is_empty() {
-            self.body = Some(Ok(body));
-        }
-
+        self.body = Some(Ok(body));
         self
     }
 
-    /// Builds and returns a new `Response`.
+    /// Builds and returns a new `Response` instance.
     ///
     /// # Errors
     /// 
@@ -106,20 +89,19 @@ impl ResponseBuilder {
             None => Body::default(),
         };
 
-        let mut res = Response {
-            version: self.version.take().unwrap_or_default(),
-            status,
-            headers: self.headers.take().unwrap_or_default(),
-            body
-        };
-
         // Ensure the default response headers are set.
-        res.headers.default_response_headers(&res.body);
-        Ok(res)
+        self.headers.default_response_headers(&body);
+
+        Ok(Response {
+            version: self.version,
+            status,
+            headers: self.headers.clone(),
+            body
+        })
     }
 }
 
-/// Contains the components of an HTTP response.
+/// An HTTP response.
 #[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Response {
     pub version: Version,
@@ -130,11 +112,9 @@ pub struct Response {
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "{} {}", self.version, self.status)?;
+        writeln!(f, "{} {}", &self.version, &self.status)?;
 
-        for (name, value) in &self.headers.0 {
-            writeln!(f, "{name}: {value}")?;
-        }
+        writeln!(f, "{}", &self.headers)?;
 
         if self.body.is_printable() {
             writeln!(f, "{}", &self.body)?;
@@ -149,12 +129,14 @@ impl Debug for Response {
         writeln!(f, "Response {{")?;
         writeln!(f, "    version: {:?},", &self.version)?;
         writeln!(f, "    status: {:?},", &self.status)?;
+
         writeln!(f, "    headers: Headers(")?;
         for (name, value) in &self.headers.0 {
             write!(f, "        ")?;
             writeln!(f, "{name:?}: {value:?},")?;
         }
         writeln!(f, "    ),")?;
+
         if self.body.is_empty() {
             writeln!(f, "    body: Body::Empty")?;
         } else if self.body.is_printable() {
@@ -162,6 +144,7 @@ impl Debug for Response {
         } else {
             writeln!(f, "    body: Body {{ ... }}")?;
         }
+
         write!(f, "}}")?;
         Ok(())
     }
@@ -178,56 +161,67 @@ impl FromStr for Response {
 impl TryFrom<&[u8]> for Response {
     type Error = NetParseError;
 
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let start = bytes
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
+        // Expect HTTP responses to start with the ASCII character 'H'.
+        let res_start = input
             .iter()
             .position(|&b| b == b'H')
             .ok_or(NetParseError::StatusLine)?;
 
-        let mut lines = bytes[start..].split(|b| *b == b'\n');
+        let mut lines = utils::trim_start(&input[res_start..])
+            .split(|b| *b == b'\n')
+            .collect::<VecDeque<&[u8]>>();
 
-        // Parse the status line.
+        if lines.is_empty() {
+            return Err(NetParseError::StatusLine);
+        }
+
         let (version, status) = lines
-            .next()
+            .pop_front()
             .ok_or(NetParseError::StatusLine)
             .and_then(Self::parse_status_line)?;
 
         let mut headers = Headers::new();
 
-        // Collect the trimmed header lines into a new iterator.
-        let header_lines = lines
-            .by_ref()
-            .map_while(|line| {
-                let line = utils::trim(line);
+        let mut lines_iter = lines.iter();
 
-                if line.is_empty() {
-                    None
-                } else {
-                    Some(line)
-                }
-            });
+        while let Some(line) = lines_iter.next() {
+            let line = utils::trim(line);
 
-        // Parse and insert each header.
-        for line in header_lines {
-            headers.insert_header_from_bytes(line)?;
+            if line.is_empty() {
+                break;
+            }
+
+            let mut parts = line.splitn(2, |&b| b == b':');
+
+            let (name, value) = parts
+                .next()
+                .map(utils::trim_end)
+                .ok_or(NetParseError::Header)
+                .and_then(HeaderName::try_from)
+                .and_then(|name| {
+                    let value = parts
+                        .next()
+                        .map(utils::trim_start)
+                        .ok_or(NetParseError::Header)
+                        .map(HeaderValue::from)?;
+
+                    Ok((name, value))
+                })?;
+
+            headers.insert(name, value);
         }
 
-        // Collect the remaining bytes while restoring the newlines that were
-        // removed from each line due to the call to `split` above.
-        let body_vec = lines
-            .flat_map(|line| line
-                .iter()
-                .copied()
-                .chain(iter::once(b'\n'))
-            )
+        let body_bytes = lines_iter
+            // Restore newline characters removed by `split` above.
+            .flat_map(|line| line.iter().copied().chain(iter::once(b'\n')))
             .collect::<Vec<u8>>();
 
-        // Parse the `Body` using the Content-Type header.
         let content_type = headers
             .get(&CONTENT_TYPE)
             .map_or(Cow::Borrowed(""), |value| value.as_str());
 
-        let body = Body::from_content_type(&body_vec, &content_type);
+        let body = Body::from_content_type(&body_bytes, &content_type);
 
         Ok(Self { version, status, headers, body })
     }
@@ -246,30 +240,6 @@ impl Response {
         Self::default()
     }
 
-    /// Returns a reference to the HTTP protocol `Version`.
-    #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.version
-    }
-
-    /// Returns a reference to the `Status` for this `Response`.
-    #[must_use]
-    pub const fn status(&self) -> &Status {
-        &self.status
-    }
-
-    /// Returns the status line as a `String` with plain formatting.
-    #[must_use]
-    pub fn status_line_to_plain_string(&self) -> String {
-        format!("{} {}", self.version, self.status)
-    }
-
-    /// Returns the status line as a `String` with color formatting.
-    #[must_use]
-    pub fn status_line_to_color_string(&self) -> String {
-        format!("{MAGENTA}{} {}{RESET}", self.version, self.status)
-    }
-
     /// Parses a bytes slice into a `Version` and a `Status`.
     ///
     /// # Errors
@@ -278,40 +248,54 @@ impl Response {
     pub fn parse_status_line(
         line: &[u8]
     ) -> Result<(Version, Status), NetParseError> {
-        let mut parts = utils::trim(line).splitn(2, |&b| b == b' ');
+        let mut parts = utils::trim_start(line).split(|&b| b == b' ');
 
-        let (Some(version), Some(status)) = (parts.next(), parts.next()) else {
-            return Err(NetParseError::StatusLine);
-        };
+        let version = parts
+            .next()
+            .map(utils::trim_end)
+            .ok_or(NetParseError::StatusLine)
+            .and_then(Version::try_from)?;
 
-        let version = utils::trim_end(version);
-        let version = Version::try_from(version)?;
-
-        let status = utils::trim_start(status);
-        let status = Status::try_from(status)?;
+        let status = parts
+            .next()
+            .map(utils::trim)
+            .ok_or(NetParseError::StatusLine)
+            .and_then(Status::try_from)?;
 
         Ok((version, status))
     }
 
-    /// Returns a reference to the headers for this `Response`.
+    /// Returns the HTTP protocol `Version`.
+    #[must_use]
+    pub const fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Returns a reference to the response `Status`.
+    #[must_use]
+    pub const fn status(&self) -> &Status {
+        &self.status
+    }
+
+    /// Returns the status line as a `String` with plain formatting.
+    #[must_use]
+    pub fn status_line_to_plain_string(&self) -> String {
+        format!("{} {}", &self.version, &self.status)
+    }
+
+    /// Returns the status line as a `String` with color formatting.
+    #[must_use]
+    pub fn status_line_to_color_string(&self) -> String {
+        format!("{MAGENTA}{} {}{RESET}", &self.version, &self.status)
+    }
+
+    /// Returns a reference to the response `Headers`.
     #[must_use]
     pub const fn headers(&self) -> &Headers {
         &self.headers
     }
 
-    /// Returns true if the header represented by the given `HeaderName` key
-    /// is present.
-    #[must_use]
-    pub fn contains(&self, name: &HeaderName) -> bool {
-        self.headers.contains(name)
-    }
-
-    /// Inserts a header into the `Response`.
-    pub fn header(&mut self, name: HeaderName, value: HeaderValue) {
-        self.headers.insert(name, value);
-    }
-
-    /// Returns a reference to the message `Body`.
+    /// Returns a reference to the response `Body`.
     #[must_use]
     pub const fn body(&self) -> &Body {
         &self.body

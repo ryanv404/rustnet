@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-./target/debug/client \
+./target/debug/http_client \
     -d \
     -n \
     -p \

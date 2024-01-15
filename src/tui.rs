@@ -2,12 +2,12 @@ use std::io::{self, BufRead, Write};
 use std::process::{self, Child, Command, Stdio};
 use std::str::FromStr;
 
-use rustnet::{
+use crate::{
     Client, Connection, HeaderValue, Method, NetError, NetParseError,
-    NetResult, Request, SERVER_NAME, TEST_SERVER_ADDR, TUI_NAME, utils,
+    NetResult, Request, TEST_SERVER_ADDR, TUI_NAME, utils,
 };
-use rustnet::headers::names::{CONNECTION, HOST};
-use rustnet::style::colors::{
+use crate::headers::names::{CONNECTION, HOST};
+use crate::style::colors::{
     BLUE, CYAN, GREEN, MAGENTA, ORANGE, RED, YELLOW, RESET,
 };
 
@@ -131,13 +131,14 @@ impl Tui {
                 if self.do_send {
                     self.send_request_and_print_output()?;
                 } else if let Some(req) = self.client.req.as_mut() {
-                    // Update request headers for the "request" output style.
+                    // Ensure the Host header is set.
                     if !req.headers.contains(&HOST) {
                         if let Some(conn) = self.client.conn.as_mut() {
                             let stream = conn.writer.get_ref();
 
-                            if let Ok(remote) = stream.peer_addr() {
-                                req.headers.add_host(remote);
+                            if let Ok(addr) = stream.peer_addr() {
+                                let addr = addr.to_string();
+                                req.headers.insert(HOST, addr.as_str().into());
                             }
                         }
                     }
@@ -313,7 +314,7 @@ Additional requests to the same address can be entered {MAGENTA}/PATH{RESET}.
         }
 
         let args = [
-            "run", "--bin", SERVER_NAME, "--", "--test", "--", TEST_SERVER_ADDR
+            "run", "--bin", "server", "--", "--test", "--", TEST_SERVER_ADDR
         ];
 
         let server = match Command::new("cargo")
@@ -329,7 +330,7 @@ Additional requests to the same address can be entered {MAGENTA}/PATH{RESET}.
             },
         };
 
-        if utils::check_server(TEST_SERVER_ADDR) {
+        if utils::check_server_is_live(TEST_SERVER_ADDR) {
             println!(
                 "{GREEN}Server is listening at {TEST_SERVER_ADDR}{RESET}\n"
             );

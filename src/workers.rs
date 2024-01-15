@@ -28,18 +28,18 @@ impl Worker {
                     Ok(req) => match server.router.resolve(&req) {
                         Ok(res) => (req, res),
                         Err(ref err) => {
-                            server.send_500_error(err.to_string(), &mut conn);
+                            server.send_error(500, err.to_string(), &mut conn);
                             continue;
                         },
                     },
                     Err(ref err) => {
-                        server.send_500_error(err.to_string(), &mut conn);
+                        server.send_error(500, err.to_string(), &mut conn);
                         continue;
                     },
                 };
 
                 if let Err(ref err) = conn.send_response(&mut res) {
-                    server.send_500_error(err.to_string(), &mut conn);
+                    server.send_error(500, err.to_string(), &mut conn);
                     continue;
                 }
 
@@ -63,10 +63,7 @@ impl Worker {
             }
         });
 
-        Self {
-            id,
-            handle: Some(handle),
-        }
+        Self { id, handle: Some(handle) }
     }
 }
 

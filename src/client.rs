@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use crate::{
     Body, Connection, Headers, Method, NetError, NetResult, Request,
-    Response, Style, UriPath, Version,
+    Response, Style, UriPath,
 };
 use crate::headers::names::DATE;
 use crate::style::colors::{GREEN, ORANGE, RESET, BLUE};
@@ -17,12 +17,8 @@ pub struct ClientBuilder {
     pub do_send: bool,
     pub do_debug: bool,
     pub no_dates: bool,
-    pub style: Option<Style>,
-    pub method: Option<Method>,
-    pub path: Option<UriPath>,
-    pub version: Option<Version>,
-    pub headers: Option<Headers>,
-    pub body: Option<Body>,
+    pub style: Style,
+    pub req: Option<Request>,
     pub conn: Option<NetResult<Connection>>,
 }
 
@@ -32,12 +28,8 @@ impl Default for ClientBuilder {
             do_send: true,
             do_debug: false,
             no_dates: false,
-            style: None,
-            method: None,
-            path: None,
-            version: None,
-            headers: None,
-            body: None,
+            style: Style::default(),
+            req: None,
             conn: None
         }
     }
@@ -68,25 +60,19 @@ impl ClientBuilder {
         self
     }
 
-    /// Sets the HTTP method.
-    pub fn method(&mut self, method: Method) -> &mut Self {
-        self.method = Some(method);
+    /// Sets the output style.
+    pub fn style(&mut self, style: Style) -> &mut Self {
+        self.style = style;
         self
     }
 
-    /// Sets the URI path.
-    pub fn path(&mut self, path: UriPath) -> &mut Self {
-        self.path = Some(path);
+    /// Sets the HTTP `Request`.
+    pub fn req(&mut self, req: Request) -> &mut Self {
+        self.req = Some(req);
         self
     }
 
-    /// Sets the HTTP version.
-    pub fn version(&mut self, version: Version) -> &mut Self {
-        self.version = Some(version);
-        self
-    }
-
-    /// Sets the remote host's address.
+    /// Opens a TCP connection to the provided address.
     pub fn addr<A: ToSocketAddrs>(&mut self, addr: A) -> &mut Self {
         let conn_result = TcpStream::connect(addr)
             .map_err(|e| NetError::Io(e.kind()))
@@ -96,71 +82,24 @@ impl ClientBuilder {
         self
     }
 
-    /// Inserts a request header.
-    pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
-        if let Some(headers) = self.headers.as_mut() {
-            headers.header(name, value);
-        } else {
-            let mut headers = Headers::default();
-            headers.header(name, value);
-            self.headers = Some(headers);
-        }
-
-        self
-    }
-
-    /// Sets the request headers.
-    pub fn headers(&mut self, mut headers: Headers) -> &mut Self {
-        match self.headers.as_mut() {
-            Some(hdrs) => hdrs.append(&mut headers),
-            None => self.headers = Some(headers),
-        }
-
-        self
-    }
-
-    /// Sets the request body.
-    pub fn body(&mut self, body: Body) -> &mut Self {
-        if !body.is_empty() {
-            self.body = Some(body);
-        }
-
-        self
-    }
-
-    /// Sets the output style.
-    pub fn style(&mut self, style: Style) -> &mut Self {
-        self.style = Some(style);
-        self
-    }
-
     /// Builds and returns a new `Client`.
     ///
     /// # Errors
     /// 
-    /// Returns an error if establishing a TCP connection fails.
+    /// Returns an error if a TCP connection could not be established.
     pub fn build(&mut self) -> NetResult<Client> {
         let conn = match self.conn.take() {
             Some(Ok(conn)) => conn,
-            Some(Err(e)) => return Err(e),
-            None => return Err(NetError::NotConnected),
+            Some(Err(e)) => Err(e)?,
+            None => Err(NetError::NotConnected)?,
         };
-
-        // `Request::builder` sets default request headers if not present.
-        let req = Request::builder()
-            .method(self.method.take().unwrap_or_default())
-            .path(self.path.take().unwrap_or_default())
-            .version(self.version.take().unwrap_or_default())
-            .headers(self.headers.take().unwrap_or_default())
-            .body(self.body.take().unwrap_or_default())
-            .build();
 
         Ok(Client {
             do_send: self.do_send,
             do_debug: self.do_debug,
             no_dates: self.no_dates,
-            style: self.style.take().unwrap_or_default(),
-            req: Some(req),
+            style: self.style,
+            req: self.req.take(),
             res: None,
             conn: Some(conn)
         })
@@ -253,7 +192,7 @@ impl Debug for Client {
             writeln!(f, "        path: {:?},", &req.path)?;
             writeln!(f, "        version: {:?},", &req.version)?;
             writeln!(f, "        headers: Headers(")?;
-            for (name, value) in &req.headers.0 {
+            for (name, value) in req.headers.0.iter() {
                 write!(f, "            ")?;
                 writeln!(f, "{name:?}: {value:?},")?;
             }
@@ -275,7 +214,7 @@ impl Debug for Client {
             writeln!(f, "        version: {:?},", &res.version)?;
             writeln!(f, "        status: {:?},", &res.status)?;
             writeln!(f, "        headers: Headers(")?;
-            for (name, value) in &res.headers.0 {
+            for (name, value) in res.headers.0.iter() {
                 write!(f, "            ")?;
                 writeln!(f, "{name:?}: {value:?},")?;
             }
@@ -315,15 +254,13 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error `TcpStream::connect` is unable to connect to the the
-    /// given `uri`.
+    /// given URI.
     pub fn new(method: Method, uri: &str) -> NetResult<Self> {
         let (addr, path) = utils::parse_uri(uri)?;
 
-        Self::builder()
-            .method(method)
-            .addr(&addr)
-            .path(path.into())
-            .build()
+        let req = Request::builder().method(method).path(path.into()).build();
+
+        Self::builder().addr(&addr).req(req).build()
     }
 
     /// Sends an HTTP request to the given URI using the provided HTTP method,
@@ -332,15 +269,13 @@ impl Client {
     /// # Errors
     /// 
     /// Returns an error `TcpStream::connect` is unable to connect to the the
-    /// given `uri` or if sending the request fails.
+    /// given URI or if sending the request fails.
     pub fn send(method: Method, uri: &str) -> NetResult<Self> {
         let (addr, path) = utils::parse_uri(uri)?;
 
-        Self::builder()
-            .method(method)
-            .addr(&addr)
-            .path(path.into())
-            .send()
+        let req = Request::builder().method(method).path(path.into()).build();
+
+        Self::builder().addr(&addr).req(req).send()
     }
 
     /// Writes an HTTP `Request` to a `Connection`.
@@ -383,7 +318,6 @@ impl Client {
             .and_then(Connection::recv_request)?;
 
         self.req = Some(req);
-
         Ok(())
     }
 
@@ -400,11 +334,10 @@ impl Client {
             .and_then(Connection::recv_response)?;
 
         self.res = Some(res);
-
         Ok(())
     }
 
-    /// Removes Date header field entries from requests and responses.
+    /// Removes Date headers from requests and responses.
     pub fn remove_date_headers(&mut self) {
         if let Some(req) = self.req.as_mut() {
             req.headers.remove(&DATE);
@@ -416,7 +349,7 @@ impl Client {
     }
 
     /// Returns true if a component of both the request and the response is
-    /// printed.
+    /// being printed.
     #[must_use]
     pub const fn include_separator(&self) -> bool {
         self.req.is_some()
@@ -491,7 +424,7 @@ impl Client {
             self.print_req_headers(req);
             self.print_req_body(req);
 
-            is_not_head = !req.route().is_head();
+            is_not_head = !matches!(req.method, Method::Head);
         }
 
         if self.include_separator() {
@@ -604,12 +537,12 @@ impl Client {
             }
 
             if let Some((name, value)) = trimmed.split_once(':') {
-                headers.header(name, value);
+                headers.header(name, value.as_bytes());
 
                 writeln!(
                     &mut stdout,
                     "{GREEN}{} header added.{RESET}",
-                    utils::to_titlecase(name.as_bytes())
+                    utils::to_titlecase(name)
                 )?;
 
                 continue;

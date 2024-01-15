@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use crate::{HeaderValue, NetError, NetParseError, NetResult, SERVER_NAME};
+use crate::{HeaderValue, NetError, NetParseError, NetResult};
 use crate::style::colors::{RED, RESET};
 
 /// Trim whitespace from the beginning of a bytes slice.
@@ -116,35 +116,43 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
     }
 }
 
-/// Converts a slice of bytes to a titlecase `String`.
+/// Converts the given string slice to a new titlecase `String`.
 #[must_use]
-pub fn to_titlecase(bytes: &[u8]) -> String {
-    if bytes.is_empty() {
-        return String::new();
+pub fn to_titlecase(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+
+    let parts = input.trim().split('-').collect::<Vec<&str>>();
+
+    for (part_idx, part) in parts.into_iter().enumerate() {
+        if part_idx != 0 {
+            // Restore any hyphens that were removed by `split`.
+            output.push('-');
+        }
+
+        for (c_idx, c) in part.chars().enumerate() {
+            // The first letter of each part should be uppercase.
+            if c_idx == 0 {
+                if c.is_ascii_lowercase() {
+                    let upper = c.to_ascii_uppercase();
+                    output.push(upper);
+                } else {
+                    output.push(c);
+                }
+
+                continue;
+            }
+
+            // All other letters should be lowercase.
+            if c.is_ascii_uppercase() {
+                let lower = c.to_ascii_lowercase();
+                output.push(lower);
+            } else {
+                output.push(c);
+            }
+        }
     }
 
-    let mut title = String::with_capacity(bytes.len());
-
-    bytes.split(|&b| b == b'-')
-        .filter(|&part| !part.is_empty())
-        .for_each(|part| {
-            if let Some((first, rest)) = part.split_first() {
-                // Restore hyphens.
-                if !title.is_empty() {
-                    title.push('-');
-                }
-
-                // Capitalize the first letter of each path.
-                title.push(first.to_ascii_uppercase() as char);
-
-                // Append the rest of the part as-is.
-                if !rest.is_empty() {
-                    title.push_str(&String::from_utf8_lossy(rest));
-                }
-            }
-        });
-
-    title
+    output
 }
 
 /// Builds the server binary using `cargo`.
@@ -154,7 +162,7 @@ pub fn to_titlecase(bytes: &[u8]) -> String {
 /// Returns an error if `cargo build` does not return an exit status of 0.
 pub fn build_server() -> NetResult<()> {
     let mut build_handle = match Command::new("cargo")
-        .args(["build", "--bin", SERVER_NAME])
+        .args(["build", "--bin", "server"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -218,7 +226,7 @@ pub fn date_command_exists() -> Option<String> {
 /// Returns true if a TCP connection can be established with the provided
 /// server address.
 #[must_use]
-pub fn check_server(addr: &str) -> bool {
+pub fn check_server_is_live(addr: &str) -> bool {
     let Ok(socket) = SocketAddr::from_str(addr) else {
         return false;
     };
