@@ -12,11 +12,11 @@ use crate::{
 use crate::style::colors::{GREEN, RED, RESET};
 
 /// Contains the parsed client command line arguments.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientCli {
     pub do_send: bool,
     pub do_debug: bool,
-    pub do_plain: bool,
     pub no_dates: bool,
     pub addr: Option<String>,
     pub style: Style,
@@ -32,7 +32,6 @@ impl Default for ClientCli {
         Self {
             do_send: true,
             do_debug: false,
-            do_plain: false,
             no_dates: false,
             addr: None,
             style: Style::default(),
@@ -48,56 +47,6 @@ impl Default for ClientCli {
 impl Display for ClientCli {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{self:?}")
-    }
-}
-
-impl Debug for ClientCli {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(
-            f,
-            "ClientCli {{\n    \
-            do_send: {:?},\n    \
-            do_debug: {:?},\n    \
-            do_plain: {:?},\n    \
-            no_dates: {:?},",
-            self.do_send,
-            self.do_debug,
-            self.do_plain,
-            self.no_dates
-        )?;
-
-        if let Some(addr) = self.addr.as_ref() {
-            writeln!(f, "    addr: Some({addr:?}),")?;
-        } else {
-            writeln!(f, "    addr: None,")?;
-        }
-
-        writeln!(
-            f,
-            "    style: {:?},\n    \
-            method: {:?},\n    \
-            path: {:?},\n    \
-            version: {:?},",
-            self.style,
-            self.method,
-            self.path,
-            self.version
-        )?;
-
-        if self.headers.is_empty() {
-            writeln!(f, "    headers: Headers(),")?;
-        } else {
-            writeln!(f, "    headers: Headers(")?;
-
-            for (name, value) in &self.headers.0 {
-                writeln!(f, "        {name:?}: {value:?},")?;
-            }
-
-            writeln!(f, "    ),")?;
-        }
-
-        writeln!(f, "    body: {:?}", self.body)?;
-        write!(f, "}}")
     }
 }
 
@@ -118,20 +67,14 @@ impl TryFrom<ClientCli> for Client {
             body: cli.body.clone()
         };
 
-        let mut client = Self::builder()
+        Self::builder()
             .do_send(cli.do_send)
             .do_debug(cli.do_debug)
             .no_dates(cli.no_dates)
             .style(cli.style)
             .req(req)
             .addr(addr)
-            .build()?;
-
-        if cli.do_plain {
-            client.style.to_plain();
-        }
-
-        Ok(client)
+            .build()
     }
 }
 
@@ -221,10 +164,6 @@ impl ClientCli {
             }
         }
 
-        if cli.do_plain {
-            cli.style.to_plain();
-        }
-
         Client::try_from(cli)
     }
 
@@ -239,7 +178,7 @@ impl ClientCli {
             // Print the help message.
             "-h" | "--help" => self.print_help(),
             // Do not colorize output.
-            "-p" | "--plain" => self.do_plain = true,
+            "-p" | "--plain" => self.style.to_plain(),
             // Enable debug printing.
             "-d" | "--debug" => self.do_debug = true,
             // Remove Date headers before printing.
@@ -299,7 +238,7 @@ impl ClientCli {
 
     pub fn handle_uri(&mut self, arg: &str) {
         match utils::parse_uri(arg).ok() {
-            Some((addr, path)) if self.path.is_default() => {
+            Some((addr, path)) if self.path.as_str() == "/" => {
                 self.path = path.into();
                 self.addr = Some(addr.trim().to_ascii_lowercase());
             },
@@ -373,7 +312,8 @@ impl ClientCli {
 }
 
 /// Contains the parsed server command line arguments.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerCli {
     pub do_log: bool,
     pub do_debug: bool,
@@ -399,47 +339,6 @@ impl Default for ServerCli {
 impl Display for ServerCli {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{self:?}")
-    }
-}
-
-impl Debug for ServerCli {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(
-            f,
-            "ServerCli {{\n    \
-            do_log: {:?},\n    \
-            do_debug: {:?},\n    \
-            is_test: {:?},",
-            self.do_log,
-            self.do_debug,
-            self.is_test
-        )?;
-
-        if let Some(addr) = self.addr.as_ref() {
-            writeln!(f, "    addr: Some({addr:?}),")?;
-        } else {
-            writeln!(f, "    addr: None,")?;
-        }
-
-        if let Some(log_file) = self.log_file.as_ref() {
-            writeln!(f, "    log_file: Some({:?}),", log_file.display())?;
-        } else {
-            writeln!(f, "    log_file: None,")?;
-        }
-
-        if self.router.is_empty() {
-            writeln!(f, "    router: Router()")?;
-        } else {
-            writeln!(f, "    router: Router(")?;
-
-            for route in &self.router.0 {
-                writeln!(f, "        {route:?},")?;
-            }
-
-            writeln!(f, "    )")?;
-        }
-
-        write!(f, "}}")
     }
 }
 
@@ -538,19 +437,19 @@ impl ServerCli {
     IP:PORT              The server's IP address and port.\n
 {GREEN}OPTIONS:{RESET}
     -d, --debug          Prints debug information.
+    -f, --log-file FILE  Enables logging of connections to FILE.
     -h, --help           Prints this help message.
     -l, --log            Enables logging of connections to stdout.
-    -f, --log-file FILE  Enables logging of connections to FILE.
     -t, --test           Creates a test server at {TEST_SERVER_ADDR}.\n
 {GREEN}ROUTES:{RESET}
-    -I, --favicon FILE_PATH
-        Adds a route that serves a favicon.
-    -0, --not-found FILE_PATH
-        Adds a route that handles 404 Not Found responses.
     -T, --text METHOD:URI_PATH:TEXT
-        Adds a route that serves text.
+        Adds a route that serves the text message TEXT.
     -F, --file METHOD:URI_PATH:FILE_PATH
-        Adds a route that serves a file.\n");
+        Adds a route that serves the file at FILE_PATH.
+    -I, --favicon FILE_PATH
+        Adds a route that serves the favicon at FILE_PATH.
+    -0, --not-found FILE_PATH
+        Sends the file at FILE_PATH with 404 not found responses.\n");
 
         process::exit(0);
     }

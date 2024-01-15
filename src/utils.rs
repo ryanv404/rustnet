@@ -7,11 +7,12 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use crate::{HeaderValue, NetError, NetParseError, NetResult};
+use crate::{HeaderValue, NetError, NetResult};
 use crate::style::colors::{RED, RESET};
 
 /// Trim whitespace from the beginning of a bytes slice.
-pub fn trim_start(mut bytes: &[u8]) -> &[u8] {
+#[must_use]
+pub const fn trim_start(mut bytes: &[u8]) -> &[u8] {
     while let [first, rest @ ..] = bytes {
         if first.is_ascii_whitespace() {
             bytes = rest;
@@ -24,7 +25,8 @@ pub fn trim_start(mut bytes: &[u8]) -> &[u8] {
 }
 
 /// Trim whitespace from the end of a bytes slice.
-pub fn trim_end(mut bytes: &[u8]) -> &[u8] {
+#[must_use]
+pub const fn trim_end(mut bytes: &[u8]) -> &[u8] {
     while let [rest @ .., last] = bytes {
         if last.is_ascii_whitespace() {
             bytes = rest;
@@ -37,7 +39,8 @@ pub fn trim_end(mut bytes: &[u8]) -> &[u8] {
 }
 
 /// Trim whitespace from the beginning and the end of a bytes slice.
-pub fn trim(bytes: &[u8]) -> &[u8] {
+#[must_use]
+pub const fn trim(bytes: &[u8]) -> &[u8] {
     trim_end(trim_start(bytes))
 }
 
@@ -51,7 +54,7 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
     match uri.trim().split_once("://") {
         Some((scheme, rest)) => {
             if scheme.is_empty() || rest.is_empty() {
-                return Err(NetParseError::Path)?;
+                return Err(NetError::BadUri);
             }
 
             match scheme {
@@ -78,15 +81,13 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
                     // http://httpbin.org
                     None => Ok((format!("{rest}:80"), String::from("/"))),
                 },
-                "https" => Err(NetError::Https),
-                _ => Err(NetParseError::Path)?,
+                "https" => Err(NetError::HttpsNotImplemented),
+                _ => Err(NetError::BadScheme),
             }
         },
         // No scheme present.
         None => match uri.split_once('/') {
-            Some((addr, _)) if addr.is_empty() => {
-                Err(NetParseError::Path)?
-            },
+            Some((addr, _)) if addr.is_empty() => Err(NetError::BadAddress),
             Some((addr, path)) if addr.contains(':') && path.is_empty() => {
                 // httpbin.org:80/
                 Ok((addr.to_string(), String::from("/")))
@@ -111,7 +112,7 @@ pub fn parse_uri(uri: &str) -> NetResult<(String, String)> {
                 // httpbin.org
                 Ok((format!("{uri}:80"), String::from("/")))
             },
-            _ => Err(NetParseError::Path)?,
+            _ => Err(NetError::BadUri),
         },
     }
 }
@@ -194,7 +195,7 @@ pub fn get_datetime() -> Option<HeaderValue> {
         return None;
     };
 
-    Command::new(&date_path)
+    Command::new(date_path)
         .env("TZ", "GMT")
         .arg("+%a, %d %b %Y %T %Z")
         .output()

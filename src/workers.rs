@@ -17,6 +17,7 @@ impl Worker {
     /// # Panics
     ///
     /// Panics if there is a problem receiving a `Connection`.
+    #[allow(clippy::similar_names)]
     pub fn new(
         id: usize,
         server: Arc<Server>,

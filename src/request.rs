@@ -3,12 +3,13 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::iter;
 use std::str::{self, FromStr};
 
-use crate::{Body, Headers, Method, NetParseError, Version};
+use crate::{Body, Headers, Method, NetError, NetResult, Version};
 use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{ORANGE, RESET};
 use crate::utils;
 
 /// An HTTP request builder object.
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestBuilder {
     pub method: Method,
@@ -77,7 +78,7 @@ impl RequestBuilder {
 }
 
 /// The path component of an HTTP URI.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UriPath(pub Cow<'static, str>);
 
 impl Default for UriPath {
@@ -89,6 +90,12 @@ impl Default for UriPath {
 impl Display for UriPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl Debug for UriPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "UriPath({:?})", self.as_str())
     }
 }
 
@@ -105,10 +112,12 @@ impl From<String> for UriPath {
 }
 
 impl TryFrom<&'static [u8]> for UriPath {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(bytes: &'static [u8]) -> Result<Self, Self::Error> {
-        str::from_utf8(bytes).map_err(|_| NetParseError::Path).map(Into::into)
+    fn try_from(bytes: &'static [u8]) -> NetResult<Self> {
+        str::from_utf8(bytes)
+            .map_err(|_| NetError::BadPath)
+            .map(Into::into)
     }
 }
 
@@ -124,16 +133,10 @@ impl UriPath {
     pub fn as_bytes(&self) -> &[u8] {
         self.as_str().as_bytes()
     }
-
-    /// Returns true if this `UriPath` is the default path ("/").
-    #[must_use]
-    pub fn is_default(&self) -> bool {
-        self.as_str() == "/"
-    }
 }
 
 /// Contains the components of an HTTP request.
-#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Request {
     pub method: Method,
     pub path: UriPath,
@@ -156,50 +159,23 @@ impl Display for Request {
     }
 }
 
-impl Debug for Request {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "Request {{")?;
-        writeln!(f, "    method: {:?},", &self.method)?;
-        writeln!(f, "    path: {:?},", &self.path)?;
-        writeln!(f, "    version: {:?}", &self.version)?;
-
-        writeln!(f, "    headers: Headers(")?;
-        for (name, value) in &self.headers.0 {
-            write!(f, "        ")?;
-            writeln!(f, "{name:?}: {value:?},")?;
-        }
-        writeln!(f, "    ),")?;
-
-        if self.body.is_empty() {
-            writeln!(f, "    body: Body::Empty")?;
-        } else if self.body.is_printable() {
-            writeln!(f, "    body: {:?}", &self.body)?;
-        } else {
-            writeln!(f, "    body: Body {{ ... }}")?;
-        }
-
-        write!(f, "}}")?;
-        Ok(())
-    }
-}
-
 impl FromStr for Request {
-    type Err = NetParseError;
+    type Err = NetError;
 
-    fn from_str(req: &str) -> Result<Self, Self::Err> {
+    fn from_str(req: &str) -> NetResult<Self> {
         Self::try_from(req.as_bytes())
     }
 }
 
 impl TryFrom<&[u8]> for Request {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(req: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(req: &[u8]) -> NetResult<Self> {
         let mut lines = utils::trim_start(req).split(|&b| b == b'\n');
 
         let (method, path, version) = lines
             .next()
-            .ok_or(NetParseError::RequestLine)
+            .ok_or(NetError::BadRequest)
             .and_then(Self::parse_request_line)?;
 
         let headers_bytes = lines
@@ -254,29 +230,29 @@ impl Request {
     /// Retuns an error if parsing of the request line fails.
     pub fn parse_request_line(
         line: &[u8]
-    ) -> Result<(Method, UriPath, Version), NetParseError> {
+    ) -> NetResult<(Method, UriPath, Version)> {
         let mut parts = utils::trim_start(line).split(|&b| b == b' ');
 
         let method = parts
             .next()
             .map(utils::trim_end)
-            .ok_or(NetParseError::RequestLine)
+            .ok_or(NetError::BadMethod)
             .and_then(Method::try_from)?;
 
         let path = parts
             .next()
             .map(utils::trim)
-            .ok_or(NetParseError::RequestLine)
+            .ok_or(NetError::BadPath)
             .and_then(|path| {
                 String::from_utf8(path.to_vec())
-                    .map_err(|_| NetParseError::Path)
-                    .and_then(|s| Ok(UriPath::from(s)))
+                    .map_err(|_| NetError::BadPath)
+                    .map(UriPath::from)
             })?;
 
         let version = parts
             .next()
             .map(utils::trim)
-            .ok_or(NetParseError::RequestLine)
+            .ok_or(NetError::BadVersion)
             .and_then(Version::try_from)?;
 
         Ok((method, path, version))

@@ -14,7 +14,7 @@ pub mod colors {
 
 /// Controls which components are printed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum StyleParts {
+pub enum Parts {
     None,
     Line,
     Hdrs,
@@ -25,7 +25,7 @@ pub enum StyleParts {
     All,
 }
 
-impl StyleParts {
+impl Parts {
     /// Returns true if this variant does not print anything.
     #[must_use]
     pub const fn is_none(&self) -> bool {
@@ -75,135 +75,135 @@ impl StyleParts {
     }
 }
 
-/// Controls whether the `StyleParts` are colorized.
+/// Controls whether the `Parts` are colorized.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum StyleKind {
-    Plain(StyleParts),
-    Color(StyleParts),
+pub enum Kind {
+    Plain(Parts),
+    Color(Parts),
 }
 
-impl StyleKind {
-    /// Returns true if this `StyleKind` is the `None` variant.
+impl Kind {
+    /// Returns true if this `Kind` is the `None` variant.
     #[must_use]
     pub const fn is_none(&self) -> bool {
         self.into_parts().is_none()
     }
 
-    /// Returns true if this `StyleKind` is a `Plain` variant.
+    /// Returns true if this `Kind` is a `Plain` variant.
     #[must_use]
     pub const fn is_plain(&self) -> bool {
         matches!(*self, Self::Plain(_))
     }
     
-    /// Returns true if this `StyleKind` is a `Color` variant.
+    /// Returns true if this `Kind` is a `Color` variant.
     #[must_use]
     pub const fn is_color(&self) -> bool {
         matches!(*self, Self::Color(_))
     }
 
-    /// Returns true if this `StyleKind` is printed.
+    /// Returns true if this `Kind` is printed.
     #[must_use]
     pub const fn is_printed(&self) -> bool {
         !self.is_none()
     }
 
-    /// Returns true if this `StyleKind` prints the request line or
+    /// Returns true if this `Kind` prints the request line or
     /// status line.
     #[must_use]
     pub const fn is_first_line(&self) -> bool {
         self.into_parts().is_first_line()
     }
 
-    /// Returns true if this `StyleKind` prints a plain request line or
+    /// Returns true if this `Kind` prints a plain request line or
     /// status line.
     #[must_use]
     pub const fn is_plain_first_line(&self) -> bool {
         self.is_plain() && self.is_first_line()
     }
 
-    /// Returns true if this `StyleKind` prints a color request line or
+    /// Returns true if this `Kind` prints a color request line or
     /// status line.
     #[must_use]
     pub const fn is_color_first_line(&self) -> bool {
         self.is_color() && self.is_first_line()
     }
 
-    /// Returns true if this `StyleKind` prints the `Headers`.
+    /// Returns true if this `Kind` prints the `Headers`.
     #[must_use]
     pub const fn is_headers(&self) -> bool {
         self.into_parts().is_headers()
     }
 
-    /// Returns true if this `StyleKind` prints plain `Headers`.
+    /// Returns true if this `Kind` prints plain `Headers`.
     #[must_use]
     pub const fn is_plain_headers(&self) -> bool {
         self.is_plain() && self.is_headers()
     }
 
-    /// Returns true if this `StyleKind` prints color `Headers`.
+    /// Returns true if this `Kind` prints color `Headers`.
     #[must_use]
     pub const fn is_color_headers(&self) -> bool {
         self.is_color() && self.is_headers()
     }
 
-    /// Returns true if this `StyleKind` prints the `Body`.
+    /// Returns true if this `Kind` prints the `Body`.
     #[must_use]
     pub const fn is_body(&self) -> bool {
         self.into_parts().is_body()
     }
 
-    /// Returns true if this `StyleKind` prints plain `Body`.
+    /// Returns true if this `Kind` prints plain `Body`.
     #[must_use]
     pub const fn is_plain_body(&self) -> bool {
         self.is_plain() && self.is_body()
     }
 
-    /// Returns true if this `StyleKind` prints color `Body`.
+    /// Returns true if this `Kind` prints color `Body`.
     #[must_use]
     pub const fn is_color_body(&self) -> bool {
         self.is_color() && self.is_body()
     }
 
-    /// Returns the `StyleParts` contained within this `StyleKind`.
+    /// Returns the `Parts` contained within this `Kind`.
     #[must_use]
-    pub const fn into_parts(&self) -> StyleParts {
+    pub const fn into_parts(&self) -> Parts {
         match *self {
             Self::Plain(parts) | Self::Color(parts) => parts,
         }
     }
 
-    /// Swaps the current `StyleParts` variant for the `new_parts` variant.
-    pub fn swap_parts(&mut self, new_parts: StyleParts) {
+    /// Swaps the current `Parts` variant for the `new_parts` variant.
+    pub fn swap_parts(&mut self, new_parts: Parts) {
         *self = match self {
             Self::Plain(_) => Self::Plain(new_parts),
             Self::Color(_) => Self::Color(new_parts),
         }
     }
 
-    /// Changes the `StyleKind` variant to `None`.
+    /// Changes the `Kind` variant to `None`.
     pub fn to_none(&mut self) {
         *self = match self {
-            Self::Plain(_) => Self::Plain(StyleParts::None),
-            Self::Color(_) => Self::Color(StyleParts::None),
+            Self::Plain(_) => Self::Plain(Parts::None),
+            Self::Color(_) => Self::Color(Parts::None),
         }
     }
 
-    /// Changes the `StyleKind` variant to `All`.
+    /// Changes the `Kind` variant to `All`.
     pub fn to_all(&mut self) {
         *self = match self {
-            Self::Plain(_) => Self::Plain(StyleParts::All),
-            Self::Color(_) => Self::Color(StyleParts::All),
+            Self::Plain(_) => Self::Plain(Parts::All),
+            Self::Color(_) => Self::Color(Parts::All),
         }
     }
 
-    /// Changes the `StyleKind` variant to `Plain`.
+    /// Changes the `Kind` variant to `Plain`.
     pub fn to_plain(&mut self) {
         if let Self::Color(parts) = self {
             *self = Self::Plain(*parts);
         }
     }
 
-    /// Changes the `StyleKind` variant to `Color`.
+    /// Changes the `Kind` variant to `Color`.
     pub fn to_color(&mut self) {
         if let Self::Plain(parts) = self {
             *self = Self::Color(*parts);
@@ -214,15 +214,15 @@ impl StyleKind {
 /// The output style settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Style {
-    pub req: StyleKind,
-    pub res: StyleKind,
+    pub req: Kind,
+    pub res: Kind,
 }
 
 impl Default for Style {
     fn default() -> Self {
         Self {
-            req: StyleKind::Color(StyleParts::None),
-            res: StyleKind::Color(StyleParts::All)
+            req: Kind::Color(Parts::None),
+            res: Kind::Color(Parts::All)
         }
     }
 }
@@ -241,6 +241,7 @@ impl Style {
     ///   h: Response headers
     ///   b: Response body
     ///   *: "Verbose" style
+    #[allow(clippy::similar_names)]
     pub fn from_format_str(&mut self, format_str: &str) {
         const fn is_good_char(c: char) -> bool {
             matches!(c, 'R' | 'H' | 'B' | 's' | 'h' | 'b' | '*')
@@ -253,8 +254,8 @@ impl Style {
             match c {
                 // "Verbose" style.
                 '*' => {
-                    self.req.swap_parts(StyleParts::All);
-                    self.res.swap_parts(StyleParts::All);
+                    self.req.swap_parts(Parts::All);
+                    self.res.swap_parts(Parts::All);
                     return;
                 },
                 // Uppercase letters.
@@ -265,26 +266,26 @@ impl Style {
         }
 
         match req_num {
-            0 => self.req.swap_parts(StyleParts::None),
-            66 => self.req.swap_parts(StyleParts::Body),
-            72 => self.req.swap_parts(StyleParts::Hdrs),
-            82 => self.req.swap_parts(StyleParts::Line),
-            138 => self.req.swap_parts(StyleParts::HdrsBody),
-            148 => self.req.swap_parts(StyleParts::LineBody),
-            154 => self.req.swap_parts(StyleParts::LineHdrs),
-            220 => self.req.swap_parts(StyleParts::All),
+            0 => self.req.swap_parts(Parts::None),
+            66 => self.req.swap_parts(Parts::Body),
+            72 => self.req.swap_parts(Parts::Hdrs),
+            82 => self.req.swap_parts(Parts::Line),
+            138 => self.req.swap_parts(Parts::HdrsBody),
+            148 => self.req.swap_parts(Parts::LineBody),
+            154 => self.req.swap_parts(Parts::LineHdrs),
+            220 => self.req.swap_parts(Parts::All),
             _ => unreachable!(),
         }
 
         match res_num {
-            0 => self.res.swap_parts(StyleParts::None),
-            98 => self.res.swap_parts(StyleParts::Body),
-            104 => self.res.swap_parts(StyleParts::Hdrs),
-            115 => self.res.swap_parts(StyleParts::Line),
-            202 => self.res.swap_parts(StyleParts::HdrsBody),
-            213 => self.res.swap_parts(StyleParts::LineBody),
-            219 => self.res.swap_parts(StyleParts::LineHdrs),
-            317 => self.res.swap_parts(StyleParts::All),
+            0 => self.res.swap_parts(Parts::None),
+            98 => self.res.swap_parts(Parts::Body),
+            104 => self.res.swap_parts(Parts::Hdrs),
+            115 => self.res.swap_parts(Parts::Line),
+            202 => self.res.swap_parts(Parts::HdrsBody),
+            213 => self.res.swap_parts(Parts::LineBody),
+            219 => self.res.swap_parts(Parts::LineHdrs),
+            317 => self.res.swap_parts(Parts::All),
             _ => unreachable!(),
         }
     }
@@ -307,25 +308,25 @@ impl Style {
             && self.res.into_parts().is_all()
     }
 
-    /// Changes the `StyleKind` variant to `None`.
+    /// Changes the `Kind` variant to `None`.
     pub fn to_none(&mut self) {
         self.req.to_none();
         self.res.to_none();
     }
 
-    /// Changes the `StyleKind` variant to `All`.
+    /// Changes the `Kind` variant to `All`.
     pub fn to_all(&mut self) {
         self.req.to_all();
         self.res.to_all();
     }
 
-    /// Changes the `StyleKind` variant to `Plain`.
+    /// Changes the `Kind` variant to `Plain`.
     pub fn to_plain(&mut self) {
         self.req.to_plain();
         self.res.to_plain();
     }
 
-    /// Changes the `StyleKind` variant to `Color`.
+    /// Changes the `Kind` variant to `Color`.
     pub fn to_color(&mut self) {
         self.req.to_color();
         self.res.to_color();

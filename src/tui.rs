@@ -3,8 +3,8 @@ use std::process::{self, Child, Command, Stdio};
 use std::str::FromStr;
 
 use crate::{
-    Client, Connection, HeaderValue, Method, NetError, NetParseError,
-    NetResult, Request, TEST_SERVER_ADDR, TUI_NAME, utils,
+    Client, Connection, HeaderValue, Method, NetError, NetResult, Request,
+    TEST_SERVER_ADDR, TUI_NAME, utils,
 };
 use crate::headers::names::{CONNECTION, HOST};
 use crate::style::colors::{
@@ -55,9 +55,14 @@ impl Tui {
     }
 
     /// Runs the main IO loop.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to stdout fails.
     pub fn run_main_loop() -> NetResult<()> {
         let mut tui = Self::new();
 
+        // Set a sensible capacity for the reusable string buffer.
         let mut line = String::with_capacity(1024);
 
         Self::print_intro()?;
@@ -82,6 +87,10 @@ impl Tui {
 
     /// Parses user input into a command or URI and handles execution of the
     /// next steps.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to stdout fails.
     pub fn handle_user_input(&mut self, input: &str) -> NetResult<()> {
         match input {
             "" => {},
@@ -152,6 +161,11 @@ impl Tui {
     }
 
     /// Parses an input string into a request and adds it to the client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to stdout fails or if a TCP connection
+    /// cannot be established.
     pub fn parse_input(&mut self, input: &str) -> NetResult<()> {
         let mut builder = Request::builder();
 
@@ -176,7 +190,7 @@ impl Tui {
             None if uri.starts_with('/') && self.last_addr.is_some() => {
                 let Some(addr) = self.last_addr.as_ref() else {
                     Self::warn_invalid_input(uri);
-                    return Err(NetParseError::Path.into());
+                    return Err(NetError::BadPath);
                 };
 
                 let req = builder.path(uri.to_string().into()).build();
@@ -186,7 +200,7 @@ impl Tui {
             },
             None => {
                 Self::warn_invalid_input(uri);
-                Err(NetParseError::Path)?
+                Err(NetError::BadPath)?
             },
         }
     }
@@ -212,6 +226,10 @@ impl Tui {
     }
 
     /// Clears the screen and moves the cursor to the top left.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to stdout fails.
     pub fn clear_screen() -> NetResult<()> {
         let mut stdout = io::stdout().lock();
 
@@ -226,9 +244,12 @@ impl Tui {
     }
 
     /// Prints the intro message on program start-up.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to stdout fails.
     pub fn print_intro() -> NetResult<()> {
         let version = env!("CARGO_PKG_VERSION");
-
         let face = format!(r#"
               .-''''''-.
             .' _      _ '.
@@ -250,6 +271,10 @@ impl Tui {
     }
 
     /// Prints the prompt.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to stdout fails.
     pub fn print_prompt(&mut self) -> NetResult<()> {
         let mut stdout = io::stdout().lock();
 
@@ -307,6 +332,11 @@ Additional requests to the same address can be entered {MAGENTA}/PATH{RESET}.
     }
 
     /// Starts a test server at 127.0.0.1:7878.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the test server cannot be built or if the server
+    /// fails to start.
     pub fn start_server() -> NetResult<Child> {
         if let Err(e) = utils::build_server() {
             eprintln!("{RED}Unable to build the server.\n{e}{RESET}\n");
@@ -342,6 +372,11 @@ Additional requests to the same address can be entered {MAGENTA}/PATH{RESET}.
     }
 
     /// Shuts the test server down.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a shutdown request cannot be sent to the test
+    /// server.
     pub fn kill_server(&mut self, quiet: bool) -> NetResult<()> {
         let Some(mut server) = self.server.take() else {
             if !quiet {
@@ -384,6 +419,11 @@ Additional requests to the same address can be entered {MAGENTA}/PATH{RESET}.
 
     /// Sends a request, receives a response, and handles printing the output
     // to stdout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a failure occurs while sending the request or
+    /// while receiving the response.
     pub fn send_request_and_print_output(&mut self) -> NetResult<()> {
         if let Err(e) = self.client.send_request() {
             let msg = format!(

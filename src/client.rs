@@ -12,6 +12,7 @@ use crate::style::colors::{GREEN, ORANGE, RESET, BLUE};
 use crate::utils;
 
 /// An HTTP client builder object.
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct ClientBuilder {
     pub do_send: bool,
@@ -75,7 +76,7 @@ impl ClientBuilder {
     /// Opens a TCP connection to the provided address.
     pub fn addr<A: ToSocketAddrs>(&mut self, addr: A) -> &mut Self {
         let conn_result = TcpStream::connect(addr)
-            .map_err(|e| NetError::Io(e.kind()))
+            .map_err(|e| NetError::IoError(e.kind()))
             .and_then(Connection::try_from);
 
         self.conn = Some(conn_result);
@@ -119,6 +120,7 @@ impl ClientBuilder {
 }
 
 /// An HTTP client.
+#[derive(Debug)]
 pub struct Client {
     pub do_send: bool,
     pub do_debug: bool,
@@ -171,73 +173,6 @@ impl Display for Client {
             writeln!(f, "{res}")?;
         }
 
-        Ok(())
-    }
-}
-
-impl Debug for Client {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "Client {{")?;
-        writeln!(f, "    do_send: {:?},", self.do_send)?;
-        writeln!(f, "    do_debug: {:?},", self.do_debug)?;
-        writeln!(f, "    no_dates: {:?},", self.no_dates)?;
-        writeln!(f, "    style: Style {{")?;
-        writeln!(f, "        req: {:?},", &self.style.req)?;
-        writeln!(f, "        res: {:?},", &self.style.res)?;
-        writeln!(f, "    }},")?;
-
-        if let Some(req) = self.req.as_ref() {
-            writeln!(f, "    req: Some(Request {{")?;
-            writeln!(f, "        method: {:?},", &req.method)?;
-            writeln!(f, "        path: {:?},", &req.path)?;
-            writeln!(f, "        version: {:?},", &req.version)?;
-            writeln!(f, "        headers: Headers(")?;
-            for (name, value) in req.headers.0.iter() {
-                write!(f, "            ")?;
-                writeln!(f, "{name:?}: {value:?},")?;
-            }
-            writeln!(f, "        ),")?;
-            if req.body.is_empty() {
-                writeln!(f, "        body: Body::Empty")?;
-            } else if req.body.is_printable() {
-                writeln!(f, "        body: {:?}", &req.body)?;
-            } else {
-                writeln!(f, "        body: Body {{ ... }}")?;
-            }
-            writeln!(f, "    }}),")?;
-        } else {
-            writeln!(f, "    req: None,")?;
-        }
-
-        if let Some(res) = self.res.as_ref() {
-            writeln!(f, "    req: Some(Response {{")?;
-            writeln!(f, "        version: {:?},", &res.version)?;
-            writeln!(f, "        status: {:?},", &res.status)?;
-            writeln!(f, "        headers: Headers(")?;
-            for (name, value) in res.headers.0.iter() {
-                write!(f, "            ")?;
-                writeln!(f, "{name:?}: {value:?},")?;
-            }
-            writeln!(f, "        ),")?;
-            if res.body.is_empty() {
-                writeln!(f, "        body: Body::Empty")?;
-            } else if res.body.is_printable() {
-                writeln!(f, "        body: {:?}", &res.body)?;
-            } else {
-                writeln!(f, "        body: Body {{ ... }}")?;
-            }
-            writeln!(f, "    }}),")?;
-        } else {
-            writeln!(f, "    res: None,")?;
-        }
-
-        if self.conn.is_some() {
-            writeln!(f, "    conn: Some(Connection {{ ... }})")?;
-        } else {
-            writeln!(f, "    conn: None")?;
-        }
-
-        write!(f, "}}")?;
         Ok(())
     }
 }
@@ -601,8 +536,8 @@ impl Client {
             .body(body)
             .build());
 
-        self.conn = Some(TcpStream::connect(&addr)
-            .map_err(|e| NetError::Io(e.kind()))
+        self.conn = Some(TcpStream::connect(addr)
+            .map_err(|e| NetError::IoError(e.kind()))
             .and_then(Connection::try_from)?);
 
         Ok(())

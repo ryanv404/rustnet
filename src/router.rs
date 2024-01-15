@@ -52,7 +52,7 @@ impl Eq for Route {}
 
 impl PartialOrd for Route {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(&other))
+        Some(self.cmp(other))
     }
 }
 
@@ -79,20 +79,20 @@ impl Route {
     /// Returns a new `Route` based on the provided `Method`, `UriPath`, and
     /// `Target`.
     #[must_use]
-    pub fn new(method: Method, uri_path: UriPath, target: Target) -> Self {
+    pub const fn new(method: Method, uri_path: UriPath, target: Target) -> Self {
         let path = Some(uri_path);
         Self { method, path, target }
     }
 
     /// Returns this route's HTTP method.
     #[must_use]
-    pub fn method(&self) -> Method {
+    pub const fn method(&self) -> Method {
         self.method
     }
 
     /// Returns this route's URI path.
     #[must_use]
-    pub fn path(&self) -> Option<&UriPath> {
+    pub const fn path(&self) -> Option<&UriPath> {
         self.path.as_ref()
     }
 
@@ -164,14 +164,8 @@ impl Route {
 }
 
 /// The server router.
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Router(pub BTreeSet<Route>);
-
-impl Default for Router {
-    fn default() -> Self {
-        Self(BTreeSet::<Route>::new())
-    }
-}
 
 impl Display for Router {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -273,6 +267,7 @@ impl Router {
     ///
     /// Returns an error if `ResponseBuilder::build` is unable to construct a
     /// `Response`.
+    #[allow(clippy::similar_names)]
     pub fn resolve(&self, req: &Request) -> NetResult<Response> {
         let mut res = match self.get_target(req) {
             // Route not found.
@@ -492,8 +487,7 @@ pub struct RouteBuilder {
 impl RouteBuilder {
     /// Returns a new `RouteBuilder` instance.
     #[must_use]
-    pub fn new(router: Router, uri_path: &'static str) -> Self {
-        let uri_path = uri_path.into();
+    pub const fn new(router: Router, uri_path: &'static str) -> Self {
         Self { router, uri_path }
     }
 

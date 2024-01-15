@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::num::NonZeroU16;
 use std::str::{self, FromStr};
 
-use crate::NetParseError;
+use crate::{NetError, NetResult};
 
 /// The HTTP method.
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -51,9 +51,9 @@ impl Debug for Method {
 }
 
 impl FromStr for Method {
-    type Err = NetParseError;
+    type Err = NetError;
 
-    fn from_str(method: &str) -> Result<Self, Self::Err> {
+    fn from_str(method: &str) -> NetResult<Self> {
         match method {
             // HTTP methods are case-sensitive.
             "ANY" => Ok(Self::Any),
@@ -67,17 +67,17 @@ impl FromStr for Method {
             "OPTIONS" => Ok(Self::Options),
             "CONNECT" => Ok(Self::Connect),
             "SHUTDOWN" => Ok(Self::Shutdown),
-            _ => Err(NetParseError::Method),
+            _ => Err(NetError::BadMethod),
         }
     }
 }
 
 impl TryFrom<&[u8]> for Method {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(method: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(method: &[u8]) -> NetResult<Self> {
         str::from_utf8(method)
-            .map_err(|_| NetParseError::Method)
+            .map_err(|_| NetError::BadMethod)
             .and_then(Self::from_str)
     }
 }
@@ -103,7 +103,7 @@ impl Method {
 
     /// Returns the `Method` as a bytes slice.
     #[must_use]
-    pub fn as_bytes(&self) -> &'static [u8] {
+    pub const fn as_bytes(&self) -> &'static [u8] {
         self.as_str().as_bytes()
     }
 
@@ -127,7 +127,7 @@ impl Method {
 }
 
 /// The HTTP response status.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Status(pub NonZeroU16);
 
 impl Default for Status {
@@ -144,35 +144,41 @@ impl Display for Status {
     }
 }
 
-impl FromStr for Status {
-    type Err = NetParseError;
+impl Debug for Status {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "Status({})", self.code())
+    }
+}
 
-    fn from_str(status_code: &str) -> Result<Self, Self::Err> {
-        u16::from_str(status_code)
-            .map_err(|_| NetParseError::Status)
+impl FromStr for Status {
+    type Err = NetError;
+
+    fn from_str(code: &str) -> NetResult<Self> {
+        u16::from_str(code)
+            .map_err(|_| NetError::BadStatusCode)
             .and_then(Self::try_from)
     }
 }
 
 impl TryFrom<&[u8]> for Status {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(status_code: &[u8]) -> Result<Self, Self::Error> {
-        str::from_utf8(status_code)
-            .map_err(|_| NetParseError::Status)
+    fn try_from(code: &[u8]) -> NetResult<Self> {
+        str::from_utf8(code)
+            .map_err(|_| NetError::BadStatusCode)
             .and_then(Self::from_str)
     }
 }
 
 impl TryFrom<u16> for Status {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> NetResult<Self> {
         if !matches!(code, 100..=999) {
-            return Err(NetParseError::Status);
+            return Err(NetError::BadStatusCode);
         }
 
-        NonZeroU16::new(code).map(Self).ok_or(NetParseError::Status)
+        NonZeroU16::new(code).map(Self).ok_or(NetError::BadStatusCode)
     }
 }
 
@@ -444,7 +450,7 @@ impl_status_methods! {
 }
 
 /// The HTTP protocol version.
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Version {
     /// HTTP version 0.9
     ZeroDotNine,
@@ -470,28 +476,41 @@ impl Display for Version {
     }
 }
 
-impl FromStr for Version {
-    type Err = NetParseError;
+impl Debug for Version {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::ZeroDotNine => f.write_str("Version::ZeroDotNine"),
+            Self::OneDotZero => f.write_str("Version::OneDotZero"),
+            Self::OneDotOne => f.write_str("Version::OneDotOne"),
+            Self::TwoDotZero => f.write_str("Version::TwoDotZero"),
+            Self::ThreeDotZero => f.write_str("Version::ThreeDotZero"),
+        }
+    }
+}
 
-    fn from_str(version: &str) -> Result<Self, Self::Err> {
+impl FromStr for Version {
+    type Err = NetError;
+
+    fn from_str(version: &str) -> NetResult<Self> {
         match version {
             "HTTP/0.9" => Ok(Self::ZeroDotNine),
             "HTTP/1.0" => Ok(Self::OneDotZero),
             "HTTP/1.1" => Ok(Self::OneDotOne),
-            // A trailing ".0" is implied if the decimal is missing.
+            // A trailing ".0" is implied if the minor version number is
+            // missing.
             "HTTP/2" | "HTTP/2.0" => Ok(Self::TwoDotZero),
             "HTTP/3" | "HTTP/3.0" => Ok(Self::ThreeDotZero),
-            _ => Err(NetParseError::Version),
+            _ => Err(NetError::BadVersion),
         }
     }
 }
 
 impl TryFrom<&[u8]> for Version {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(version: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(version: &[u8]) -> NetResult<Self> {
         str::from_utf8(version)
-            .map_err(|_| NetParseError::Version)
+            .map_err(|_| NetError::BadVersion)
             .and_then(Self::from_str)
     }
 }
@@ -511,7 +530,7 @@ impl Version {
 
     /// Returns the the protocol `Version` as a bytes slice.
     #[must_use]
-    pub fn as_bytes(&self) -> &'static [u8] {
+    pub const fn as_bytes(&self) -> &'static [u8] {
         self.as_str().as_bytes()
     }
 
@@ -538,7 +557,7 @@ impl Version {
 
     /// Returns true if the protocol version is currently supported.
     #[must_use]
-    pub fn is_supported(&self) -> bool {
+    pub const fn is_supported(&self) -> bool {
         matches!(self, Self::OneDotOne)
     }
 }

@@ -31,15 +31,15 @@ pub mod workers;
 pub use body::{Body, Target};
 pub use cli::{ClientCli, ServerCli};
 pub use client::{Client, ClientBuilder};
-pub use errors::{NetError, NetParseError, NetResult};
+pub use errors::{NetError, NetResult};
 pub use headers::{Headers, HeaderName, HeaderValue};
 pub use io::{Connection, WriteCliError};
 pub use http::{Method, Status, Version};
 pub use request::{Request, RequestBuilder, UriPath};
 pub use response::{Response, ResponseBuilder};
 pub use router::{Route, RouteBuilder, Router};
-pub use server::{Listener, Server, ServerBuilder, ServerHandle};
-pub use style::{Style, StyleKind, StyleParts};
+pub use server::{Listener, Server, ServerBuilder, NetHandle};
+pub use style::{Style, Kind, Parts};
 pub use tui::Tui;
 pub use workers::{ThreadPool, Worker};
 

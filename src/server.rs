@@ -15,6 +15,7 @@ use crate::{Connection, NetError, NetResult, Router, ThreadPool};
 pub const NUM_WORKERS: usize = 4;
 
 /// Configures the socket address and the router for a `Server`.
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Default)]
 pub struct ServerBuilder {
     pub do_log: bool,
@@ -87,9 +88,9 @@ impl ServerBuilder {
             let _ = self.router.shutdown();
         }
 
-        let log_file = self.log_file.take().and_then(|path| {
+        let log_file = self.log_file.take().map(|path| {
             self.do_log = true;
-            Some(Arc::new(path))
+            Arc::new(path)
         });
 
         let listener = match self.listener.take() {
@@ -116,7 +117,7 @@ impl ServerBuilder {
     /// # Errors
     ///
     /// Returns an error if building the `Server` instance fails.
-    pub fn start(&mut self) -> NetResult<ServerHandle<()>> {
+    pub fn start(&mut self) -> NetResult<NetHandle<()>> {
         let server = self.build()?;
         server.start()
     }
@@ -251,7 +252,7 @@ impl Server {
     /// # Errors
     ///
     /// Returns an error if the `Listener` is not active.
-    pub fn start(mut self) -> NetResult<ServerHandle<()>> {
+    pub fn start(mut self) -> NetResult<NetHandle<()>> {
         let listener = self.listener.take().ok_or(NetError::NotConnected)?;
 
         self.keep_listening.store(true, Ordering::Relaxed);
@@ -279,17 +280,17 @@ impl Server {
             }
         });
 
-        Ok(ServerHandle { handle })
+        Ok(NetHandle { handle })
     }
 }
 
 /// A handle to the server's listener thread.
 #[derive(Debug)]
-pub struct ServerHandle<T> {
+pub struct NetHandle<T> {
     pub handle: JoinHandle<T>,
 }
 
-impl<T> ServerHandle<T> {
+impl<T> NetHandle<T> {
     /// Waits until the server thread is finished.
     ///
     /// # Errors

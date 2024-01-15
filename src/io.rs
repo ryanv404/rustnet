@@ -8,9 +8,8 @@ use std::process;
 use std::str;
 
 use crate::{
-    Body, Headers, Method, NetError, NetParseError, NetResult, Request,
-    Response, Status, UriPath, Version, MAX_HEADERS, READER_BUFSIZE,
-    WRITER_BUFSIZE,
+    Body, Headers, Method, NetError, NetResult, Request, Response, Status,
+    UriPath, Version, MAX_HEADERS, READER_BUFSIZE, WRITER_BUFSIZE,
 };
 use crate::headers::names::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
 use crate::style::colors::{RED, RESET};
@@ -98,7 +97,7 @@ impl TryFrom<&str> for Connection {
 
     fn try_from(addr: &str) -> NetResult<Self> {
         TcpStream::connect(addr)
-            .map_err(|_| NetError::ConnectFailure)
+            .map_err(|e| NetError::IoError(e.kind()))
             .and_then(Self::try_from)
     }
 }
@@ -124,7 +123,7 @@ impl TryFrom<(TcpStream, SocketAddr)> for Connection {
         let reader = BufReader::with_capacity(READER_BUFSIZE, clone);
         let writer = BufWriter::with_capacity(WRITER_BUFSIZE, stream);
 
-        Ok(Self { reader, writer, local_addr, remote_addr })
+        Ok(Self { local_addr, remote_addr, reader, writer })
     }
 }
 
@@ -174,7 +173,7 @@ impl Connection {
             .try_clone()
             .map(|stream| BufWriter::with_capacity(WRITER_BUFSIZE, stream))?;
 
-        Ok(Self { reader, writer, local_addr, remote_addr })
+        Ok(Self { local_addr, remote_addr, reader, writer })
     }
 
     /// Reads a single line from the underlying `TcpStream`.
@@ -209,19 +208,16 @@ impl Connection {
 
         loop {
             if num_headers >= MAX_HEADERS {
-                return Err(NetParseError::TooManyHeaders.into());
+                return Err(NetError::TooManyHeaders);
             }
 
             match reader.read_until(b'\n', buf) {
                 Err(e) => return Err(NetError::Read(e.kind())),
                 Ok(0) => return Err(NetError::UnexpectedEof),
-                Ok(1 | 2) => break,
+                Ok(1 | 2) => return Headers::try_from(buf.as_slice()),
                 Ok(_) => num_headers += 1,
             }
         }
-
-        Headers::try_from(buf.as_slice())
-            .map_err(|_| NetParseError::Header.into())
     }
 
     /// Reads and parses the message body from the underlying `TcpStream`.
@@ -263,9 +259,11 @@ impl Connection {
 
         self.recv_line(&mut buf)?;
         let (method, path, version) = Request::parse_request_line(&buf)?;
+
         buf.clear();
 
         let headers = self.recv_headers(&mut buf)?;
+
         buf.clear();
 
         let body = self.recv_body(&mut buf, &headers)?;
@@ -284,9 +282,11 @@ impl Connection {
 
         self.recv_line(&mut buf)?;
         let (version, status) = Response::parse_status_line(&buf)?;
+
         buf.clear();
 
         let headers = self.recv_headers(&mut buf)?;
+
         buf.clear();
 
         let body = self.recv_body(&mut buf, &headers)?;
@@ -340,7 +340,7 @@ impl Connection {
     /// An error is returned if a problem was encountered while writing the
     /// `Headers` to the underlying `TcpStream`.
     pub fn write_headers(&mut self, headers: &Headers) -> NetResult<()> {
-        for (name, value) in headers.0.iter() {
+        for (name, value) in &headers.0 {
             self.writer.write_all(name.as_bytes())?;
             self.writer.write_all(b": ")?;
             self.writer.write_all(value.as_bytes())?;
@@ -404,16 +404,12 @@ impl Connection {
     /// # Errors
     ///
     /// An error is returned if writing to the underlying `TcpStream` fails
-    /// or if the provided `status_code` is not in the range 100 to 999,
+    /// or if the provided status `code` is not in the range from 100 to 999,
     /// inclusive.
-    pub fn send_error(
-        &mut self,
-        status_code: u16,
-        err_msg: String
-    ) -> NetResult<()> {
-        let body = Body::from(err_msg);
+    pub fn send_error(&mut self, code: u16, msg: String) -> NetResult<()> {
+        let body = Body::from(msg);
         let version = Version::default();
-        let status = Status::try_from(status_code)?;
+        let status = Status::try_from(code)?;
 
         let mut headers = Headers::new();
         headers.default_response_headers(&body);

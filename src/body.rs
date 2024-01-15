@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str;
 
-use crate::{Method, NetParseError};
+use crate::{Method, NetError, NetResult};
 use crate::utils;
 
 /// A respresentation of the message body.
@@ -76,9 +76,9 @@ impl From<Vec<u8>> for Body {
 }
 
 impl TryFrom<Target> for Body {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(target: Target) -> Result<Self, Self::Error> {
+    fn try_from(target: Target) -> NetResult<Self> {
         match target {
             Target::Empty | Target::NotFound => Ok(Self::Empty),
             Target::Shutdown => Ok("Server is shutting down.".into()),
@@ -195,8 +195,9 @@ impl Body {
     /// # Errors
     ///
     /// Returns an error if reading the file at `filepath` fails.
-    pub fn from_filepath(filepath: &Path) -> Result<Self, NetParseError> {
-        let data = fs::read(filepath).map_err(|_| NetParseError::Body)?;
+    pub fn from_filepath(filepath: &Path) -> NetResult<Self> {
+        let data = fs::read(filepath)
+            .map_err(|e| NetError::IoError(e.kind()))?;
 
         match utils::get_extension(filepath) {
             Some("ico") => Ok(Self::Favicon(data.into())),
@@ -254,7 +255,7 @@ impl Body {
     /// Returns true if a body is not permitted based on the given `Method`
     /// and status code.
     #[must_use]
-    pub fn should_be_empty(status_code: u16, method: &Method) -> bool {
+    pub const fn should_be_empty(status_code: u16, method: &Method) -> bool {
         match status_code {
             // 1xx (Informational), 204 (No Content), and 304 (Not Modified).
             100..=199 | 204 | 304 => true,
@@ -300,7 +301,9 @@ impl Display for Target {
             Self::Json(ref s) => write!(f, "Target::Json({})", s.trim_end()),
             Self::Text(ref s) => write!(f, "Target::Text({})", s.trim_end()),
             Self::File(ref p) => write!(f, "Target::File({})", p.display()),
-            Self::Favicon(ref p) => write!(f, "Target::Favicon({})", p.display()),
+            Self::Favicon(ref p) => {
+                write!(f, "Target::Favicon({})", p.display())
+            },
         }
     }
 }
@@ -317,7 +320,9 @@ impl Debug for Target {
             Self::Json(ref s) => write!(f, "Target::Json({:?})", s.trim_end()),
             Self::Text(ref s) => write!(f, "Target::Text({:?})", s.trim_end()),
             Self::File(ref p) => write!(f, "Target::File({:?})", p.display()),
-            Self::Favicon(ref p) => write!(f, "Target::Favicon({:?})", p.display()),
+            Self::Favicon(ref p) => {
+                write!(f, "Target::Favicon({:?})", p.display())
+            },
         }
     }
 }
@@ -328,15 +333,15 @@ impl From<&'static str> for Target {
     }
 }
 
-impl From<&'static [u8]> for Target {
-    fn from(bytes: &'static [u8]) -> Self {
-        Self::Bytes(Cow::Borrowed(bytes))
-    }
-}
-
 impl From<String> for Target {
     fn from(text: String) -> Self {
         Self::Text(Cow::Owned(text))
+    }
+}
+
+impl From<&'static [u8]> for Target {
+    fn from(bytes: &'static [u8]) -> Self {
+        Self::Bytes(Cow::Borrowed(bytes))
     }
 }
 
@@ -433,7 +438,9 @@ impl Target {
             Self::Xml(_) => Some("application/xml"),
             Self::Html(_) => Some("text/html; charset=utf-8"),
             Self::Json(_) => Some("application/json"),
-            Self::Text(_) | Self::Shutdown => Some("text/plain; charset=utf-8"),
+            Self::Text(_) | Self::Shutdown => {
+                Some("text/plain; charset=utf-8")
+            },
             Self::Bytes(_) => Some("application/octet-stream"),
             Self::File(ref path) | Self::Favicon(ref path) => {
                 utils::content_type_from_ext(path)

@@ -5,7 +5,7 @@ use std::iter;
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, Headers, HeaderName, HeaderValue, NetParseError, NetResult, Status,
+    Body, Headers, HeaderName, HeaderValue, NetError, NetResult, Status,
     Target, Version,
 };
 use crate::headers::names::CONTENT_TYPE;
@@ -13,12 +13,13 @@ use crate::style::colors::{MAGENTA, RESET};
 use crate::utils;
 
 /// An HTTP response builder object.
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResponseBuilder {
     pub version: Version,
-    pub status: Option<Result<Status, NetParseError>>,
+    pub status: Option<NetResult<Status>>,
     pub headers: Headers,
-    pub body: Option<Result<Body, NetParseError>>,
+    pub body: Option<NetResult<Body>>,
 }
 
 impl ResponseBuilder {
@@ -102,7 +103,7 @@ impl ResponseBuilder {
 }
 
 /// An HTTP response.
-#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Response {
     pub version: Version,
     pub status: Status,
@@ -124,68 +125,42 @@ impl Display for Response {
     }
 }
 
-impl Debug for Response {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(f, "Response {{")?;
-        writeln!(f, "    version: {:?},", &self.version)?;
-        writeln!(f, "    status: {:?},", &self.status)?;
-
-        writeln!(f, "    headers: Headers(")?;
-        for (name, value) in &self.headers.0 {
-            write!(f, "        ")?;
-            writeln!(f, "{name:?}: {value:?},")?;
-        }
-        writeln!(f, "    ),")?;
-
-        if self.body.is_empty() {
-            writeln!(f, "    body: Body::Empty")?;
-        } else if self.body.is_printable() {
-            writeln!(f, "    body: {:?}", &self.body)?;
-        } else {
-            writeln!(f, "    body: Body {{ ... }}")?;
-        }
-
-        write!(f, "}}")?;
-        Ok(())
-    }
-}
-
 impl FromStr for Response {
-    type Err = NetParseError;
+    type Err = NetError;
 
-    fn from_str(res: &str) -> Result<Self, Self::Err> {
+    fn from_str(res: &str) -> NetResult<Self> {
         Self::try_from(res.as_bytes())
     }
 }
 
 impl TryFrom<&[u8]> for Response {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
-        // Expect HTTP responses to start with the ASCII character 'H'.
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        // Expect HTTP responses to start with 'H' (i.e. "HTTP/1.1...").
         let res_start = input
             .iter()
             .position(|&b| b == b'H')
-            .ok_or(NetParseError::StatusLine)?;
+            .ok_or(NetError::BadResponse)?;
 
         let mut lines = utils::trim_start(&input[res_start..])
             .split(|b| *b == b'\n')
             .collect::<VecDeque<&[u8]>>();
 
         if lines.is_empty() {
-            return Err(NetParseError::StatusLine);
+            return Err(NetError::BadResponse);
         }
 
         let (version, status) = lines
             .pop_front()
-            .ok_or(NetParseError::StatusLine)
+            .ok_or(NetError::BadResponse)
             .and_then(Self::parse_status_line)?;
 
         let mut headers = Headers::new();
 
         let mut lines_iter = lines.iter();
 
-        while let Some(line) = lines_iter.next() {
+        for line in lines_iter.by_ref() {
             let line = utils::trim(line);
 
             if line.is_empty() {
@@ -197,13 +172,13 @@ impl TryFrom<&[u8]> for Response {
             let (name, value) = parts
                 .next()
                 .map(utils::trim_end)
-                .ok_or(NetParseError::Header)
+                .ok_or(NetError::BadHeaderName)
                 .and_then(HeaderName::try_from)
                 .and_then(|name| {
                     let value = parts
                         .next()
                         .map(utils::trim_start)
-                        .ok_or(NetParseError::Header)
+                        .ok_or(NetError::BadHeaderValue)
                         .map(HeaderValue::from)?;
 
                     Ok((name, value))
@@ -245,21 +220,19 @@ impl Response {
     /// # Errors
     /// 
     /// Returns an error if status line parsing fails.
-    pub fn parse_status_line(
-        line: &[u8]
-    ) -> Result<(Version, Status), NetParseError> {
+    pub fn parse_status_line(line: &[u8]) -> NetResult<(Version, Status)> {
         let mut parts = utils::trim_start(line).split(|&b| b == b' ');
 
         let version = parts
             .next()
             .map(utils::trim_end)
-            .ok_or(NetParseError::StatusLine)
+            .ok_or(NetError::BadVersion)
             .and_then(Version::try_from)?;
 
         let status = parts
             .next()
             .map(utils::trim)
-            .ok_or(NetParseError::StatusLine)
+            .ok_or(NetError::BadStatusCode)
             .and_then(Status::try_from)?;
 
         Ok((version, status))

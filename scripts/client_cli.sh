@@ -1,13 +1,12 @@
 #!/usr/bin/bash
 
-./target/debug/http_client \
-    -d \
-    -n \
-    -p \
-    -O "Rshb" \
-    -M "put" \
-    -P "/json" \
-    -H "content-length:13" \
-    -H "content-type:text/plain" \
-    -B "Test message." \
-    'httpbin.org'
+./target/debug/client \
+    --debug \
+    --plain \
+    --no-dates \
+    --output 'Rshb' \
+    --method 'put' \
+    --header 'content-length:13' \
+    --header 'content-type:text/plain' \
+    --body 'Test message.' \
+    'httpbin.org/status/200'

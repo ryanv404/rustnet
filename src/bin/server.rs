@@ -54,7 +54,7 @@ fn main() -> NetResult<()> {
     // Merge the CLI router into the server router.
     router.append(&mut cli.router);
 
-    let mut builder = Server::http(&addr);
+    let mut builder = Server::http(addr);
 
     let _ = builder
         .router(&mut router)

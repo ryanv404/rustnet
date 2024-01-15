@@ -1,107 +1,78 @@
 use std::borrow::Cow;
-use std::error::Error as StdError;
+use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
-use std::result::Result as StdResult;
+use std::result::Result;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NetParseError {
-    Body,
-    Header,
-    Method,
-    Path,
-    RequestLine,
-    Status,
-    StatusCode,
-    StatusLine,
-    TooManyHeaders,
-    Version,
-}
+/// Result type that contains a `NetError` error variant.
+pub type NetResult<T> = Result<T, NetError>;
 
-impl StdError for NetParseError {}
-
-impl Display for NetParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(
-            f,
-            "Parsing error: {}",
-            match self {
-                Self::Body => "body",
-                Self::Header => "headers",
-                Self::Method => "method",
-                Self::RequestLine => "request line",
-                Self::Status => "status",
-                Self::StatusCode => "status code",
-                Self::StatusLine => "status line",
-                Self::TooManyHeaders => "headers (exceeded max)",
-                Self::Path => "URI path",
-                Self::Version => "version",
-            }
-        )
-    }
-}
-
-impl Debug for NetParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{self}")
-    }
-}
-
-impl From<NetParseError> for IoError {
-    fn from(err: NetParseError) -> Self {
-        Self::new(IoErrorKind::Other, err)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Errors representing the various potential points of failure.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetError {
-    ConnectFailure,
+    BadAddress,
+    BadBody,
+    BadHeaderName,
+    BadHeaderValue,
+    BadMethod,
+    BadPath,
+    BadRequest,
+    BadResponse,
+    BadScheme,
+    BadStatusCode,
+    BadUri,
+    BadVersion,
+    HttpsNotImplemented,
+    IoError(IoErrorKind),
     JoinFailure,
-    Https,
-    Io(IoErrorKind),
+    NotConnected,
     NoRequest,
     NoResponse,
-    NotConnected,
     Other(Cow<'static, str>),
-    Parse(NetParseError),
     Read(IoErrorKind),
+    TooManyHeaders,
     UnexpectedEof,
     Write(IoErrorKind),
 }
 
-impl StdError for NetError {}
+impl Error for NetError {}
 
 impl Display for NetError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::ConnectFailure => f.write_str("Could not connect."),
-            Self::JoinFailure => f.write_str("Could not join server thread."),
-            Self::Https => f.write_str("HTTPS not implemented"),
-            Self::Io(kind) => write!(f, "I/O error: {kind}"),
-            Self::NoRequest => f.write_str("No request found."),
-            Self::NoResponse => f.write_str("No response found."),
-            Self::NotConnected => f.write_str("No active TCP stream"),
-            Self::Other(ref msg) => write!(f, "{msg}"),
-            Self::Parse(kind) => write!(f, "{kind}"),
-            Self::Read(kind) => write!(f, "Read error: {kind}"),
+            Self::BadAddress => f.write_str("Address parsing failed"),
+            Self::BadBody => f.write_str("Body parsing failed"),
+            Self::BadHeaderName => f.write_str("Header name parsing failed"),
+            Self::BadHeaderValue => f.write_str("Header value parsing failed"),
+            Self::BadMethod => f.write_str("Method parsing failed"),
+            Self::BadPath => f.write_str("URI path parsing failed"),
+            Self::BadRequest => f.write_str("Request parsing failed"),
+            Self::BadResponse => f.write_str("Response parsing failed"),
+            Self::BadScheme => f.write_str("URI scheme parsing failed"),
+            Self::BadStatusCode => f.write_str("Status code parsing failed"),
+            Self::BadUri => f.write_str("URI parsing failed"),
+            Self::BadVersion => f.write_str("Version parsing failed"),
+            Self::HttpsNotImplemented => f.write_str("HTTPS not implemented"),
+            Self::IoError(kind) => write!(f, "Received \"{kind}\" error"),
+            Self::JoinFailure => f.write_str("Could not join server thread"),
+            Self::NotConnected => f.write_str("No active TCP connection"),
+            Self::NoRequest => f.write_str("No request found"),
+            Self::NoResponse => f.write_str("No response found"),
+            Self::Other(ref err_msg) => write!(f, "{err_msg}"),
+            Self::Read(kind) => write!(f, "Received \"{kind}\" read error"),
+            Self::TooManyHeaders => f.write_str("Too many headers"),
             Self::UnexpectedEof => f.write_str("Received unexpected EOF"),
-            Self::Write(kind) => write!(f, "Write error: {kind}"),
+            Self::Write(kind) => write!(f, "Received \"{kind}\" write error"),
         }
-    }
-}
-
-impl Debug for NetError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{self}")
     }
 }
 
 impl From<IoErrorKind> for NetError {
     fn from(kind: IoErrorKind) -> Self {
         match kind {
+            IoErrorKind::NotConnected => Self::NotConnected,
             IoErrorKind::UnexpectedEof => Self::UnexpectedEof,
-            kind @ IoErrorKind::WriteZero => Self::Write(kind),
-            kind => Self::Io(kind),
+            _ => Self::IoError(kind),
         }
     }
 }
@@ -112,32 +83,44 @@ impl From<IoError> for NetError {
     }
 }
 
-impl From<NetParseError> for NetError {
-    fn from(err: NetParseError) -> Self {
-        Self::Parse(err)
-    }
-}
-
 impl From<NetError> for IoError {
     fn from(err: NetError) -> Self {
         match err {
-            NetError::Https => Self::new(IoErrorKind::Unsupported, err),
-            NetError::NotConnected | NetError::ConnectFailure => {
+            NetError::IoError(kind)
+                | NetError::Read(kind)
+                | NetError::Write(kind) =>
+            {
+                Self::from(kind)
+            },
+            NetError::HttpsNotImplemented => {
+                Self::new(IoErrorKind::Unsupported, err)
+            },
+            NetError::NotConnected => {
                 Self::from(IoErrorKind::NotConnected)
             },
             NetError::UnexpectedEof => {
                 Self::from(IoErrorKind::UnexpectedEof)
             },
-            NetError::JoinFailure
+            NetError::BadAddress
+                | NetError::BadBody
+                | NetError::BadHeaderName
+                | NetError::BadHeaderValue
+                | NetError::BadMethod
+                | NetError::BadPath
+                | NetError::BadRequest
+                | NetError::BadResponse
+                | NetError::BadScheme
+                | NetError::BadStatusCode
+                | NetError::BadUri
+                | NetError::BadVersion
+                | NetError::JoinFailure
                 | NetError::NoRequest
                 | NetError::NoResponse
-                | NetError::Other(_)
-                | NetError::Parse(_) => Self::new(IoErrorKind::Other, err),
-            NetError::Read(kind)
-                | NetError::Write(kind)
-                | NetError::Io(kind) => Self::from(kind),
+                | NetError::TooManyHeaders =>
+            {
+                Self::new(IoErrorKind::Other, err)
+            },
+            NetError::Other(msg) => Self::new(IoErrorKind::Other, msg),
         }
     }
 }
-
-pub type NetResult<T> = StdResult<T, NetError>;

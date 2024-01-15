@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::SocketAddr;
 use std::str::{self, FromStr};
 
-use crate::{Body, NetParseError, DEFAULT_NAME};
+use crate::{Body, NetError, NetResult, DEFAULT_NAME};
 use crate::style::colors::{BLUE, CYAN, RESET};
 use crate::utils;
 
@@ -19,7 +19,7 @@ pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
 
 impl Display for Headers {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        for (name, value) in self.0.iter() {
+        for (name, value) in &self.0 {
             writeln!(f, "{name}: {value}")?;
         }
 
@@ -28,22 +28,22 @@ impl Display for Headers {
 }
 
 impl FromStr for Headers {
-    type Err = NetParseError;
+    type Err = NetError;
 
-    fn from_str(headers: &str) -> Result<Self, Self::Err> {
+    fn from_str(headers: &str) -> NetResult<Self> {
         Self::try_from(headers.as_bytes())
     }
 }
 
 impl TryFrom<&[u8]> for Headers {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(headers: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(headers: &[u8]) -> NetResult<Self> {
         let mut headers_map = Self::new();
 
-        let mut lines = utils::trim_start(headers).split(|b| *b == b'\n');
+        let lines = utils::trim_start(headers).split(|b| *b == b'\n');
 
-        while let Some(line) = lines.next() {
+        for line in lines {
             let line = utils::trim(line);
 
             if line.is_empty() {
@@ -54,12 +54,12 @@ impl TryFrom<&[u8]> for Headers {
 
             let name = parts
                 .next()
-                .ok_or(NetParseError::Header)
+                .ok_or(NetError::BadHeaderName)
                 .and_then(HeaderName::try_from)?;
 
             let value = parts
                 .next()
-                .ok_or(NetParseError::Header)
+                .ok_or(NetError::BadHeaderValue)
                 .map(HeaderValue::from)?;
 
             headers_map.insert(name, value);
@@ -137,17 +137,13 @@ impl Headers {
             self.insert(ACCEPT, "*/*".into());
         }
 
-        if !self.contains(&CONTENT_LENGTH) {
-            if !body.is_empty() {
-                self.insert(CONTENT_LENGTH, body.len().into());
-            }
+        if !self.contains(&CONTENT_LENGTH) && !body.is_empty() {
+            self.insert(CONTENT_LENGTH, body.len().into());
         }
 
-        if !self.contains(&CONTENT_TYPE) {
-            if !body.is_empty() {
-                if let Some(content_type) = body.as_content_type() {
-                    self.insert(CONTENT_TYPE, content_type.into());
-                }
+        if !self.contains(&CONTENT_TYPE) && !body.is_empty() {
+            if let Some(content_type) = body.as_content_type() {
+                self.insert(CONTENT_TYPE, content_type.into());
             }
         }
 
@@ -184,17 +180,13 @@ impl Headers {
             }
         }
 
-        if !self.contains(&CONTENT_LENGTH) {
-            if !body.is_empty() {
-                self.insert(CONTENT_LENGTH, body.len().into());
-            }
+        if !self.contains(&CONTENT_LENGTH) && !body.is_empty() {
+            self.insert(CONTENT_LENGTH, body.len().into());
         }
 
-        if !self.contains(&CONTENT_TYPE) {
-            if !body.is_empty() {
-                if let Some(content_type) = body.as_content_type() {
-                    self.insert(CONTENT_TYPE, content_type.into());
-                }
+        if !self.contains(&CONTENT_TYPE) && !body.is_empty() {
+            if let Some(content_type) = body.as_content_type() {
+                self.insert(CONTENT_TYPE, content_type.into());
             }
         }
 

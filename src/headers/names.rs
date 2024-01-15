@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::str::{self, FromStr};
 
-use crate::{NetParseError, utils};
+use crate::{NetError, NetResult, utils};
 
 /// An HTTP header name.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,11 +28,11 @@ impl From<&str> for HeaderName {
 }
 
 impl TryFrom<&[u8]> for HeaderName {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(name: &[u8]) -> NetResult<Self> {
         str::from_utf8(name)
-            .map_err(|_| NetParseError::Header)
+            .map_err(|_| NetError::BadHeaderName)
             .map(Into::into)
     }
 }
@@ -66,22 +66,23 @@ impl Display for HeaderNameInner {
 
 impl From<&str> for HeaderNameInner {
     fn from(inner: &str) -> Self {
-        if let Ok(std) = StandardHeaderName::from_str(inner) {
-            Self::Standard(std)
-        } else {
-            // Store custom header names in titlecase.
-            let inner = utils::to_titlecase(inner.trim());
-            Self::Custom(inner)
-        }
+        StandardHeaderName::from_str(inner).map_or_else(
+            |_| {
+                // Store custom header names in titlecase.
+                let inner = utils::to_titlecase(inner.trim());
+                Self::Custom(inner)
+            },
+            Self::Standard
+        )
     }
 }
 
 impl TryFrom<&[u8]> for HeaderNameInner {
-    type Error = NetParseError;
+    type Error = NetError;
 
-    fn try_from(inner: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(inner: &[u8]) -> NetResult<Self> {
         str::from_utf8(inner)
-            .map_err(|_| NetParseError::Header)
+            .map_err(|_| NetError::BadHeaderName)
             .map(Into::into)
     }
 }
@@ -121,24 +122,24 @@ macro_rules! impl_standard_header_names {
         }
 
         impl FromStr for StandardHeaderName {
-            type Err = NetParseError;
+            type Err = NetError;
 
-            fn from_str(name: &str) -> Result<Self, Self::Err> {
+            fn from_str(name: &str) -> NetResult<Self> {
                 let name = utils::to_titlecase(name.trim());
 
                 match name.as_str() {
                     $( $text => Ok(Self::$variant), )+
-                    _ => Err(NetParseError::Header),
+                    _ => Err(NetError::BadHeaderName),
                 }
             }
         }
 
         impl TryFrom<&[u8]> for StandardHeaderName {
-            type Error = NetParseError;
+            type Error = NetError;
 
-            fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
+            fn try_from(name: &[u8]) -> NetResult<Self> {
                 str::from_utf8(name)
-                    .map_err(|_| NetParseError::Header)
+                    .map_err(|_| NetError::BadHeaderName)
                     .and_then(Self::from_str)
             }
         }

@@ -1,6 +1,5 @@
-#![allow(unused_macros)]
-
 // Start a test server in the background.
+#[allow(unused_macros)]
 macro_rules! start_test_server {
     () => {
         #[test]
@@ -28,6 +27,7 @@ macro_rules! start_test_server {
 }
 
 // Shut down the test server using a shutdown route.
+#[allow(unused_macros)]
 macro_rules! shutdown_test_server {
     () => {
         #[test]
@@ -123,9 +123,11 @@ pub fn get_client_expected(method: &str, route: &str) -> rustnet::Response {
         CONTENT_TYPE, HOST, LOCATION, SERVER, USER_AGENT,
     };
 
-    let mut _req = Request::default();
-    _req.method = Method::from_str(method).unwrap();
-    _req.path = route.to_string().into();
+    let mut _req = Request {
+        method: Method::from_str(method).unwrap(),
+        path: route.to_string().into(),
+        ..Request::default()
+    };
     _req.headers.insert(ACCEPT, "*/*".into());
     _req.headers.insert(HOST, "httpbin.org:80".into());
     _req.headers.insert(USER_AGENT, DEFAULT_NAME.into());
