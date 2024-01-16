@@ -13,6 +13,63 @@ pub mod values;
 pub use names::HeaderName;
 pub use values::HeaderValue;
 
+/// A convenience type containing a single header's name and value.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Header(pub HeaderName, pub HeaderValue);
+
+impl FromStr for Header {
+    type Err = NetError;
+
+    fn from_str(input: &str) -> NetResult<Self> {
+        Self::try_from(input.as_bytes())
+    }
+}
+
+impl TryFrom<&[u8]> for Header {
+    type Error = NetError;
+
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        // Split header into name and value slices at the ':'.
+        let (name, value) = utils::trim(input)
+            .iter()
+            .position(|&b| b == b':')
+            .ok_or(NetError::BadHeader)
+            .map(|colon| input.split_at(colon))?;
+
+        // Remove the colon used above by `split_at` and trim whitespace.
+        let value = match value.strip_prefix(b":") {
+            Some(strip) => utils::trim_start(strip),
+            None if value.is_empty() => &[][..],
+            None => utils::trim_start(value),
+        };
+
+        let name = HeaderName::try_from(name)?;
+        let value = HeaderValue::from(value);
+
+        Ok(Self(name, value))
+    }
+}
+
+impl Header {
+    /// Returns a reference to the `HeaderName`.
+    #[must_use]
+    pub const fn name(&self) -> &HeaderName {
+        &self.0
+    }
+
+    /// Returns a reference to the `HeaderValue`.
+    #[must_use]
+    pub const fn value(&self) -> &HeaderValue {
+        &self.1
+    }
+
+    /// Returns the inner `HeaderName` and `HeaderValue` as a tuple.
+    #[must_use]
+    pub fn into_tuple(self) -> (HeaderName, HeaderValue) {
+        (self.0.clone(), self.1)
+    }
+}
+
 /// A mapping of `HeaderNames` to `HeaderValues`.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Headers(pub BTreeMap<HeaderName, HeaderValue>);
@@ -38,34 +95,26 @@ impl FromStr for Headers {
 impl TryFrom<&[u8]> for Headers {
     type Error = NetError;
 
-    fn try_from(headers: &[u8]) -> NetResult<Self> {
-        let mut headers_map = Self::new();
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        input.split_inclusive(|&b| b == b'\n')
+            .map(utils::trim)
+            .take_while(|line| !line.is_empty())
+            .map(Header::try_from)
+            .collect::<NetResult<Self>>()
+    }
+}
 
-        let lines = utils::trim_start(headers).split(|b| *b == b'\n');
+impl FromIterator<Header> for Headers {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = Header>,
+    {
+        let map = iter
+            .into_iter()
+            .map(Header::into_tuple)
+            .collect::<BTreeMap<HeaderName, HeaderValue>>();
 
-        for line in lines {
-            let line = utils::trim(line);
-
-            if line.is_empty() {
-                break;
-            }
-
-            let mut parts = line.splitn(2, |b| *b == b':');
-
-            let name = parts
-                .next()
-                .ok_or(NetError::BadHeaderName)
-                .and_then(HeaderName::try_from)?;
-
-            let value = parts
-                .next()
-                .ok_or(NetError::BadHeaderValue)
-                .map(HeaderValue::from)?;
-
-            headers_map.insert(name, value);
-        }
-
-        Ok(headers_map)
+        Self(map)
     }
 }
 

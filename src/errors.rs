@@ -12,6 +12,7 @@ pub type NetResult<T> = Result<T, NetError>;
 pub enum NetError {
     BadAddress,
     BadBody,
+    BadHeader,
     BadHeaderName,
     BadHeaderValue,
     BadMethod,
@@ -42,6 +43,7 @@ impl Display for NetError {
         match self {
             Self::BadAddress => f.write_str("Address parsing failed"),
             Self::BadBody => f.write_str("Body parsing failed"),
+            Self::BadHeader => f.write_str("Header parsing failed"),
             Self::BadHeaderName => f.write_str("Header name parsing failed"),
             Self::BadHeaderValue => f.write_str("Header value parsing failed"),
             Self::BadMethod => f.write_str("Method parsing failed"),
@@ -103,6 +105,7 @@ impl From<NetError> for IoError {
             },
             NetError::BadAddress
                 | NetError::BadBody
+                | NetError::BadHeader
                 | NetError::BadHeaderName
                 | NetError::BadHeaderValue
                 | NetError::BadMethod

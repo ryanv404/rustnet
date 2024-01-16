@@ -94,10 +94,10 @@ impl TryFrom<Target> for Body {
 }
 
 impl Body {
-    /// Returns a new `Body::Empty` instance.
+    /// Returns a new default `Body` instance.
     #[must_use]
-    pub const fn new() -> Self {
-        Self::Empty
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns true if the body type is `Body::Empty`.
@@ -200,7 +200,6 @@ impl Body {
             .map_err(|e| NetError::IoError(e.kind()))?;
 
         match utils::get_extension(filepath) {
-            Some("ico") => Ok(Self::Favicon(data.into())),
             Some("xml") => {
                 let body = String::from_utf8_lossy(&data);
                 Ok(Self::Xml(body.into_owned().into()))
@@ -217,6 +216,9 @@ impl Body {
                 let body = String::from_utf8_lossy(&data);
                 Ok(Self::Html(body.into_owned().into()))
             },
+            Some("ico") => Ok(Self::Favicon(data.into())),
+            // If the extension is unrecognized or absent, then just fall
+            // back to the `Body::Bytes` type.
             Some(_) | None => Ok(Self::Bytes(data.into())),
         }
     }
@@ -364,7 +366,7 @@ impl From<PathBuf> for Target {
 }
 
 impl Target {
-    /// Returns a new `Target::Empty` instance.
+    /// Returns a new default `Target` instance.
     #[must_use]
     pub fn new() -> Self {
         Self::default()

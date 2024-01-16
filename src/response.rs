@@ -1,16 +1,12 @@
-use std::borrow::Cow;
-use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::iter;
 use std::str::{self, FromStr};
 
 use crate::{
-    Body, Headers, HeaderName, HeaderValue, NetError, NetResult, Status,
-    Target, Version,
+    Body, Header, Headers, NetError, NetResult, Status, Target, Version,
+    utils,
 };
 use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{MAGENTA, RESET};
-use crate::utils;
 
 /// An HTTP response builder object.
 #[allow(clippy::module_name_repetitions)]
@@ -137,66 +133,41 @@ impl TryFrom<&[u8]> for Response {
     type Error = NetError;
 
     fn try_from(input: &[u8]) -> NetResult<Self> {
-        // Expect HTTP responses to start with 'H' (i.e. "HTTP/1.1...").
-        let res_start = input
+        // Expect HTTP responses to start with 'H' (e.g. "HTTP/1.1").
+        let start = input
             .iter()
             .position(|&b| b == b'H')
             .ok_or(NetError::BadResponse)?;
 
-        let mut lines = utils::trim_start(&input[res_start..])
-            .split(|b| *b == b'\n')
-            .collect::<VecDeque<&[u8]>>();
+        let mut lines = input[start..].split_inclusive(|&b| b == b'\n');
 
-        if lines.is_empty() {
-            return Err(NetError::BadResponse);
-        }
+        let first_line = lines.next().ok_or(NetError::BadResponse)?;
 
-        let (version, status) = lines
-            .pop_front()
-            .ok_or(NetError::BadResponse)
-            .and_then(Self::parse_status_line)?;
+        let mut tokens = first_line.splitn(2, |&b| b == b' ');
 
-        let mut headers = Headers::new();
+        let version = Version::try_from(tokens.next())?;
+        let status = Status::try_from(tokens.next())?;
 
-        let mut lines_iter = lines.iter();
+        let headers = lines
+            .by_ref()
+            .map(utils::trim)
+            .take_while(|line| !line.is_empty())
+            .map(Header::try_from)
+            .collect::<NetResult<Headers>>()?;
 
-        for line in lines_iter.by_ref() {
-            let line = utils::trim(line);
-
-            if line.is_empty() {
-                break;
-            }
-
-            let mut parts = line.splitn(2, |&b| b == b':');
-
-            let (name, value) = parts
-                .next()
-                .map(utils::trim_end)
-                .ok_or(NetError::BadHeaderName)
-                .and_then(HeaderName::try_from)
-                .and_then(|name| {
-                    let value = parts
-                        .next()
-                        .map(utils::trim_start)
-                        .ok_or(NetError::BadHeaderValue)
-                        .map(HeaderValue::from)?;
-
-                    Ok((name, value))
-                })?;
-
-            headers.insert(name, value);
-        }
-
-        let body_bytes = lines_iter
-            // Restore newline characters removed by `split` above.
-            .flat_map(|line| line.iter().copied().chain(iter::once(b'\n')))
+        let body = lines
+            .flatten()
+            .copied()
             .collect::<Vec<u8>>();
 
-        let content_type = headers
+        let body = headers
             .get(&CONTENT_TYPE)
-            .map_or(Cow::Borrowed(""), |value| value.as_str());
-
-        let body = Body::from_content_type(&body_bytes, &content_type);
+            .map_or(
+                Body::Empty,
+                |content_type| {
+                    let content_type = content_type.as_str();
+                    Body::from_content_type(&body, &content_type)
+                });
 
         Ok(Self { version, status, headers, body })
     }
@@ -213,29 +184,6 @@ impl Response {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Parses a bytes slice into a `Version` and a `Status`.
-    ///
-    /// # Errors
-    /// 
-    /// Returns an error if status line parsing fails.
-    pub fn parse_status_line(line: &[u8]) -> NetResult<(Version, Status)> {
-        let mut parts = utils::trim_start(line).split(|&b| b == b' ');
-
-        let version = parts
-            .next()
-            .map(utils::trim_end)
-            .ok_or(NetError::BadVersion)
-            .and_then(Version::try_from)?;
-
-        let status = parts
-            .next()
-            .map(utils::trim)
-            .ok_or(NetError::BadStatusCode)
-            .and_then(Status::try_from)?;
-
-        Ok((version, status))
     }
 
     /// Returns the HTTP protocol `Version`.

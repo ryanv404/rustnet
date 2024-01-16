@@ -32,7 +32,7 @@ pub use body::{Body, Target};
 pub use cli::{ClientCli, ServerCli};
 pub use client::{Client, ClientBuilder};
 pub use errors::{NetError, NetResult};
-pub use headers::{Headers, HeaderName, HeaderValue};
+pub use headers::{Header, Headers, HeaderName, HeaderValue};
 pub use io::{Connection, WriteCliError};
 pub use http::{Method, Status, Version};
 pub use request::{Request, RequestBuilder, UriPath};

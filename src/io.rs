@@ -9,7 +9,7 @@ use std::str;
 
 use crate::{
     Body, Headers, Method, NetError, NetResult, Request, Response, Status,
-    UriPath, Version, MAX_HEADERS, READER_BUFSIZE, WRITER_BUFSIZE,
+    UriPath, Version, MAX_HEADERS, READER_BUFSIZE, WRITER_BUFSIZE, utils,
 };
 use crate::headers::names::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
 use crate::style::colors::{RED, RESET};
@@ -200,7 +200,7 @@ impl Connection {
     /// As with the other readers, an error of kind `NetError::UnexpectedEof`
     /// is returned if `Ok(0)` is received while reading from the underlying
     /// `TcpStream`.
-    pub fn recv_headers(&mut self, buf: &mut Vec<u8>) -> NetResult<Headers> {
+    pub fn recv_headers(&mut self, buf: &mut Vec<u8>) -> NetResult<()> {
         let max_bytes = u64::try_from(READER_BUFSIZE).unwrap_or(4000);
         let mut reader = self.reader.by_ref().take(max_bytes);
 
@@ -214,7 +214,7 @@ impl Connection {
             match reader.read_until(b'\n', buf) {
                 Err(e) => return Err(NetError::Read(e.kind())),
                 Ok(0) => return Err(NetError::UnexpectedEof),
-                Ok(1 | 2) => return Headers::try_from(buf.as_slice()),
+                Ok(1 | 2) => return Ok(()),
                 Ok(_) => num_headers += 1,
             }
         }
@@ -258,12 +258,17 @@ impl Connection {
         let mut buf = Vec::with_capacity(READER_BUFSIZE);
 
         self.recv_line(&mut buf)?;
-        let (method, path, version) = Request::parse_request_line(&buf)?;
 
+        let mut parts = utils::trim_start(&buf[..])
+            .splitn(3, |&b| b == b' ');
+
+        let method = Method::try_from(parts.next())?;
+        let path = UriPath::try_from(parts.next())?;
+        let version = Version::try_from(parts.next())?;
         buf.clear();
 
-        let headers = self.recv_headers(&mut buf)?;
-
+        self.recv_headers(&mut buf)?;
+        let headers = Headers::try_from(&buf[..])?;
         buf.clear();
 
         let body = self.recv_body(&mut buf, &headers)?;
@@ -281,12 +286,20 @@ impl Connection {
         let mut buf = Vec::with_capacity(READER_BUFSIZE);
 
         self.recv_line(&mut buf)?;
-        let (version, status) = Response::parse_status_line(&buf)?;
 
+        let start = buf
+            .iter()
+            .position(|&b| b == b'H')
+            .ok_or(NetError::BadResponse)?;
+
+        let mut parts = buf[start..].splitn(2, |&b| b == b' ');
+
+        let version = Version::try_from(parts.next())?;
+        let status = Status::try_from(parts.next())?;
         buf.clear();
 
-        let headers = self.recv_headers(&mut buf)?;
-
+        self.recv_headers(&mut buf)?;
+        let headers = Headers::try_from(&buf[..])?;
         buf.clear();
 
         let body = self.recv_body(&mut buf, &headers)?;

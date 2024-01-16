@@ -1,12 +1,12 @@
 use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::iter;
 use std::str::{self, FromStr};
 
-use crate::{Body, Headers, Method, NetError, NetResult, Version};
+use crate::{
+    Body, Header, Headers, Method, NetError, NetResult, Version, utils,
+};
 use crate::headers::names::CONTENT_TYPE;
 use crate::style::colors::{ORANGE, RESET};
-use crate::utils;
 
 /// An HTTP request builder object.
 #[allow(clippy::module_name_repetitions)]
@@ -99,9 +99,9 @@ impl Debug for UriPath {
     }
 }
 
-impl From<&'static str> for UriPath {
-    fn from(path: &'static str) -> Self {
-        Self(Cow::Borrowed(path))
+impl<'a> From<&'a str> for UriPath {
+    fn from(path: &'a str) -> Self {
+        Self(Cow::Owned(path.to_string()))
     }
 }
 
@@ -111,13 +111,31 @@ impl From<String> for UriPath {
     }
 }
 
-impl TryFrom<&'static [u8]> for UriPath {
+impl<'a> TryFrom<&'a [u8]> for UriPath {
     type Error = NetError;
 
-    fn try_from(bytes: &'static [u8]) -> NetResult<Self> {
-        str::from_utf8(bytes)
+    fn try_from(bytes: &'a [u8]) -> NetResult<Self> {
+        String::from_utf8(bytes.to_vec())
             .map_err(|_| NetError::BadPath)
             .map(Into::into)
+    }
+}
+
+impl TryFrom<Vec<u8>> for UriPath {
+    type Error = NetError;
+
+    fn try_from(bytes: Vec<u8>) -> NetResult<Self> {
+        String::from_utf8(bytes)
+            .map_err(|_| NetError::BadPath)
+            .map(Into::into)
+    }
+}
+
+impl TryFrom<Option<&[u8]>> for UriPath {
+    type Error = NetError;
+
+    fn try_from(input: Option<&[u8]>) -> NetResult<Self> {
+        input.map_or(Err(NetError::BadPath), Self::try_from)
     }
 }
 
@@ -170,41 +188,38 @@ impl FromStr for Request {
 impl TryFrom<&[u8]> for Request {
     type Error = NetError;
 
-    fn try_from(req: &[u8]) -> NetResult<Self> {
-        let mut lines = utils::trim_start(req).split(|&b| b == b'\n');
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        let mut lines = utils::trim_start(input)
+            .split_inclusive(|&b| b == b'\n');
 
-        let (method, path, version) = lines
-            .next()
-            .ok_or(NetError::BadRequest)
-            .and_then(Self::parse_request_line)?;
+        let first_line = lines.next().ok_or(NetError::BadRequest)?;
 
-        let headers_bytes = lines
+        let mut tokens = first_line.splitn(3, |&b| b == b' ');
+
+        let method = Method::try_from(tokens.next())?;
+        let path = UriPath::try_from(tokens.next())?;
+        let version = Version::try_from(tokens.next())?;
+
+        let headers = lines
             .by_ref()
-            .map_while(|line| {
-                let line = utils::trim(line);
+            .map(utils::trim)
+            .take_while(|line| !line.is_empty())
+            .map(Header::try_from)
+            .collect::<NetResult<Headers>>()?;
 
-                if line.is_empty() {
-                    None
-                } else {
-                    Some(line)
-                }
-            })
-            // Restore newline characters removed by `split` above.
-            .flat_map(|line| line.iter().copied().chain(iter::once(b'\n')))
+        let body = lines
+            .flatten()
+            .copied()
             .collect::<Vec<u8>>();
 
-        let headers = Headers::try_from(&headers_bytes[..])?;
-
-        let content_type = headers
+        let body = headers
             .get(&CONTENT_TYPE)
-            .map_or(Cow::Borrowed(""), |value| value.as_str());
-
-        let body_bytes = lines
-            // Restore newline characters removed by `split` above.
-            .flat_map(|line| line.iter().copied().chain(iter::once(b'\n')))
-            .collect::<Vec<u8>>();
-
-        let body = Body::from_content_type(&body_bytes, &content_type);
+            .map_or(
+                Body::Empty,
+                |content_type| {
+                    let content_type = content_type.as_str();
+                    Body::from_content_type(&body, &content_type)
+                });
 
         Ok(Self { method, path, version, headers, body })
     }
@@ -221,41 +236,6 @@ impl Request {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Parses a bytes slice into a `Method`, `UriPath`, and `Version`.
-    ///
-    /// # Errors
-    ///
-    /// Retuns an error if parsing of the request line fails.
-    pub fn parse_request_line(
-        line: &[u8]
-    ) -> NetResult<(Method, UriPath, Version)> {
-        let mut parts = utils::trim_start(line).split(|&b| b == b' ');
-
-        let method = parts
-            .next()
-            .map(utils::trim_end)
-            .ok_or(NetError::BadMethod)
-            .and_then(Method::try_from)?;
-
-        let path = parts
-            .next()
-            .map(utils::trim)
-            .ok_or(NetError::BadPath)
-            .and_then(|path| {
-                String::from_utf8(path.to_vec())
-                    .map_err(|_| NetError::BadPath)
-                    .map(UriPath::from)
-            })?;
-
-        let version = parts
-            .next()
-            .map(utils::trim)
-            .ok_or(NetError::BadVersion)
-            .and_then(Version::try_from)?;
-
-        Ok((method, path, version))
     }
 
     /// Returns the HTTP protocol `Version`.

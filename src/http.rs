@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::num::NonZeroU16;
 use std::str::{self, FromStr};
 
-use crate::{NetError, NetResult};
+use crate::{NetError, NetResult, utils};
 
 /// The HTTP method.
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -53,8 +53,8 @@ impl Debug for Method {
 impl FromStr for Method {
     type Err = NetError;
 
-    fn from_str(method: &str) -> NetResult<Self> {
-        match method {
+    fn from_str(input: &str) -> NetResult<Self> {
+        match input.trim() {
             // HTTP methods are case-sensitive.
             "ANY" => Ok(Self::Any),
             "GET" => Ok(Self::Get),
@@ -75,10 +75,20 @@ impl FromStr for Method {
 impl TryFrom<&[u8]> for Method {
     type Error = NetError;
 
-    fn try_from(method: &[u8]) -> NetResult<Self> {
-        str::from_utf8(method)
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        let input = utils::trim(input);
+
+        str::from_utf8(input)
             .map_err(|_| NetError::BadMethod)
             .and_then(Self::from_str)
+    }
+}
+
+impl TryFrom<Option<&[u8]>> for Method {
+    type Error = NetError;
+
+    fn try_from(input: Option<&[u8]>) -> NetResult<Self> {
+        input.map_or(Err(NetError::BadMethod), Self::try_from)
     }
 }
 
@@ -153,7 +163,31 @@ impl Debug for Status {
 impl FromStr for Status {
     type Err = NetError;
 
-    fn from_str(code: &str) -> NetResult<Self> {
+    fn from_str(input: &str) -> NetResult<Self> {
+        let input = input.trim();
+
+        // We only care about the 3-digit status code.
+        let code = match input.len() {
+            0..=2 => return Err(NetError::BadStatusCode),
+            3 => {
+                if input[0..=2].chars().any(|c| !c.is_ascii_digit()) {
+                    return Err(NetError::BadStatusCode);
+                }
+
+                input
+            },
+            4.. => {
+                // Parse "999 " but not "9999", "99 9", etc.
+                if input[0..=2].chars().any(|c| !c.is_ascii_digit())
+                    || input[3..4].chars().any(|c| !c.is_ascii_whitespace())
+                {
+                    return Err(NetError::BadStatusCode);
+                }
+
+                &input[0..=2]
+            },
+        };
+
         u16::from_str(code)
             .map_err(|_| NetError::BadStatusCode)
             .and_then(Self::try_from)
@@ -163,10 +197,42 @@ impl FromStr for Status {
 impl TryFrom<&[u8]> for Status {
     type Error = NetError;
 
-    fn try_from(code: &[u8]) -> NetResult<Self> {
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        let input = utils::trim(input);
+
+        // We only care about the 3-digit status code.
+        let code = match input.len() {
+            0..=2 => return Err(NetError::BadStatusCode),
+            3 => {
+                if input[0..=2].iter().any(|&b| !b.is_ascii_digit()) {
+                    return Err(NetError::BadStatusCode);
+                }
+
+                input
+            },
+            4.. => {
+                // Parse "999 " but not "9999", "99 9", etc.
+                if input[0..=2].iter().any(|&b| !b.is_ascii_digit())
+                    || !input[3].is_ascii_whitespace()
+                {
+                    return Err(NetError::BadStatusCode);
+                }
+
+                &input[0..=2]
+            },
+        };
+
         str::from_utf8(code)
             .map_err(|_| NetError::BadStatusCode)
             .and_then(Self::from_str)
+    }
+}
+
+impl TryFrom<Option<&[u8]>> for Status {
+    type Error = NetError;
+
+    fn try_from(input: Option<&[u8]>) -> NetResult<Self> {
+        input.map_or(Err(NetError::BadStatusCode), Self::try_from)
     }
 }
 
@@ -174,11 +240,12 @@ impl TryFrom<u16> for Status {
     type Error = NetError;
 
     fn try_from(code: u16) -> NetResult<Self> {
-        if !matches!(code, 100..=999) {
-            return Err(NetError::BadStatusCode);
+        if matches!(code, 100..=999) {
+            let code = NonZeroU16::new(code).ok_or(NetError::BadStatusCode)?;
+            Ok(Self(code))
+        } else {
+            Err(NetError::BadStatusCode)
         }
-
-        NonZeroU16::new(code).map(Self).ok_or(NetError::BadStatusCode)
     }
 }
 
@@ -491,8 +558,8 @@ impl Debug for Version {
 impl FromStr for Version {
     type Err = NetError;
 
-    fn from_str(version: &str) -> NetResult<Self> {
-        match version {
+    fn from_str(input: &str) -> NetResult<Self> {
+        match input.trim() {
             "HTTP/0.9" => Ok(Self::ZeroDotNine),
             "HTTP/1.0" => Ok(Self::OneDotZero),
             "HTTP/1.1" => Ok(Self::OneDotOne),
@@ -508,10 +575,20 @@ impl FromStr for Version {
 impl TryFrom<&[u8]> for Version {
     type Error = NetError;
 
-    fn try_from(version: &[u8]) -> NetResult<Self> {
-        str::from_utf8(version)
+    fn try_from(input: &[u8]) -> NetResult<Self> {
+        let input = utils::trim(input);
+
+        str::from_utf8(input)
             .map_err(|_| NetError::BadVersion)
             .and_then(Self::from_str)
+    }
+}
+
+impl TryFrom<Option<&[u8]>> for Version {
+    type Error = NetError;
+
+    fn try_from(input: Option<&[u8]>) -> NetResult<Self> {
+        input.map_or(Err(NetError::BadVersion), Self::try_from)
     }
 }
 

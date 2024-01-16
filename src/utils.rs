@@ -12,36 +12,30 @@ use crate::style::colors::{RED, RESET};
 
 /// Trim whitespace from the beginning of a bytes slice.
 #[must_use]
-pub const fn trim_start(mut bytes: &[u8]) -> &[u8] {
-    while let [first, rest @ ..] = bytes {
-        if first.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-
-    bytes
+pub fn trim_start(bytes: &[u8]) -> &[u8] {
+    bytes.iter()
+        .position(|&b| !b.is_ascii_whitespace())
+        .map_or_else(|| &[][..], |start| &bytes[start..])
 }
 
 /// Trim whitespace from the end of a bytes slice.
 #[must_use]
-pub const fn trim_end(mut bytes: &[u8]) -> &[u8] {
-    while let [rest @ .., last] = bytes {
-        if last.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-
-    bytes
+pub fn trim_end(bytes: &[u8]) -> &[u8] {
+    bytes.iter()
+        .rposition(|&b| !b.is_ascii_whitespace())
+        .map_or_else(|| &[][..], |end| &bytes[..=end])
 }
 
 /// Trim whitespace from the beginning and the end of a bytes slice.
 #[must_use]
-pub const fn trim(bytes: &[u8]) -> &[u8] {
-    trim_end(trim_start(bytes))
+pub fn trim(bytes: &[u8]) -> &[u8] {
+    let bytes = trim_start(bytes);
+
+    if bytes.is_empty() {
+        return &[][..];
+    }
+
+    trim_end(bytes)
 }
 
 /// Parses a string slice into a host address and a URI path.
